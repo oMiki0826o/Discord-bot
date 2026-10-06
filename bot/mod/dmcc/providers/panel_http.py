@@ -24,6 +24,7 @@ class PanelHttpClient:
         base_url: str,
         api_key: str,
         *,
+        auth_mode: str = "bearer",
         total_timeout_seconds: float = 15.0,
         max_response_bytes: int = 1_048_576,
     ) -> None:
@@ -33,8 +34,14 @@ class PanelHttpClient:
             raise ValueError("panel API key must not be empty")
         if total_timeout_seconds <= 0 or max_response_bytes < 1:
             raise ValueError("panel transport limits must be positive")
+        if auth_mode not in {"bearer", "query"}:
+            raise ValueError("unsupported panel authentication mode")
         self._base_url = base_url.rstrip("/")
-        self._headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+        self._api_key = api_key
+        self._auth_mode = auth_mode
+        self._headers = {"Accept": "application/json"}
+        if auth_mode == "bearer":
+            self._headers["Authorization"] = f"Bearer {api_key}"
         self._timeout = aiohttp.ClientTimeout(total=total_timeout_seconds)
         self._max_response_bytes = max_response_bytes
         self._session: aiohttp.ClientSession | None = None
@@ -58,10 +65,13 @@ class PanelHttpClient:
             session = aiohttp.ClientSession(timeout=self._timeout, headers=self._headers)
             self._session = session
         try:
+            request_params = dict(params)
+            if self._auth_mode == "query":
+                request_params["apikey"] = self._api_key
             async with session.request(
                 method,
                 self._base_url + path,
-                params=dict(params),
+                params=request_params,
                 json=dict(payload) if payload is not None else None,
             ) as response:
                 if response.status >= 400:

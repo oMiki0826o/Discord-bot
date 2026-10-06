@@ -19,6 +19,7 @@ from .commands.owner import DmccOwnerCog
 from .commands.user import DmccUserCog
 from .config import DEFAULT_SETTINGS, SETTINGS_NAME, DmccSettings, build_settings_schema
 from .gateway.server import Gateway
+from .providers.control.local_tmux import LocalTmuxControlProvider
 from .providers.control.mcsm import McsmControlProvider
 from .providers.control.pterodactyl import PterodactylControlProvider
 from .providers.panel_http import PanelHttpClient
@@ -57,11 +58,12 @@ def build_control_providers(settings: DmccSettings, environ=None):
     providers = {}
     clients: list[PanelHttpClient] = []
     for definition in settings.control_providers:
-        if definition.provider_type not in {"pterodactyl", "mcsm"}:
-            continue
         options = definition.options
+        if definition.provider_type == "local_tmux":
+            providers[definition.provider_id] = LocalTmuxControlProvider(definition.provider_id, str(options["server_dir"]), str(options["session_name"]), tuple(str(item) for item in options["start_argv"]))
+            continue
         key_name = str(options["api_key_env"])
-        client = PanelHttpClient(str(options["base_url"]), str(environment[key_name]))
+        client = PanelHttpClient(str(options["base_url"]), str(environment[key_name]), auth_mode="query" if definition.provider_type == "mcsm" else "bearer")
         clients.append(client)
         if definition.provider_type == "pterodactyl":
             providers[definition.provider_id] = PterodactylControlProvider(

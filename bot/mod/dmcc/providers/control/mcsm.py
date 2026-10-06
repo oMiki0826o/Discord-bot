@@ -25,12 +25,16 @@ class McsmControlProvider:
         return {"daemonId": self._daemon_id, "uuid": self._instance_id if target is None else _identifier(target, "instance")}
 
     async def status(self, target: str | None = None) -> ProcessState:
-        response = await self._client.request_json("GET", "/api/protected_instance", params=self._params(target), payload=None)
+        response = await self._client.request_json("GET", "/api/instance", params=self._params(target), payload=None)
         _ensure_success(response)
         data = response.get("data")
-        if not isinstance(data, Mapping) or not isinstance(data.get("running"), bool):
+        if not isinstance(data, Mapping):
             raise ProviderConnectionError("invalid MCSManager status response")
-        return ProcessState.RUNNING if data["running"] else ProcessState.STOPPED
+        raw_status = data.get("status", data.get("instanceStatus"))
+        states = {0: ProcessState.STOPPED, 1: ProcessState.STOPPING, 2: ProcessState.STARTING, 3: ProcessState.RUNNING, -1: ProcessState.UNKNOWN}
+        if type(raw_status) is not int or raw_status not in states:
+            raise ProviderConnectionError("invalid MCSManager status response")
+        return states[raw_status]
 
     async def start(self, target: str | None = None) -> None:
         await self._action("open", target)
@@ -45,7 +49,7 @@ class McsmControlProvider:
         await self._action("kill", target)
 
     async def _action(self, action: str, target: str | None) -> None:
-        response = await self._client.request_json("POST", f"/api/protected_instance/{action}", params=self._params(target), payload=None)
+        response = await self._client.request_json("GET", f"/api/protected_instance/{action}", params=self._params(target), payload=None)
         _ensure_success(response)
 
 

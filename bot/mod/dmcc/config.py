@@ -38,7 +38,7 @@ def build_settings_schema(rule_type):
 
     return {
         "gateway": rule_type(dict),
-        "frame_max_bytes": rule_type(int, minimum=1, maximum=1_048_576),
+        "frame_max_bytes": rule_type(int, minimum=1, maximum=262_144),
         "heartbeat_interval_seconds": rule_type((int, float), minimum=0.01, maximum=3_600),
         "heartbeat_timeout_seconds": rule_type((int, float), minimum=0.02, maximum=7_200),
         "request_timeout_seconds": rule_type((int, float), minimum=0.01, maximum=600),
@@ -139,10 +139,10 @@ def _mapping(value: object, name: str) -> Mapping[str, object]:
 def _gateway(raw: Mapping[str, object]) -> tuple[str, int]:
     host = raw.get("host")
     port = raw.get("port")
-    if host not in {"127.0.0.1", "0.0.0.0"}:
-        raise SettingsError("gateway host must be 127.0.0.1 or 0.0.0.0")
-    if type(port) is not int or not 0 <= port <= 65535:
-        raise SettingsError("gateway port must be between 0 and 65535")
+    if host != "127.0.0.1":
+        raise SettingsError("gateway host must be 127.0.0.1")
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise SettingsError("gateway port must be between 1 and 65535")
     return str(host), port
 
 
@@ -151,8 +151,8 @@ def _limits(raw: Mapping[str, object]) -> tuple[int, float, float, float]:
     interval = raw.get("heartbeat_interval_seconds", DEFAULT_SETTINGS["heartbeat_interval_seconds"])
     timeout = raw.get("heartbeat_timeout_seconds", DEFAULT_SETTINGS["heartbeat_timeout_seconds"])
     request = raw.get("request_timeout_seconds", DEFAULT_SETTINGS["request_timeout_seconds"])
-    if type(frame) is not int or not 1 <= frame <= 1_048_576:
-        raise SettingsError("frame_max_bytes must be between 1 and 1048576")
+    if type(frame) is not int or not 1 <= frame <= 262_144:
+        raise SettingsError("frame_max_bytes must be between 1 and 262144")
     if type(interval) not in {int, float} or float(interval) <= 0:
         raise SettingsError("heartbeat_interval_seconds must be positive")
     if type(timeout) not in {int, float} or float(timeout) <= float(interval):
@@ -190,6 +190,9 @@ def _control_providers(
             _require_text(options.get("base_url"), "base_url")
             secret_name = _require_text(options.get("api_key_env"), "api_key_env")
             _require_environment(secret_name, environ)
+            if provider_type == "mcsm":
+                _require_text(options.get("daemon_id"), "daemon_id")
+                _require_text(options.get("instance_id"), "instance_id")
         definitions.append(ControlProviderDefinition(provider_id, provider_type, options))
     return tuple(definitions)
 
@@ -254,15 +257,22 @@ def _servers(
             raise SettingsError(f"unknown control provider: {control_id}")
         if backup_id is not None and backup_id not in backup_ids:
             raise SettingsError(f"unknown backup provider: {backup_id}")
+        control_target = _optional_text(raw.get("control_target"), "control_target")
+        if control_id is not None:
+            definition = next(item for item in controls if item.provider_id == control_id)
+            if definition.provider_type == "local_tmux":
+                session_name = str(definition.options["session_name"])
+                if control_target is not None and control_target != session_name:
+                    raise SettingsError("local_tmux control_target must match session_name")
         servers.append(
             ManagedServer(
                 server_id=server_id,
                 bridge_enabled=bridge_enabled,
                 control_provider_id=control_id,
-                control_target=_optional_text(raw.get("control_target"), "control_target"),
+                control_target=control_target,
                 backup_provider_id=backup_id,
-                identity_enabled=bool(raw.get("identity_enabled", True)),
-                allow_kill=bool(raw.get("allow_kill", False)),
+                identity_enabled=_strict_bool(raw.get("identity_enabled", True), "identity_enabled"),
+                allow_kill=_strict_bool(raw.get("allow_kill", False), "allow_kill"),
             )
         )
     return tuple(servers), secrets
@@ -286,6 +296,12 @@ def _validate_local_paths(
         backup_dir = Path(str(backup.options["backup_dir"])).resolve(strict=False)
         if backup_dir == server_dir or server_dir in backup_dir.parents:
             raise SettingsError("backup_dir must not be inside server_dir")
+
+
+def _strict_bool(value: object, name: str) -> bool:
+    if type(value) is not bool:
+        raise SettingsError(f"{name} must be a boolean")
+    return value
 
 
 def _require_text(value: object, name: str) -> str:
