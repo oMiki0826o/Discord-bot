@@ -8,12 +8,16 @@ Modification():
 from __future__ import annotations
 
 import asyncio
+import socket
 from pathlib import Path
 
 
 class _Settings:
     def register(self, _name, defaults, *_schema):
-        return {**defaults, "gateway": {"host": "127.0.0.1", "port": 8765}}
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        return {**defaults, "gateway": {"host": "127.0.0.1", "port": port}}
 
 
 class _Bot:

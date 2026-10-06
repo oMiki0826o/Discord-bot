@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .provider.models import GenerationRequest, ProviderPolicy, ProviderToolCall
+from .provider.errors import ProviderQuotaError
 from .routing import contains_url
 from .runtime.host import RuntimeFactory, RuntimeHost
 from .runtime.models import RuntimeRequest, RuntimeResult, RuntimeStopReason
@@ -64,7 +65,7 @@ class AiServices:
             if uses_combined_tools
             else request.model_candidates
         )
-        response = await self._provider.generate(GenerationRequest(
+        generation = GenerationRequest(
             request_id=request.request_id,
             user_id=request.user_id,
             prompt="\n\n".join(prompt_parts),
@@ -81,7 +82,30 @@ class AiServices:
             use_url_context="web" in request.capabilities and contains_url(request.prompt),
             allow_combined_tools=uses_combined_tools,
             max_output_tokens=self._settings.max_output_tokens,
-        ))
+        )
+        try:
+            response = await self._provider.generate(generation)
+        except ProviderQuotaError:
+            if not uses_combined_tools:
+                raise
+            response = await self._provider.generate(GenerationRequest(
+                request_id=request.request_id,
+                user_id=request.user_id,
+                prompt="\n\n".join(prompt_parts),
+                system_instruction=request.system_instruction,
+                model_candidates=request.model_candidates,
+                policy=ProviderPolicy(
+                    self._settings.provider_timeout_seconds,
+                    self._settings.provider_retries_per_model,
+                ),
+                tools=declarations if allow_tools else (),
+                transcript=transcript,
+                binary_parts=request.binary_parts,
+                use_web=False,
+                use_url_context=False,
+                allow_combined_tools=False,
+                max_output_tokens=self._settings.max_output_tokens,
+            ))
         return ProviderTurn(response.text, response.tool_calls, response.model, response.model_content)
 
     async def search_requester_memory(self, request: RuntimeRequest, query: str, *, limit: int = 20):

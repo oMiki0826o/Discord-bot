@@ -10,10 +10,14 @@ Modification():
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+
+import pytest
 
 from bot.mod.ai.api import AiServices
 from bot.mod.ai.config import AiSettings, DEFAULT_SETTINGS, model_selector_choices
 from bot.mod.ai.commands.discord import apply_model_selection
+from bot.mod.ai.provider.errors import ProviderQuotaError
 from bot.mod.ai.provider.models import ProviderResponse
 from bot.mod.ai.routing import RouteRequest, Router, extract_model_directive
 from bot.mod.ai.runtime.models import RuntimeRequest
@@ -37,6 +41,40 @@ def test_model_selector_choices_match_configured_route_categories() -> None:
         ("Gemma", "gemma"),
         ("Agent", "agent"),
     )
+
+
+def test_agent_web_quota_falls_back_to_non_web_chat_candidates() -> None:
+    class Provider:
+        def __init__(self) -> None:
+            self.requests = []
+
+        async def generate(self, request):
+            self.requests.append(request)
+            if request.use_web:
+                raise ProviderQuotaError("grounding quota exhausted")
+            return ProviderResponse("fallback answer", "gemini-3.5-flash-lite")
+
+    provider = Provider()
+    settings = SimpleNamespace(
+        model_pools={"agent_web": ("gemini-3-flash-preview",)},
+        provider_timeout_seconds=30.0,
+        provider_retries_per_model=1,
+        max_output_tokens=1200,
+    )
+    request = RuntimeRequest(
+        request_id="request", user_id="user", channel_id="channel", prompt="find this",
+        model_candidates=("gemini-3.1-flash-lite", "gemini-3.5-flash-lite"),
+        capabilities=frozenset({"web"}),
+    )
+
+    turn = asyncio.run(AiServices(_provider=provider, _settings=settings).generate_model_turn(
+        request, (), ({"name": "lookup"},), allow_tools=True,
+    ))
+
+    assert turn.model == "gemini-3.5-flash-lite"
+    assert provider.requests[0].use_web is True
+    assert provider.requests[1].use_web is False
+    assert provider.requests[1].model_candidates == request.model_candidates
 
 
 def test_settings_schema_accepts_the_gemma_fallback_pool() -> None:
