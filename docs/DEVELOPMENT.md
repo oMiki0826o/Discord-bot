@@ -1,6 +1,6 @@
 # 開發指南
 
-這份指南給私有維護工作區中需要在本機修改、除錯或擴充 Bot 的開發者。公開 GitHub repository 會依 `.gitignore` 排除 `tools/` 與 `tests/`。單純部署請先閱讀專案根目錄的 [README](../README.md)。
+這份指南給需要在本機修改、除錯或擴充 Bot 的開發者。單純部署請先閱讀專案根目錄的 [README](../README.md) 與[從零安裝與啟動指南](INSTALL.md)。
 
 ## 建立開發環境
 
@@ -91,7 +91,7 @@ Web／URL Context 與模型可用性屬於外部服務能力，不能只靠單�
 
 ## GitHub 推送前檢查
 
-請使用 Git 或 GitHub Desktop 推送, 不要在 GitHub 網頁直接上傳整個工作目錄。`.gitignore` 會排除 `.env`, `data/`, `settings/*.json`, 虛擬環境, cache, `dist/`, `tools/` 與 `tests/`。
+請使用 Git 或 GitHub Desktop 推送, 不要在 GitHub 網頁直接上傳整個工作目錄。`.gitignore` 會排除 `.env`, `data/`, `settings/*.json`, 虛擬環境, cache, `dist/` 與 `tools/`。
 
 ```bash
 git add .

@@ -24,6 +24,8 @@ output.txt
 *.db
 settings/*.json
 tools/
+.superpowers/
+docs/superpowers/
 
 # --- Build / test reports ---
 dist/

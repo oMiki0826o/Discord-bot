@@ -16,6 +16,7 @@
 - [關於](#關於)
 - [功能](#功能)
 - [安裝](#安裝)
+- [Minecraft 與備份](#minecraft-與備份)
 - [使用方式](#使用方式)
 - [授權](#授權)
 
@@ -36,6 +37,7 @@
 - **文件工具**：`/markitdown` 轉換支援的文件格式。
 - **AI**：`/ai`、@Bot 對話、附件處理、受 scope 限制的 History／Memory／Knowledge 檢索，以及 Gemini Web／URL Context。
 - **Agent（可選）**：有限回合的 Function Calling、只讀 Tools 與 Skill 載入；依賴 `ai` 模組。
+- **Minecraft 維運**：Fabric DMCC bridge、Discord ↔ Minecraft 訊息轉送、Owner 本機控制，以及 tmux + tar 的安全備份／回檔。
 
 ### 安裝
 
@@ -69,6 +71,14 @@ GEMINI_API=
 只有 `DISCORD_TOKEN` 是整個 Bot 的必要環境變數。`OWNER_ID` 留空時會使用 Discord Application Owner／Team Owner；不使用 AI 時可讓 `GEMINI_API` 保持空白。
 
 一般功能設定不需要手動複製範本。第一次載入 Core 或模組時，Bot 會依程式內的預設值建立對應的 `settings/*.json`。這些檔案屬於部署端設定，預設不提交到 Git。
+
+### Minecraft 與備份
+
+第一次部署請直接閱讀[從零安裝與啟動指南](docs/INSTALL.md)。其中包含 Linux 套件、Fabric bridge、DMCC、tmux 控制、備份與回檔的完整步驟。
+
+- [DMCC / Minecraft Bridge 設定](docs/DMCC.md)
+- [Minecraft 備份與回檔設定](docs/MC_BACKUP.md)
+- [Fabric bridge 說明與 checksum](bridge/README.md)
 
 ### 使用方式
 
@@ -116,6 +126,7 @@ $bot stop
 - [About](#about)
 - [Features](#features)
 - [Installation](#installation)
+- [Minecraft and backups](#minecraft-and-backups)
 - [Usage](#usage)
 - [License](#license)
 
@@ -136,6 +147,7 @@ The current version is `v0.1.0` and the project is under active development. Sou
 - **Documents**: `/markitdown` conversion for supported document formats.
 - **AI**: `/ai`, mention conversations, attachments, scoped History/Memory/Knowledge retrieval, and Gemini Web/URL Context.
 - **Agent (optional)**: bounded Function Calling, read-only tools, and progressive skill loading; depends on the `ai` module.
+- **Minecraft operations**: Fabric DMCC bridge, Discord relay, owner-operated local control, and tmux + tar backup/restore.
 
 ### Installation
 
@@ -169,6 +181,10 @@ GEMINI_API=
 Only `DISCORD_TOKEN` is required for the whole application. When `OWNER_ID` is empty, the bot resolves the Discord Application Owner/Team Owner. Leave `GEMINI_API` empty when AI is not enabled.
 
 Feature settings are generated as `settings/*.json` from module defaults when they are first loaded. These files are deployment-local and are not tracked by default.
+
+### Minecraft and backups
+
+For a first deployment, follow the [step-by-step installation guide](docs/INSTALL.md). It covers Linux packages, the Fabric bridge, DMCC, tmux control, backup, and restore.
 
 ### Usage
 

@@ -28,8 +28,8 @@ git status
 - `data/`, SQLite, Log, AI 使用者記憶與 Prompt override.
 - `settings/*.json` 部署端設定.
 - `dist/`, `.git/`, `.DS_Store`, `__MACOSX/` 與其他工作目錄附加檔.
-- `tools/` 與 `tests/` 維護端內容.
-- `.superpowers/`, `docs/superpowers/` 與其他內部協作紀錄.
+- `tools/` 與其他只屬於維護者本機的內容.
+- 其他內部協作暫存資料.
 
 這些路徑已由 `.gitignore` 排除. `.env.example` 與 `settings/README.md` 會保留, 讓部署者知道必要環境變數與設定位置.
 
