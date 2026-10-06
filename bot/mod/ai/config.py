@@ -6,6 +6,7 @@ Modification():
 - 建立 AI Module 的中立預設值與型別化設定。
 - 將 Gemini Secret 限定在 AI Module 邊界讀取。
 - 提供可調整的 Knowledge Markdown chunk 大小。
+- 將 Gemini 3+ 的 Agent web tool-combination 候選模型獨立為可設定 pool。
 
 本檔案定義可發布的非機密 AI 設定契約。
 """
@@ -27,6 +28,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "vision": ["gemini-2.5-flash"],
         "web": [
             "gemini-2.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-3.5-flash",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+        ],
+        "agent_web": [
             "gemini-3-flash-preview",
             "gemini-3.5-flash",
             "gemini-3.6-flash",
@@ -85,6 +93,7 @@ def build_settings_schema(rule_type) -> dict[str, Any]:
         "model_pools.chat": rule_type(list, validator=model_list, description="must contain model names"),
         "model_pools.vision": rule_type(list, validator=model_list, description="must contain model names"),
         "model_pools.web": rule_type(list, validator=model_list, description="must contain model names"),
+        "model_pools.agent_web": rule_type(list, validator=model_list, description="must contain Gemini 3+ model names"),
         "model_pools.gemma": rule_type(list, validator=model_list, description="must contain model names"),
         "model_pools.background": rule_type(list, validator=model_list, description="must contain model names"),
         "provider_timeout_seconds": positive_number(300),

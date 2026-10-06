@@ -6,6 +6,7 @@ Modification():
 - 建立 Agent 可依賴的唯一 AI 跨模組公開介面。
 - 封裝 Provider turn 與 scoped data queries，不暴露 Repository、Database、Secret 或 Discord Client。
 - 將 reload-safe RuntimeHost 保存為 Bot 上的 Module-owned state。
+- 對需要 web 與 function tools 的 Agent turn 選用 Gemini 3+ 專用模型池。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ class ProviderTurn:
     text: str
     function_calls: tuple[ProviderToolCall, ...]
     model: str
+    model_content: Any = None
 
 
 @dataclass(slots=True)
@@ -56,12 +58,18 @@ class AiServices:
                 + "\n\n".join(request.context_blocks)
             )
         prompt_parts.append("Current request:\n" + request.prompt)
+        uses_combined_tools = allow_tools and bool(declarations) and "web" in request.capabilities
+        model_candidates = (
+            self._settings.model_pools["agent_web"]
+            if uses_combined_tools
+            else request.model_candidates
+        )
         response = await self._provider.generate(GenerationRequest(
             request_id=request.request_id,
             user_id=request.user_id,
             prompt="\n\n".join(prompt_parts),
             system_instruction=request.system_instruction,
-            model_candidates=request.model_candidates,
+            model_candidates=model_candidates,
             policy=ProviderPolicy(
                 self._settings.provider_timeout_seconds,
                 self._settings.provider_retries_per_model,
@@ -71,9 +79,10 @@ class AiServices:
             binary_parts=request.binary_parts,
             use_web="web" in request.capabilities,
             use_url_context="web" in request.capabilities and contains_url(request.prompt),
+            allow_combined_tools=uses_combined_tools,
             max_output_tokens=self._settings.max_output_tokens,
         ))
-        return ProviderTurn(response.text, response.tool_calls, response.model)
+        return ProviderTurn(response.text, response.tool_calls, response.model, response.model_content)
 
     async def search_requester_memory(self, request: RuntimeRequest, query: str, *, limit: int = 20):
         if self._retrieval is None:

@@ -4,6 +4,7 @@ bot/mod/ai/provider/models.py
 Modification():
 
 - 定義供應商中立的生成請求、策略與結果。
+- 表達已驗證模型可使用的 built-in 與 function tool 組合。
 
 本檔案是 Runtime 與實際 SDK adapter 之間的穩定契約。
 """
@@ -38,6 +39,7 @@ class GenerationRequest:
     binary_parts: tuple[BinaryPart, ...] = ()
     use_web: bool = False
     use_url_context: bool = False
+    allow_combined_tools: bool = False
     max_output_tokens: int = 1200
 
     def __post_init__(self) -> None:
@@ -57,6 +59,7 @@ class ProviderToolCall:
     # exact function-call part on the next tool turn.  It is deliberately
     # provider data, not an agent-visible instruction.
     thought_signature: Any = field(default=None, repr=False, compare=False)
+    call_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,4 +82,5 @@ class ProviderResponse:
     model: str
     tool_calls: tuple[ProviderToolCall, ...] = ()
     raw: Any = field(default=None, repr=False, compare=False)
+    model_content: Any = field(default=None, repr=False, compare=False)
     observation: ProviderObservation = field(default_factory=ProviderObservation)

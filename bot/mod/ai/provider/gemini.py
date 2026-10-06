@@ -5,6 +5,8 @@ Modification():
 
 - 建立 google-genai 的懶加載 Transport adapter。
 - 將 SDK 錯誤與 function calls 轉成 Module-owned 契約。
+- 防止 Gemini built-in tools 與 Agent Function Calling 同一請求衝突。
+- 讓 Gemini 3 相容模型以 tool-context circulation 組合搜尋與函式工具。
 
 本檔案是 AI Module 唯一直接理解 Gemini SDK 的位置。
 """
@@ -86,15 +88,11 @@ class GeminiTransport:
                 # functions behind our back or create an extra model turn.
                 "automatic_function_calling": {"disable": True},
             }
-            tools: list[dict[str, Any]] = []
-            if request.use_web:
-                tools.append({"google_search": {}})
-            if request.use_url_context:
-                tools.append({"url_context": {}})
-            if request.tools:
-                tools.append({"function_declarations": list(request.tools)})
+            tools = _build_tools(request)
             if tools:
                 config["tools"] = tools
+            if request.allow_combined_tools:
+                config["tool_config"] = {"include_server_side_tool_invocations": True}
             contents: Any = request.prompt
             if request.binary_parts or request.transcript:
                 from google.genai import types
@@ -102,13 +100,24 @@ class GeminiTransport:
                 contents = [types.Content(role="user", parts=user_parts)]
                 for entry in request.transcript:
                     if entry.get("role") == "model":
-                        parts = [
-                            _function_call_part(types, call)
-                            for call in entry.get("function_calls", ())
-                        ]
-                        contents.append(types.Content(role="model", parts=parts))
+                        provider_content = entry.get("provider_content")
+                        if provider_content is not None:
+                            contents.append(provider_content)
+                        else:
+                            parts = [
+                                _function_call_part(types, call)
+                                for call in entry.get("function_calls", ())
+                            ]
+                            contents.append(types.Content(role="model", parts=parts))
                     elif entry.get("role") == "tool":
-                        parts = [types.Part.from_function_response(name=call.name, response={"ok": result.ok, "data": result.data, "error": result.error}) for call, result in entry.get("results", ())]
+                        parts = [
+                            types.Part(function_response=types.FunctionResponse(
+                                name=call.name,
+                                id=call.call_id or None,
+                                response={"ok": result.ok, "data": result.data, "error": result.error},
+                            ))
+                            for call, result in entry.get("results", ())
+                        ]
                         contents.append(types.Content(role="user", parts=parts))
             response = await self.client.aio.models.generate_content(model=model, contents=contents, config=config)
         except Exception as exc:
@@ -123,6 +132,7 @@ class GeminiTransport:
             model,
             calls,
             response,
+            _candidate_content(response),
             inspect_response_observation(
                 response,
                 requested_web=request.use_web,
@@ -139,15 +149,11 @@ class GeminiTransport:
                 "max_output_tokens": request.max_output_tokens,
                 "automatic_function_calling": {"disable": True},
             }
-            tools: list[dict[str, Any]] = []
-            if request.use_web:
-                tools.append({"google_search": {}})
-            if request.use_url_context:
-                tools.append({"url_context": {}})
-            if request.tools:
-                tools.append({"function_declarations": list(request.tools)})
+            tools = _build_tools(request)
             if tools:
                 config["tools"] = tools
+            if request.allow_combined_tools:
+                config["tool_config"] = {"include_server_side_tool_invocations": True}
             contents: Any = request.prompt
             if request.binary_parts:
                 from google.genai import types
@@ -191,6 +197,33 @@ class GeminiTransport:
         return ProviderError(text)
 
 
+# ── Tool Configuration ──────────────────────
+
+def _build_tools(request: GenerationRequest) -> list[dict[str, Any]]:
+    """Build a Gemini-compatible tool set for one provider request.
+
+    Gemini 2.x rejects built-in Google tools and function declarations in the
+    same request.  Gemini 3 supports their combination only when the request
+    explicitly enables server-side tool context circulation.
+    """
+
+    if request.tools:
+        if request.allow_combined_tools:
+            tool: dict[str, Any] = {"function_declarations": list(request.tools)}
+            if request.use_web:
+                tool["google_search"] = {}
+            if request.use_url_context:
+                tool["url_context"] = {}
+            return [tool]
+        return [{"function_declarations": list(request.tools)}]
+    tools: list[dict[str, Any]] = []
+    if request.use_web:
+        tools.append({"google_search": {}})
+    if request.use_url_context:
+        tools.append({"url_context": {}})
+    return tools
+
+
 def _function_call_parts(response: Any) -> tuple[Any, ...]:
     """Return original SDK parts so Gemini thought signatures are not lost."""
 
@@ -204,19 +237,29 @@ def _function_call_parts(response: Any) -> tuple[Any, ...]:
     return tuple(parts)
 
 
+def _candidate_content(response: Any) -> Any:
+    candidates = _read(response, "candidates", ()) or ()
+    return _read(candidates[0], "content") if candidates else None
+
+
 def _provider_tool_call(part: Any) -> ProviderToolCall:
     call = _read(part, "function_call")
     return ProviderToolCall(
         str(_read(call, "name", "")),
         dict(_read(call, "args", {}) or {}),
         _read(part, "thought_signature"),
+        str(_read(call, "id", "") or ""),
     )
 
 
 def _function_call_part(types: Any, call: Any) -> Any:
     """Recreate a model function-call part without stripping its signature."""
 
-    part = types.Part.from_function_call(name=call.name, args=call.arguments)
+    part = types.Part(function_call=types.FunctionCall(
+        name=call.name,
+        args=call.arguments,
+        id=call.call_id or None,
+    ))
     signature = getattr(call, "thought_signature", None)
     if signature is not None:
         part.thought_signature = signature

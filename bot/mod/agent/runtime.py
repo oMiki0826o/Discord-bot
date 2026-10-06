@@ -5,6 +5,7 @@ Modification():
 
 - 建立可附掛至 AI RuntimeHost 的有限預算 Agent Tool Loop。
 - 防止重複 Tool Call，並在預算用盡後強制收尾。
+- 保留 Provider 原始 tool context，支援 Gemini 3 server-side tool circulation。
 
 本 Runtime 不擁有 Provider、Database 或 Discord 入口。
 """
@@ -13,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Protocol
 
@@ -28,6 +29,7 @@ class ModelTurn:
     final_text: str = ""
     function_calls: tuple[ToolCall, ...] = ()
     model: str = ""
+    provider_content: Any = field(default=None, repr=False, compare=False)
 
 
 class AgentModel(Protocol):
@@ -72,7 +74,11 @@ class AgentRuntime:
                 return self._result(turn.final_text.strip(), reason, model_turns, tool_calls, started, used_model, tuple(observations))
             if not allow_tools or not turn.function_calls:
                 break
-            transcript.append({"role": "model", "function_calls": turn.function_calls})
+            transcript.append(
+                {"role": "model", "provider_content": turn.provider_content}
+                if turn.provider_content is not None
+                else {"role": "model", "function_calls": turn.function_calls}
+            )
             results: list[tuple[ToolCall, ToolResult]] = []
             context = ToolContext(request, request.capabilities, self.settings.tool_timeout_seconds)
             for call in turn.function_calls:

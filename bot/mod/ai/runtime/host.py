@@ -5,6 +5,7 @@ Modification():
 
 - 建立同一時間僅執行一個 Runtime 的 capability host。
 - 保留 extension factory，AI reload 後以新 services 重建附掛 Runtime。
+- 保留單次 Provider request 錯誤，不將 Agent Runtime 降級為 BasicRuntime。
 
 本檔不理解任何特定 Agent 實作。
 """
@@ -18,7 +19,7 @@ from typing import Any
 
 from .models import RuntimeResult, RuntimeStopReason
 from .protocol import AiRuntime
-from ..provider.errors import ProviderQuotaError
+from ..provider.errors import ProviderError, ProviderQuotaError
 
 RuntimeFactory = Callable[[Any], AiRuntime]
 logger = logging.getLogger("bot.mod.ai.runtime_host")
@@ -98,10 +99,10 @@ class RuntimeHost:
         registration = self._extensions[self._active_owner]
         try:
             result = await active.run(request)
-        except ProviderQuotaError:
+        except (ProviderQuotaError, ProviderError):
             # A provider quota failure is shared by the basic and extension
             # runtimes. Retrying through BasicRuntime only spends another API
-            # call and hides the actual cause, so preserve the quota error.
+            # call and hides the actual cause, so preserve provider errors.
             raise
         except Exception:
             if not registration.read_only or self._basic is None:

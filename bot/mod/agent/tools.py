@@ -5,6 +5,7 @@ Modification():
 
 - 建立 Agent-owned 只讀 Tool 契約、schema validation、capability policy 與 timeout。
 - 使用 AI RuntimeRequest 作為 trusted scope，不接受模型指定身分。
+- 保存 Provider function call ID，讓 Gemini 3 tool-context circulation 可回傳結果。
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ class ToolCall:
     name: str
     arguments: dict[str, Any]
     thought_signature: Any = field(default=None, repr=False, compare=False)
+    call_id: str = ""
 
     @property
     def fingerprint(self) -> str:

@@ -39,7 +39,7 @@
 
 ### 安裝
 
-需求: Python 3.11 以上, Discord Bot Token. 音樂播放需要 FFmpeg, AI 或 Agent 需要 Gemini API Key.
+需求: Python 3.11 以上, Discord Bot Token. 音樂播放需要 FFmpeg, AI 或 Agent 需要 Gemini API Key. macOS 使用 `/markitdown` 轉換 PDF 時需要 macOS 13 以上.
 
 ```bash
 git clone https://github.com/oMiki0826o/Discord-bot.git
@@ -139,7 +139,7 @@ The current version is `v0.1.0` and the project is under active development. Sou
 
 ### Installation
 
-Requirements: Python 3.11 or newer and a Discord Bot Token. FFmpeg is required for music playback. A Gemini API key is required only for AI or Agent modules.
+Requirements: Python 3.11 or newer and a Discord Bot Token. FFmpeg is required for music playback. A Gemini API key is required only for AI or Agent modules. PDF conversion through `/markitdown` requires macOS 13 or newer on macOS.
 
 ```bash
 git clone https://github.com/oMiki0826o/Discord-bot.git

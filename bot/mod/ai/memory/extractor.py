@@ -6,6 +6,7 @@ Modification():
 - 將不可信任的 Provider Output 轉換成 Memory Candidate。
 - 由程式注入 Event、User、Scope 與 Candidate Identity。
 - 限制單一 Event 可產生的 Candidate 數量與欄位。
+- 安全正規化模型輸出的整數 importance 表示法。
 
 本檔不呼叫 Model Provider，也不修改 Memory。
 """
@@ -87,8 +88,12 @@ class MemoryCandidateParser:
                 )
 
             try:
+                normalized_item = dict(raw_item)
+                normalized_item["importance"] = _normalize_importance(
+                    normalized_item["importance"]
+                )
                 canonical = json.dumps(
-                    raw_item,
+                    normalized_item,
                     ensure_ascii=False,
                     sort_keys=True,
                     separators=(",", ":"),
@@ -105,16 +110,16 @@ class MemoryCandidateParser:
                     user_id=event.user_id,
                     scope_type=MemoryScopeType.CHANNEL,
                     scope_id=event.channel_id,
-                    memory_type=raw_item["type"],
-                    memory_key=raw_item["key"],
-                    value=raw_item["value"],
-                    confidence=raw_item["confidence"],
-                    importance=raw_item["importance"],
+                    memory_type=normalized_item["type"],
+                    memory_key=normalized_item["key"],
+                    value=normalized_item["value"],
+                    confidence=normalized_item["confidence"],
+                    importance=normalized_item["importance"],
                     assertion_strength=AssertionStrength(
-                        raw_item["assertion_strength"]
+                        normalized_item["assertion_strength"]
                     ),
                     temporal_scope=TemporalScope(
-                        raw_item["temporal_scope"]
+                        normalized_item["temporal_scope"]
                     ),
                     observed_at=event.created_at,
                 )
@@ -126,3 +131,13 @@ class MemoryCandidateParser:
             candidates.append(candidate)
 
         return tuple(candidates)
+
+
+def _normalize_importance(value: object) -> object:
+    """Accept lossless numeric representations while preserving range checks."""
+
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
