@@ -185,11 +185,14 @@ class LocalTarBackupProvider:
     def _artifact_from_payload(payload: Any) -> BackupArtifact:
         if not isinstance(payload, dict):
             raise ValueError("manifest must be an object")
+        automatic = payload.get("automatic")
+        if type(automatic) is not bool:
+            raise ValueError("manifest automatic must be a boolean")
         return BackupArtifact(
             artifact_id=str(payload["artifact_id"]),
             server_id=str(payload["server_id"]),
             created_at=datetime.fromisoformat(str(payload["created_at"])),
-            automatic=bool(payload["automatic"]),
+            automatic=automatic,
             size_bytes=int(payload["size_bytes"]),
             sha256=str(payload["sha256"]),
         )

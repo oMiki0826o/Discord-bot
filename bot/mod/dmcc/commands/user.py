@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from discord import app_commands
+from discord import AllowedMentions, app_commands
 from discord.ext import commands
 
 from ..application.bridge_requests import BridgeRequestService
@@ -284,7 +284,7 @@ class DmccUserCog(commands.Cog):
         except ValueError:
             return
         if channel is not None and hasattr(channel, "send"):
-            await channel.send(content)
+            await channel.send(content, allowed_mentions=AllowedMentions.none())
 
     async def _execute(
         self,

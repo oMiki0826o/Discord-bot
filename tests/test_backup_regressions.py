@@ -38,3 +38,9 @@ def test_long_backup_name_and_symlink_are_handled_safely(tmp_path: Path) -> None
     (server_dir / "unsafe-link").symlink_to(tmp_path / "outside")
     with pytest.raises(BackupOperationError, match="unsafe archive member"):
         provider._create_sync(_server(server_dir, backup_dir), "manual")
+
+
+def test_manifest_rejects_string_automatic_flag() -> None:
+    payload = {"artifact_id": "manual-20261006T000000000000Z-deadbeef", "server_id": "survival", "created_at": "2026-10-06T00:00:00+00:00", "automatic": "false", "size_bytes": 1, "sha256": "0" * 64}
+    with pytest.raises(ValueError, match="boolean"):
+        LocalTarBackupProvider._artifact_from_payload(payload)

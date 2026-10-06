@@ -15,6 +15,8 @@ from pathlib import Path
 
 from .application.bridge_requests import BridgeRequestService
 from .application.channel_mappings import ChannelMappingService
+from .application.power import PowerService
+from .application.status import StatusQueryService
 from .commands.owner import DmccOwnerCog
 from .commands.user import DmccUserCog
 from .config import DEFAULT_SETTINGS, SETTINGS_NAME, DmccSettings, build_settings_schema
@@ -25,6 +27,7 @@ from .providers.control.pterodactyl import PterodactylControlProvider
 from .providers.panel_http import PanelHttpClient
 from .repositories.links import JsonLinkRepository
 from .repositories.state import JsonStateRepository
+from .domain.registry import ServerRegistry
 from .services.autocomplete import AutocompleteService
 from .services.command_catalog import CommandCatalog, DmccMode
 from .services.cross_server_relay import CrossServerRelayService
@@ -91,7 +94,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     state.initialize()
     links = JsonLinkRepository(state_path.parent / "account_linking" / "links.json")
     gateway = Gateway(settings)
-    _controls, panel_clients = build_control_providers(settings)
+    controls, panel_clients = build_control_providers(settings)
     added_cogs: list[str] = []
     try:
         await gateway.start()
@@ -117,6 +120,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 linking,
                 raw_settings,
                 settings,
+                controls,
             )
             gateway.relay.subscribe(MinecraftDiscordRelayService(state, user_cog).forward)
             for cog in (user_cog, owner_cog):
@@ -156,8 +160,10 @@ def _build_cogs(
     linking: LinkingService,
     raw_settings: dict[str, object],
     settings: DmccSettings,
+    controls,
 ) -> tuple[DmccUserCog, DmccOwnerCog]:
     catalog = CommandCatalog(DmccMode(settings.mode))
+    servers = ServerRegistry(settings.servers)
     info = InfoService(gateway, state, catalog)
     bridge = BridgeRequestService(gateway.requests)
     user = DmccUserCog(
@@ -175,6 +181,8 @@ def _build_cogs(
         info=info,
         mappings=ChannelMappingService(state),
         bridge=bridge,
+        status=StatusQueryService(servers, gateway.manager, controls),
+        power=PowerService(servers, controls),
     )
     return user, owner
 

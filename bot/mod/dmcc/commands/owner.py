@@ -14,6 +14,9 @@ from discord.ext import commands
 
 from ..application.bridge_requests import BridgeRequestService
 from ..application.channel_mappings import ChannelMappingService
+from ..application.power import PowerService
+from ..application.status import StatusQueryService
+from ..domain.models import PowerAction
 from ..services.info import InfoService
 
 
@@ -25,11 +28,15 @@ class DmccOwnerCog(commands.Cog):
         info: InfoService,
         mappings: ChannelMappingService,
         bridge: BridgeRequestService,
+        status: StatusQueryService,
+        power: PowerService,
     ) -> None:
         self.bot = bot
         self._info = info
         self._mappings = mappings
         self._bridge = bridge
+        self._status = status
+        self._power = power
 
     @commands.group(name="dmcc", invoke_without_command=True)
     @commands.is_owner()
@@ -79,6 +86,27 @@ class DmccOwnerCog(commands.Cog):
             await ctx.send(f"DMCC console failed: {exc}")
             return
         await ctx.send(output or "DMCC command completed.")
+
+    @dmcc_group.command(name="server-status")
+    @commands.is_owner()
+    async def server_status(self, ctx: commands.Context, server_id: str) -> None:
+        try:
+            status = await self._status.get(server_id)
+        except (ConnectionError, LookupError, TimeoutError, ValueError) as exc:
+            await ctx.send(f"DMCC status failed: {exc}")
+            return
+        await ctx.send(f"DMCC `{server_id}` bridge={status.bridge_state.value} process={status.process_state.value}")
+
+    @dmcc_group.command(name="power")
+    @commands.is_owner()
+    async def power(self, ctx: commands.Context, server_id: str, action: str) -> None:
+        try:
+            selected = PowerAction(action.lower())
+            await self._power.execute(server_id, selected, actor_level=4)
+        except (ConnectionError, LookupError, TimeoutError, ValueError) as exc:
+            await ctx.send(f"DMCC power failed: {exc}")
+            return
+        await ctx.send(f"DMCC `{server_id}` {selected.value} requested.")
 
     @dmcc_group.command(name="reload")
     @commands.is_owner()

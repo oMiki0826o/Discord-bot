@@ -26,6 +26,11 @@ class ConnectionManager:
 
         return self._connections.get(server_id)
 
+    def is_connected(self, server_id: str) -> bool:
+        """Return whether an authenticated bridge currently owns ``server_id``."""
+
+        return server_id in self._connections
+
     def register(self, server_id: str, connection: Connection) -> bool:
         """註冊唯一 Server 連線；ID 已使用時不覆寫。"""
 
