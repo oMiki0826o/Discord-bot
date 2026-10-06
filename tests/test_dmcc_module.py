@@ -13,7 +13,7 @@ from pathlib import Path
 
 class _Settings:
     def register(self, _name, defaults, *_schema):
-        return {**defaults, "gateway": {"host": "127.0.0.1", "port": 0}}
+        return {**defaults, "gateway": {"host": "127.0.0.1", "port": 8765}}
 
 
 class _Bot:
