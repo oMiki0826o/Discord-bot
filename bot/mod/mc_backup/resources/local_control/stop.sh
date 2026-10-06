@@ -10,3 +10,6 @@ if [[ "${2:-}" == "--kill" ]]; then
   exit 0
 fi
 tmux send-keys -t "$session" "stop" C-m
+while session_exists "$session"; do
+  sleep 0.25
+done

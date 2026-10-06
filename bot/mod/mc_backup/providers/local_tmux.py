@@ -45,7 +45,7 @@ class LocalTmuxControlProvider:
         return result.returncode == 0
 
     async def start(self, server: ManagedBackupServer) -> None:
-        await self._require_success("start.sh", server.tmux_session, *server.start_argv)
+        await self._require_success("start.sh", server.tmux_session, str(server.server_dir), *server.start_argv)
 
     async def stop(self, server: ManagedBackupServer) -> None:
         await self._require_success("stop.sh", server.tmux_session)

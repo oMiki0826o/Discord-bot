@@ -24,6 +24,7 @@ from ..domain.errors import BackupOperationError
 from ..domain.models import BackupArtifact, ManagedBackupServer
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}")
+_ARTIFACT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 
 
 class LocalTarBackupProvider:
@@ -63,6 +64,9 @@ class LocalTarBackupProvider:
             with tarfile.open(partial, "w:gz") as output:
                 for child in server.server_dir.iterdir():
                     output.add(child, arcname=child.name, recursive=True)
+            with tarfile.open(partial, "r:gz") as source:
+                for member in source.getmembers():
+                    self._validate_member(member)
             sha256 = self._sha256(partial)
             size_bytes = partial.stat().st_size
             created_at = datetime.now(UTC)
@@ -166,7 +170,7 @@ class LocalTarBackupProvider:
 
     @staticmethod
     def _validate_artifact_id(artifact_id: str) -> None:
-        if not _NAME.fullmatch(artifact_id):
+        if not isinstance(artifact_id, str) or not _ARTIFACT_ID.fullmatch(artifact_id):
             raise BackupOperationError("invalid backup artifact")
 
     @staticmethod

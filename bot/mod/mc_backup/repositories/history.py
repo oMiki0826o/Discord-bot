@@ -36,12 +36,14 @@ def _deserialize(value: Any) -> list[OperationRecord]:
     for item in value["records"]:
         if not isinstance(item, dict):
             raise ValueError("history record must be an object")
+        if type(item.get("success")) is not bool:
+            raise ValueError("history success must be a boolean")
         records.append(
             OperationRecord(
                 operation_id=str(item["operation_id"]),
                 server_id=str(item["server_id"]),
                 kind=str(item["kind"]),
-                success=bool(item["success"]),
+                success=item["success"],
                 started_at=datetime.fromisoformat(str(item["started_at"])),
                 finished_at=datetime.fromisoformat(str(item["finished_at"])),
                 detail=str(item["detail"]),

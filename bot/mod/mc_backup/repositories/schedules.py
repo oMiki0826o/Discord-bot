@@ -23,9 +23,11 @@ def _deserialize(value: Any) -> dict[str, BackupSchedule]:
     for server_id, item in value["schedules"].items():
         if not isinstance(server_id, str) or not isinstance(item, dict):
             raise ValueError("invalid schedule entry")
+        if type(item.get("enabled")) is not bool:
+            raise ValueError("schedule enabled must be a boolean")
         result[server_id] = BackupSchedule(
             server_id=server_id,
-            enabled=bool(item["enabled"]),
+            enabled=item["enabled"],
             time_of_day=str(item["time_of_day"]),
             timezone=str(item["timezone"]),
         )
