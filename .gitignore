@@ -24,7 +24,6 @@ output.txt
 *.db
 settings/*.json
 tools/
-tests/
 
 # --- Build / test reports ---
 dist/
