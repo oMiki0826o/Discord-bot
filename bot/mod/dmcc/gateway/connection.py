@@ -31,6 +31,7 @@ class Connection:
     ) -> None:
         self.reader = reader
         self.writer = writer
+        self._max_frame_bytes = max_frame_bytes
         self.decoder = FrameDecoder(max_frame_bytes=max_frame_bytes)
         self.server_id: str | None = None
         self.challenge: str | None = None
@@ -45,7 +46,7 @@ class Connection:
         if self._closed:
             raise ConnectionError("connection is closed")
         async with self._write_lock:
-            self.writer.write(encode_frame(envelope))
+            self.writer.write(encode_frame(envelope, max_frame_bytes=self._max_frame_bytes))
             await self.writer.drain()
 
     async def close(self) -> None:

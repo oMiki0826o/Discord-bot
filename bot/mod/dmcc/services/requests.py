@@ -70,7 +70,9 @@ class RequestService:
         if request_id is None:
             return False
         pending = self._pending.get(request_id)
-        if pending is None or pending.server_id != envelope.server_id:
+        if pending is None:
+            return True
+        if pending.server_id != envelope.server_id:
             return False
         if not pending.future.done():
             pending.future.set_result(dict(envelope.data))

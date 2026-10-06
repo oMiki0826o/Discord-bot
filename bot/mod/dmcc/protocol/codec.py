@@ -85,7 +85,7 @@ def decode_frame(frame: bytes, *, max_frame_bytes: int) -> Envelope:
     return _validate_payload(value)
 
 
-def encode_frame(envelope: Envelope) -> bytes:
+def encode_frame(envelope: Envelope, *, max_frame_bytes: int | None = None) -> bytes:
     """Validate and encode an envelope as a network-order length-prefixed frame."""
 
     if not isinstance(envelope, Envelope):
@@ -109,6 +109,11 @@ def encode_frame(envelope: Envelope) -> bytes:
         raise ProtocolError("envelope data is not JSON serializable") from exc
     if len(encoded) > 0xFFFFFFFF:
         raise ProtocolError("frame exceeds protocol maximum")
+    if max_frame_bytes is not None:
+        if type(max_frame_bytes) is not int or max_frame_bytes <= 0:
+            raise ValueError("max_frame_bytes must be a positive integer")
+        if len(encoded) > max_frame_bytes:
+            raise ProtocolError("frame exceeds configured limit")
     return struct.pack(">I", len(encoded)) + encoded
 
 
