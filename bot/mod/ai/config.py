@@ -25,15 +25,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "default_model": "gemini-3.1-flash-lite",
     "model_pools": {
         "chat": ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"],
-        "vision": ["gemini-2.5-flash"],
-        "web": [
-            "gemini-2.5-flash",
-            "gemini-3-flash-preview",
-            "gemini-3.5-flash",
-            "gemini-3.6-flash",
-            "gemini-3.7-flash",
-            "gemini-3.8-flash",
-        ],
+        "flash": ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite"],
+        "vision": ["gemini-3.1-flash-lite"],
+        "search": ["gemini-2.5-flash"],
         "agent_web": [
             "gemini-3-flash-preview",
             "gemini-3.5-flash",
@@ -76,7 +70,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 MODEL_SELECTOR_ORDER: tuple[tuple[str, str, str], ...] = (
     ("Gemini", "gemini", "chat"),
-    ("Flash", "flash", "web"),
+    ("Flash", "flash", "flash"),
     ("Gemma", "gemma", "gemma"),
     ("Agent", "agent", "chat"),
 )
@@ -91,8 +85,9 @@ def build_settings_schema(rule_type) -> dict[str, Any]:
     return {
         "default_model": rule_type(str, validator=lambda value: bool(value.strip())),
         "model_pools.chat": rule_type(list, validator=model_list, description="must contain model names"),
+        "model_pools.flash": rule_type(list, validator=model_list, description="must contain model names"),
         "model_pools.vision": rule_type(list, validator=model_list, description="must contain model names"),
-        "model_pools.web": rule_type(list, validator=model_list, description="must contain model names"),
+        "model_pools.search": rule_type(list, validator=model_list, description="must contain model names"),
         "model_pools.agent_web": rule_type(list, validator=model_list, description="must contain Gemini 3+ model names"),
         "model_pools.gemma": rule_type(list, validator=model_list, description="must contain model names"),
         "model_pools.background": rule_type(list, validator=model_list, description="must contain model names"),

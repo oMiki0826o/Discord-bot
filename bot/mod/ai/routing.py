@@ -83,10 +83,11 @@ class RouteDecision:
 
 
 class Router:
-    def __init__(self, *, default_model: str = "chat", multimodal_model: str = "vision", web_model: str = "web") -> None:
+    def __init__(self, *, default_model: str = "chat", multimodal_model: str = "vision", flash_model: str = "flash", search_model: str = "search") -> None:
         self.default_model = default_model
         self.multimodal_model = multimodal_model
-        self.web_model = web_model
+        self.flash_model = flash_model
+        self.search_model = search_model
 
     def route(self, request: RouteRequest) -> RouteDecision:
         capabilities = {Capability.KNOWLEDGE, Capability.SKILLS}
@@ -111,9 +112,11 @@ class Router:
             selected = None
         category = {
             "gemini": self.default_model,
-            "flash": self.web_model,
+            "flash": self.flash_model,
             "gemma": "gemma",
-        }.get(selected, self.web_model if request.wants_web else self.multimodal_model if request.has_visual_attachment else self.default_model)
+        }.get(selected, self.multimodal_model if request.has_visual_attachment else self.default_model)
+        if request.wants_web:
+            category = self.search_model
         return RouteDecision(category, frozenset(capabilities))
 
     def infer(self, prompt: str, *, has_visual_attachment: bool = False) -> RouteRequest:

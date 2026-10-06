@@ -28,8 +28,8 @@ def test_case_insensitive_directive_is_removed_before_routing() -> None:
 
     assert selected == "flash"
     assert prompt == "幫我查最新天氣"
-    decision = Router().route(RouteRequest(prompt=prompt, model_override=selected))
-    assert decision.model_category == "web"
+    decision = Router().route(RouteRequest(prompt=prompt, model_override=selected, wants_web=True))
+    assert decision.model_category == "search"
 
 
 def test_model_selector_choices_match_configured_route_categories() -> None:
@@ -41,6 +41,18 @@ def test_model_selector_choices_match_configured_route_categories() -> None:
         ("Gemma", "gemma"),
         ("Agent", "agent"),
     )
+
+
+def test_gemini_25_flash_is_reserved_for_search_only() -> None:
+    settings = AiSettings.from_mapping(DEFAULT_SETTINGS)
+
+    assert settings.model_pools["search"] == ("gemini-2.5-flash",)
+    assert all(
+        "gemini-2.5-flash" not in candidates
+        for name, candidates in settings.model_pools.items()
+        if name != "search"
+    )
+    assert settings.model_pools["vision"] == ("gemini-3.1-flash-lite",)
 
 
 def test_agent_web_quota_falls_back_to_non_web_chat_candidates() -> None:
@@ -91,14 +103,11 @@ def test_default_pools_preserve_the_legacy_full_fallback_order() -> None:
         "gemini-3.1-flash-lite",
         "gemini-3.5-flash-lite",
     )
-    assert settings.model_pools["web"] == (
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.5-flash",
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
-        "gemini-3.8-flash",
+    assert settings.model_pools["flash"] == (
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
     )
+    assert settings.model_pools["search"] == ("gemini-2.5-flash",)
     assert settings.model_pools["agent_web"] == (
         "gemini-3-flash-preview",
         "gemini-3.5-flash",
@@ -138,11 +147,12 @@ def test_agent_web_turn_uses_the_configured_gemini_3_combined_tool_pool() -> Non
     assert provider.request.allow_combined_tools is True
 
 
-def test_route_uses_chat_pool_for_gemini_and_web_pool_for_flash() -> None:
+def test_route_uses_flash_pool_for_normal_flash_and_search_pool_for_web() -> None:
     router = Router()
 
     assert router.route(RouteRequest(prompt="hello", model_override="gemini")).model_category == "chat"
-    assert router.route(RouteRequest(prompt="hello", model_override="flash")).model_category == "web"
+    assert router.route(RouteRequest(prompt="hello", model_override="flash")).model_category == "flash"
+    assert router.route(RouteRequest(prompt="latest weather", wants_web=True)).model_category == "search"
 
 
 def test_slash_model_selection_uses_the_same_directive_contract() -> None:
