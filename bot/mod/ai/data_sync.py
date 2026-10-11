@@ -7,6 +7,7 @@ Modification():
 - 僅處理 `.json`、`.md`、`.txt` 文字資料，忽略其他非支援檔案。
 - Knowledge 文件僅支援 `.md` 與 `.txt`。
 - 維持來源檔案唯讀驗證，不主動修改來源或 SQLite。
+- 將 validation、文件統計與 manifest 合併為一次來源走訪，避免大型知識庫拖慢模組啟動。
 """
 
 from __future__ import annotations
@@ -51,6 +52,15 @@ class OwnerDataReport:
     issues: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _SourceSnapshot:
+    """一次走訪取得 Owner data validation 所需的唯讀資訊。"""
+
+    issues: tuple[str, ...]
+    knowledge_documents: int
+    manifest: dict[str, tuple[str, str]]
+
+
 # ── Owner 資料服務 ──
 
 class OwnerDataService:
@@ -71,13 +81,15 @@ class OwnerDataService:
         self.manual_memory = manual_memory
         self.prompts = prompts
         self.max_source_bytes = max_source_bytes
+        self._validated_manifest: dict[str, tuple[str, str]] | None = None
 
     # ── 公開介面 ──
 
     def validate(self) -> OwnerDataReport:
         """驗證目前所有受支援的 Owner 可編輯資料來源。"""
 
-        issues = self._scan_sources()
+        snapshot = self._source_snapshot()
+        issues = list(snapshot.issues)
 
         records = 0
         try:
@@ -92,12 +104,14 @@ class OwnerDataService:
         except (ValueError, PromptSourceError) as exc:
             issues.append(f"prompt: {exc}")
 
-        changed, removed = self._manifest_diff()
+        changed, removed = self._manifest_diff(snapshot.manifest)
 
+        valid = not issues
+        self._validated_manifest = dict(snapshot.manifest) if valid else None
         return OwnerDataReport(
-            valid=not issues,
+            valid=valid,
             manual_records=records,
-            knowledge_documents=self._knowledge_documents(),
+            knowledge_documents=snapshot.knowledge_documents,
             changed_sources=changed,
             removed_sources=removed,
             issues=tuple(issues),
@@ -111,7 +125,10 @@ class OwnerDataService:
     def mark_applied(self) -> None:
         """僅在同步成功後記錄目前已驗證的來源快照。"""
 
-        sources = self._source_manifest()
+        sources = self._validated_manifest
+        self._validated_manifest = None
+        if sources is None:
+            sources = self._source_manifest()
 
         with self.manual_memory.database.transaction() as connection:
             connection.execute("DELETE FROM ai_data_manifest")
@@ -142,10 +159,21 @@ class OwnerDataService:
     def _scan_sources(self) -> list[str]:
         """掃描並驗證所有受支援的文字來源。"""
 
+        return list(self._source_snapshot().issues)
+
+    def _source_snapshot(self) -> _SourceSnapshot:
+        """避免 validate 在大型知識庫上重複走訪與讀取相同來源。"""
+
         issues: list[str] = []
+        knowledge_documents = 0
+        manifest: dict[str, tuple[str, str]] = {}
 
         if not self.root.exists():
-            return [f"data root does not exist: {self.root}"]
+            return _SourceSnapshot(
+                issues=(f"data root does not exist: {self.root}",),
+                knowledge_documents=0,
+                manifest=manifest,
+            )
 
         root = self.root.resolve()
 
@@ -153,11 +181,19 @@ class OwnerDataService:
             if path.is_dir():
                 continue
 
+            relative = path.relative_to(self.root).as_posix()
+            if (
+                relative.startswith("knowledge/")
+                and path.is_file()
+                and not path.is_symlink()
+                and path.suffix.casefold() in KNOWLEDGE_SUFFIXES
+                and path.name != "填寫說明.md"
+            ):
+                knowledge_documents += 1
+
             # 不支援的副檔名不屬於 AI 可編輯資料來源。
             if not self._is_supported_text_source(path):
                 continue
-
-            relative = path.relative_to(self.root).as_posix()
 
             if path.is_symlink():
                 issues.append(
@@ -181,15 +217,25 @@ class OwnerDataService:
                 continue
 
             try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                issues.append(
-                    f"{relative}: must be UTF-8"
-                )
-                continue
+                raw = path.read_bytes()
             except OSError as exc:
                 issues.append(
                     f"{relative}: cannot read source ({exc})"
+                )
+                continue
+
+            source_type = self._source_type(relative)
+            if source_type is not None:
+                manifest[relative] = (
+                    hashlib.sha256(raw).hexdigest(),
+                    source_type,
+                )
+
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                issues.append(
+                    f"{relative}: must be UTF-8"
                 )
                 continue
 
@@ -203,7 +249,11 @@ class OwnerDataService:
                     f"{relative}: knowledge document must not be blank"
                 )
 
-        return issues
+        return _SourceSnapshot(
+            issues=tuple(issues),
+            knowledge_documents=knowledge_documents,
+            manifest=manifest,
+        )
 
     # ── Prompt JSON 驗證 ──
 
@@ -309,10 +359,14 @@ class OwnerDataService:
 
         return result
 
-    def _manifest_diff(self) -> tuple[int, int]:
+    def _manifest_diff(
+        self,
+        current: dict[str, tuple[str, str]] | None = None,
+    ) -> tuple[int, int]:
         """比較目前來源與上一次已套用來源的差異。"""
 
-        current = self._source_manifest()
+        if current is None:
+            current = self._source_manifest()
 
         with self.manual_memory.database.connect() as connection:
             previous = {
@@ -352,3 +406,13 @@ class OwnerDataService:
         """判斷檔案是否屬於允許讀取的文字資料格式。"""
 
         return path.suffix.casefold() in SUPPORTED_TEXT_SUFFIXES
+
+    @staticmethod
+    def _source_type(relative: str) -> str | None:
+        if relative.startswith("users_memory/"):
+            return "user_memory"
+        if relative.startswith("knowledge/"):
+            return "knowledge"
+        if relative.startswith("prompt/"):
+            return "prompt"
+        return None

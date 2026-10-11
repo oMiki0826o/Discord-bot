@@ -5,11 +5,13 @@ Modification():
 
 - 提供 test ai data sync 的自動化回歸測試。
 - 驗證修改後的行為與既有契約保持一致。
+- 驗證大型知識庫 validation 不會重複走訪來源樹。
 """
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from bot.mod.ai.data_sync import OwnerDataService
 from bot.mod.ai.data import initialize_data_dir
@@ -173,3 +175,36 @@ def test_knowledge_source_reader_accepts_mcfunction_data_pack_files(tmp_path) ->
 
     assert document.title == "load"
     assert document.content == "say loaded"
+
+
+def test_owner_data_validation_scans_the_knowledge_tree_once(tmp_path, monkeypatch) -> None:
+    data = tmp_path / "data"
+    knowledge = data / "knowledge"
+    knowledge.mkdir(parents=True)
+    (knowledge / "guide.md").write_text("# Guide\nUseful text", encoding="utf-8")
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    service = OwnerDataService(
+        data,
+        manual_memory=ManualMemorySyncService(database, data / "users_memory"),
+        prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
+    )
+    original_rglob = Path.rglob
+    scans = 0
+
+    def counted_rglob(path: Path, pattern: str):
+        nonlocal scans
+        if path in {data, knowledge}:
+            scans += 1
+        return original_rglob(path, pattern)
+
+    monkeypatch.setattr(Path, "rglob", counted_rglob)
+
+    report = service.validate()
+    service.mark_applied()
+
+    assert report.valid
+    assert report.knowledge_documents == 1
+    assert scans == 1
