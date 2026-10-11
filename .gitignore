@@ -23,7 +23,8 @@ data/
 output.txt
 *.db
 settings/*.json
-tools/
+# 維護工具屬於原始碼倉庫，供 CI 與發布驗證使用；正式發布 ZIP 仍由
+# tools/build_release.py 排除 tools/。
 .superpowers/
 docs/superpowers/
 
