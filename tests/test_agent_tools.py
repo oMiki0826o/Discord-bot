@@ -29,7 +29,8 @@ class _EmptyToolModel:
         if self.turns == 1:
             assert allow_tools
             return ModelTurn(function_calls=(ToolCall("empty", {}),), model="test")
-        return ModelTurn(final_text="should not be requested", model="test")
+        assert not allow_tools
+        return ModelTurn(final_text="No matching source was found.", model="test")
 
 
 class _KnowledgeRetryModel:
@@ -48,7 +49,7 @@ class _KnowledgeRetryModel:
         return ModelTurn(final_text="found it", model="test")
 
 
-def test_agent_stops_after_empty_tool_observation() -> None:
+def test_agent_reserves_a_final_model_turn_after_an_empty_tool_observation() -> None:
     async def empty_handler(arguments, context):
         del arguments, context
         return ()
@@ -71,8 +72,9 @@ def test_agent_stops_after_empty_tool_observation() -> None:
     result = asyncio.run(runtime.run(request))
 
     assert result.tool_calls == 1
-    assert model.turns == 1
-    assert result.text == "Available information is insufficient for a reliable answer."
+    assert model.turns == 2
+    assert result.text == "No matching source was found."
+    assert result.stop_reason.value == "forced_finalize"
 
 
 def test_agent_allows_knowledge_search_to_rephrase_after_empty_result() -> None:

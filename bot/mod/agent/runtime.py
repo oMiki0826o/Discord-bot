@@ -102,8 +102,6 @@ class AgentRuntime:
                 ):
                     force_final = True
             transcript.append({"role": "tool", "results": tuple(results)})
-            if force_final:
-                break
             if tool_calls >= self.settings.max_tool_calls:
                 force_final = True
         return self._result(
