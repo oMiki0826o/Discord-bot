@@ -9,6 +9,8 @@ Modification():
 
 from __future__ import annotations
 
+import asyncio
+
 from bot.mod.ai.background.jobs import JobStatus, MemoryJobRepository
 from bot.mod.ai.background.worker import BackgroundMemoryWorker
 from bot.mod.ai.database import AiDatabase
@@ -98,3 +100,50 @@ def test_memory_parser_normalizes_safe_importance_values() -> None:
     parsed = MemoryCandidateParser().parse(event, payload)
 
     assert parsed[0].importance == 3
+
+
+def test_worker_start_recovers_an_interrupted_processing_job(tmp_path) -> None:
+    async def scenario() -> None:
+        database = AiDatabase(tmp_path / "ai.db")
+        database.initialize()
+        events = EventRepository(database)
+        events.append(NewEvent(
+            "event", "user", "channel", None, "conversation",
+            EventRole.USER, "message", 100,
+        ))
+        jobs = MemoryJobRepository(
+            database,
+            max_attempts=2,
+            retry_base_seconds=30,
+            retry_max_seconds=300,
+        )
+        job = jobs.enqueue("event", now=100)
+        assert jobs.claim(limit=1, now=100)[0].status is JobStatus.PROCESSING
+        processed = asyncio.Event()
+
+        async def processor(event) -> None:
+            assert event.event_id == "event"
+            processed.set()
+
+        worker = BackgroundMemoryWorker(
+            jobs=jobs,
+            events=events,
+            processor=processor,
+            batch_size=1,
+            clock=lambda: 101,
+        )
+        worker.start()
+        try:
+            await asyncio.wait_for(processed.wait(), timeout=1)
+        finally:
+            await worker.close()
+
+        with database.connect() as connection:
+            row = connection.execute(
+                "SELECT status, attempts FROM memory_jobs WHERE job_id = ?",
+                (job.job_id,),
+            ).fetchone()
+        assert row["status"] == JobStatus.COMPLETED.value
+        assert row["attempts"] == 2
+
+    asyncio.run(scenario())
