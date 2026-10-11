@@ -83,7 +83,8 @@ def test_memory_evidence_and_history_exports_are_target_scoped(tmp_path) -> None
 
 
 def test_dashboard_snapshot_is_aggregate_only_and_groups_models(tmp_path) -> None:
-    database = AiDatabase(tmp_path / "ai.db"); database.initialize()
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
     with database.transaction() as connection:
         connection.execute("INSERT INTO events (event_id, user_id, channel_id, conversation_id, role, content, created_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ("a", "user-a", "chan", "conv", "assistant", "private text", 100, '{"model":"gemini-test"}'))
     snapshot = AiOperations(database, now=lambda: 200).dashboard_snapshot(hours=24)
@@ -95,7 +96,8 @@ def test_dashboard_snapshot_is_aggregate_only_and_groups_models(tmp_path) -> Non
 
 
 def test_usage_telemetry_is_aggregated_without_storing_prompt_content(tmp_path) -> None:
-    database = AiDatabase(tmp_path / "ai.db"); database.initialize()
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
     operations = AiOperations(database, now=lambda: 100)
     operations.record_usage("user-a", "gemini-test", "private prompt", "private response")
     operations.record_error("user-a", "gemini-test", "timeout")

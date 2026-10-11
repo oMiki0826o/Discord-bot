@@ -1,0 +1,10 @@
+[lint]
+# Start CI with syntax and correctness rules that can be enforced across the
+# existing codebase. Broader style modernization is tracked separately so it
+# does not hide functional regressions behind a repository-wide rewrite.
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# The import follows pytest.importorskip intentionally: importing discord
+# before this guard would make the optional-dependency test fail at collection.
+"tests/test_help_ui.py" = ["E402"]

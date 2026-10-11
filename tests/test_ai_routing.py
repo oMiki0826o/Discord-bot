@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-import pytest
 
 from bot.mod.ai.api import AiServices
 from bot.mod.ai.config import AiSettings, DEFAULT_SETTINGS, model_selector_choices

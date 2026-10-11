@@ -4,6 +4,7 @@ bot/mod/music/migration.py
 Modification():
 
 - Explicit, read-only legacy favourite migration for the Music module。
+- 展開遷移計數與略過分支，避免壓縮敘述影響可讀性。
 """
 
 from __future__ import annotations
@@ -48,15 +49,18 @@ class LegacyFavoritesMigrator:
             rows = source.execute("SELECT user_id, title, url, duration, added_at FROM music_favorites ORDER BY rowid").fetchall()
         finally:
             source.close()
-        scanned = len(rows); insertable = inserted = duplicates = invalid = 0
+        scanned = len(rows)
+        insertable = inserted = duplicates = invalid = 0
         with self.target._connect() as destination:
             for row in rows:
                 user_id, title, url = (str(row[key] or "").strip() for key in ("user_id", "title", "url"))
                 if not user_id or not title or not url.startswith(("http://", "https://")):
-                    invalid += 1; continue
+                    invalid += 1
+                    continue
                 exists = destination.execute("SELECT 1 FROM music_favorites WHERE user_id = ? AND url = ?", (user_id, url)).fetchone()
                 if exists:
-                    duplicates += 1; continue
+                    duplicates += 1
+                    continue
                 insertable += 1
                 if apply:
                     destination.execute("INSERT INTO music_favorites (user_id, title, url, duration, added_at) VALUES (?, ?, ?, ?, ?)", (user_id, title, url, max(0, int(row["duration"] or 0)), float(row["added_at"] or 0)))

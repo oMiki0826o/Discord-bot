@@ -7,6 +7,7 @@ Modification():
 - 封裝 Provider turn 與 scoped data queries，不暴露 Repository、Database、Secret 或 Discord Client。
 - 將 reload-safe RuntimeHost 保存為 Bot 上的 Module-owned state。
 - 對需要 web 與 function tools 的 Agent turn 選用 Gemini 3+ 專用模型池。
+- 明確宣告供 Agent 使用的 Runtime model re-export，避免 lint 誤刪公開契約。
 """
 
 from __future__ import annotations
@@ -21,6 +22,18 @@ from .runtime.host import RuntimeFactory, RuntimeHost
 from .runtime.models import RuntimeRequest, RuntimeResult, RuntimeStopReason
 
 _HOST_ATTRIBUTE = "_discord_bot_ai_runtime_host"
+
+__all__ = (
+    "AiServices",
+    "ProviderTurn",
+    "RuntimeRequest",
+    "RuntimeResult",
+    "RuntimeStopReason",
+    "get_runtime_host",
+    "get_services",
+    "register_runtime_extension",
+    "unregister_runtime_extension",
+)
 
 
 @dataclass(frozen=True, slots=True)

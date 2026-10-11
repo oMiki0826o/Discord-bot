@@ -15,6 +15,7 @@ from bot.mod.ai.history.repository import EventRepository
 from bot.mod.ai.summary.repository import SummaryRepository
 from bot.mod.ai.summary.service import SummaryService
 from bot.mod.ai.background.extractor import ProviderMemoryExtractor
+from bot.mod.ai.errors import CandidatePayloadError
 from bot.mod.ai.routing import extract_model_directive
 
 
@@ -42,8 +43,22 @@ def test_summary_service_uses_event_range_hash(tmp_path) -> None:
     assert service.current("user-a", "channel", "conv-a").content == "facts and decision"
 
 
-def test_memory_extractor_ignores_non_array_json_response() -> None:
-    assert ProviderMemoryExtractor._parse_json('{"memories": []}') == []
+def test_memory_extractor_rejects_non_array_json_response() -> None:
+    try:
+        ProviderMemoryExtractor._parse_json('{"memories": []}')
+    except CandidatePayloadError as exc:
+        assert "JSON Array" in str(exc)
+    else:
+        raise AssertionError("non-array memory output must be rejected")
+
+
+def test_memory_extractor_rejects_invalid_json_response() -> None:
+    try:
+        ProviderMemoryExtractor._parse_json("not json")
+    except CandidatePayloadError as exc:
+        assert "JSON" in str(exc)
+    else:
+        raise AssertionError("invalid memory output must be rejected")
 
 
 def test_memory_extractor_accepts_fenced_json_array() -> None:

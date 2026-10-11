@@ -30,7 +30,8 @@ def test_atomic_json_quarantines_corrupt_document(tmp_path: Path) -> None:
 
 def test_long_backup_name_and_symlink_are_handled_safely(tmp_path: Path) -> None:
     server_dir, backup_dir = tmp_path / "server", tmp_path / "backups"
-    server_dir.mkdir(); backup_dir.mkdir()
+    server_dir.mkdir()
+    backup_dir.mkdir()
     (server_dir / "level.dat").write_bytes(b"world")
     provider = LocalTarBackupProvider()
     artifact = provider._create_sync(_server(server_dir, backup_dir), "a" * 80)

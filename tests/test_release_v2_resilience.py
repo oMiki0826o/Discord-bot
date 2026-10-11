@@ -54,7 +54,8 @@ def test_worker_close_cancels_stuck_processor() -> None:
         recovered = False
         def recover_processing(self, *, now): self.recovered = True
         def claim(self, *, limit, now):
-            if self.claimed: return ()
+            if self.claimed:
+                return ()
             self.claimed = True
             return (Job(),)
         def next_available_at(self): return None
@@ -114,7 +115,9 @@ def test_ai_response_survives_background_side_effect_failure() -> None:
         def clear(self): return None
     class Events:
         def __init__(self): self.items = []
-        def append(self, event): self.items.append(event); return event
+        def append(self, event):
+            self.items.append(event)
+            return event
     class Planner:
         async def build(self, *args, **kwargs): return object()
     class Prompts:

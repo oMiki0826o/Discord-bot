@@ -57,6 +57,7 @@ SQLite schema 與 repository 應由使用資料的模組擁有。Core 的 `bot/c
 
 ```bash
 python -m pytest -q
+python -m ruff check bot tests main.py
 python -m compileall -q bot tools tests main.py
 git diff --check
 ```

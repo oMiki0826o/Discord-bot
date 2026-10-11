@@ -1,5 +1,8 @@
 # Discord Bot 開發與測試依賴
 # 安裝：python -m pip install -r requirements-dev.txt
+#
+# CI 與本機開發均以發布鎖定檔為基礎，避免測試時另外解析浮動 runtime 版本。
 
--r requirements.txt
+-r requirements-lock.txt
 pytest==9.1.1
+ruff==0.17.0

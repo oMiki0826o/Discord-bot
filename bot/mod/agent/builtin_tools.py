@@ -5,6 +5,7 @@ Modification():
 
 - 將 AI public facade 的 Memory、Profile、History、Topic、Knowledge 與 Channel Context 接成只讀 Tools。
 - 將 Agent-owned Skills 接成 progressive-loading Tools。
+- 使用具名欄位需求 helper，讓 Tool schema 建立保持可讀與可檢查。
 
 所有 private scope 都來自 trusted RuntimeRequest。
 """
@@ -62,7 +63,8 @@ def build_readonly_registry(services: Any, *, skills: Any = None) -> ToolRegistr
         now = datetime.now(ZoneInfo("Asia/Taipei"))
         return {"timezone": "Asia/Taipei", "iso": now.isoformat(), "display": now.strftime("%Y-%m-%d %H:%M:%S")}
 
-    required = lambda name: frozenset({name})
+    def required(name: str) -> frozenset[str]:
+        return frozenset({name})
     registry.register(Tool("search_user_memory", "Search the requester's private long-term memory", "memory", required("query"), search_memory, required("query")))
     registry.register(Tool("read_public_profile", "Read explicitly public profile fields for a user", "public_profile", required("target_user_id"), read_profile, required("target_user_id")))
     registry.register(Tool("search_public_profiles", "Search explicitly public profiles by name or content", "public_profile", required("query"), search_profiles, required("query")))

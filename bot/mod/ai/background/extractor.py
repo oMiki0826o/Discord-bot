@@ -14,12 +14,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..errors import CandidatePayloadError
 from ..provider.models import GenerationRequest, ProviderPolicy
 
 _INSTRUCTION = """Analyze the user message and return a JSON array of durable memory candidates only.
 Each item must contain exactly: type, key, value, confidence, importance,
 assertion_strength (tentative|observed|explicit), temporal_scope
 (temporary|ongoing|permanent).
+confidence must be a JSON number from 0.0 through 1.0. importance must be a
+JSON integer from 1 through 5, where 1 is low relevance and 5 is essential.
 Only retain the user's explicit stable identity, durable preferences, long-running
 project decisions, or an explicit request to remember something. Never store
 technical questions, technical answers, game facts, explanations, model guesses,
@@ -61,9 +64,8 @@ class ProviderMemoryExtractor:
             return []
         try:
             parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return []
-        # A malformed model response must not make the durable background job
-        # fail repeatedly.  Treat any valid but unexpected JSON shape as an
-        # empty extraction; only arrays are valid memory candidates.
-        return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError as exc:
+            raise CandidatePayloadError("Memory Extractor 必須回傳有效 JSON Array") from exc
+        if not isinstance(parsed, list):
+            raise CandidatePayloadError("Memory Extractor 根節點必須是 JSON Array")
+        return parsed

@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 
 
-DATA_DIRECTORIES = ("prompt", "users_memory", "knowledge")
+DATA_DIRECTORIES = ("prompt", "users_memory", "auto_memory", "knowledge")
 
 
 def initialize_data_dir(data_dir: Path, *, resource_dir: Path) -> Path:

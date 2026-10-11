@@ -4,6 +4,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tech](https://img.shields.io/badge/stack-Python%20%2B%20discord.py-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-orange)
+[![CI](https://github.com/oMiki0826o/Discord-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/oMiki0826o/Discord-bot/actions/workflows/ci.yml)
 
 [中文](#中文) | [English](#english)
 

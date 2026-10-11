@@ -5,6 +5,7 @@ Modification():
 
 - 建立只選擇模型類別與可用能力的 Router。
 - 包含他人公開個人資料的保守意圖辨識。
+- 以具名文字 cue helper 保持路由判斷可讀。
 
 本檔案不選擇 legacy/agent runtime，所有請求都走同一執行層。
 """
@@ -124,7 +125,8 @@ class Router:
 
         model_override, prompt = extract_model_directive(prompt)
         folded = prompt.casefold()
-        has_any = lambda words: any(word in folded for word in words)
+        def has_any(words: tuple[str, ...]) -> bool:
+            return any(word in folded for word in words)
         return RouteRequest(
             prompt=prompt,
             wants_memory=has_any(("我喜歡", "我偏好", "remember about me", "my preference")),

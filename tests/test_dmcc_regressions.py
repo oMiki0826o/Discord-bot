@@ -18,7 +18,6 @@ from bot.mod.dmcc.protocol.codec import FrameDecoder, ProtocolError, encode_fram
 from bot.mod.dmcc.protocol.models import Envelope
 from bot.mod.dmcc.config import DEFAULT_SETTINGS, DmccSettings, SettingsError
 from bot.mod.dmcc.domain.models import ProcessState
-from bot.mod.dmcc.providers.control.local_tmux import LocalTmuxControlProvider
 from bot.mod.dmcc.providers.control.mcsm import McsmControlProvider
 from bot.mod.dmcc.services.requests import RequestService
 

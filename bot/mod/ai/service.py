@@ -24,7 +24,6 @@ from opencc import OpenCC
 from .config import AiSettings
 from .context.models import ContextRequest
 from .history.models import EventRole, NewEvent
-from .prompt.models import PromptMessage
 from .provider.models import BinaryPart
 from .routing import RouteRequest
 from .runtime.models import RuntimeRequest, RuntimeResult

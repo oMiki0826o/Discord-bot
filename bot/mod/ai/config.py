@@ -7,6 +7,7 @@ Modification():
 - 將 Gemini Secret 限定在 AI Module 邊界讀取。
 - 提供可調整的 Knowledge Markdown chunk 大小。
 - 將 Gemini 3+ 的 Agent web tool-combination 候選模型獨立為可設定 pool。
+- 使用具名 schema validators，避免隱性 lambda 設定邏輯。
 
 本檔案定義可發布的非機密 AI 設定契約。
 """
@@ -79,9 +80,17 @@ MODEL_SELECTOR_ORDER: tuple[tuple[str, str, str], ...] = (
 def build_settings_schema(rule_type) -> dict[str, Any]:
     """Build the latest Core Settings schema without importing Core at package import time."""
 
-    positive_int = lambda maximum: rule_type(int, minimum=1, maximum=maximum)
-    positive_number = lambda maximum: rule_type((int, float), minimum=0.1, maximum=maximum)
-    model_list = lambda values: bool(values) and all(isinstance(value, str) and bool(value.strip()) for value in values)
+    def positive_int(maximum: int):
+        return rule_type(int, minimum=1, maximum=maximum)
+
+    def positive_number(maximum: int):
+        return rule_type((int, float), minimum=0.1, maximum=maximum)
+
+    def model_list(values: object) -> bool:
+        return isinstance(values, list) and bool(values) and all(
+            isinstance(value, str) and bool(value.strip())
+            for value in values
+        )
     return {
         "default_model": rule_type(str, validator=lambda value: bool(value.strip())),
         "model_pools.chat": rule_type(list, validator=model_list, description="must contain model names"),

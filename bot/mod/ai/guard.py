@@ -10,7 +10,6 @@ Modification():
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable

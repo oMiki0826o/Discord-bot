@@ -32,7 +32,8 @@ class _SummaryService:
 
 
 def test_context_uses_summary_when_recent_history_is_over_budget(tmp_path) -> None:
-    database = AiDatabase(tmp_path / "ai.db"); database.initialize()
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
     events = EventRepository(database)
     events.append(NewEvent("old", "user", "channel", None, "conv", EventRole.USER, "x" * 400, 1))
     context = ContextOrchestrator(event_repository=events, history_search=HistorySearchService(database), memory_service=_NoneService(), topic_service=_NoneService(), summary_service=_SummaryService())
