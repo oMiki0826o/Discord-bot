@@ -14,6 +14,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .database import AiDatabase
+from .provider.models import TokenUsage
 
 _TIER_NAMES = {0: "陌生人", 1: "路人", 2: "朋友", 3: "開拓者"}
 _MODE_LABELS = {
@@ -35,8 +36,22 @@ class AiOperations:
         self._owner_id = owner_id.strip() if owner_id and owner_id.strip() else None
 
     def record_usage(self, user_id: str, model: str, prompt: str, response: str) -> None:
+        """Compatibility entry point for callers without provider metadata."""
+
+        usage = TokenUsage(
+            max(1, len(prompt) // 3),
+            max(1, len(response) // 3),
+            max(1, len(prompt) // 3) + max(1, len(response) // 3),
+            estimated=True,
+        )
+        self.record_provider_usage(user_id, model, usage)
+
+    def record_provider_usage(self, user_id: str, model: str, usage: TokenUsage) -> None:
         with self._database.transaction() as connection:
-            connection.execute("INSERT INTO ai_usage (user_id, model, input_tokens, output_tokens, created_at) VALUES (?, ?, ?, ?, ?)", (user_id, model, max(1, len(prompt) // 3), max(1, len(response) // 3), self._now()))
+            connection.execute(
+                "INSERT INTO ai_usage (user_id, model, input_tokens, output_tokens, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, model, usage.input_tokens, usage.output_tokens, self._now()),
+            )
 
     def record_error(self, user_id: str, model: str, error_type: str) -> None:
         with self._database.transaction() as connection:

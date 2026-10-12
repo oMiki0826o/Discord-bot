@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -16,6 +17,32 @@ import org.junit.jupiter.api.Test;
 
 /** Validates the Java Bridge handshake against a minimal Protocol v1 peer. */
 final class BridgeClientTest {
+    @Test
+    void authenticationChallengeHasAnIndependentTimeout() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            CountDownLatch accepted = new CountDownLatch(1);
+            CompletableFuture<Void> peer = CompletableFuture.runAsync(() -> {
+                try (Socket ignored = server.accept()) {
+                    accepted.countDown();
+                    Thread.sleep(500);
+                } catch (Exception exception) {
+                    throw new RuntimeException(exception);
+                }
+            });
+            BridgeSettings settings = new BridgeSettings(
+                "survival", "127.0.0.1", server.getLocalPort(), "secret", 500, 50, 60_000, 120_000
+            );
+            BridgeClient client = new BridgeClient(settings);
+            try {
+                org.junit.jupiter.api.Assertions.assertThrows(SocketTimeoutException.class, client::connect);
+                assertTrue(accepted.await(1, TimeUnit.SECONDS));
+            } finally {
+                client.close();
+            }
+            peer.get(2, TimeUnit.SECONDS);
+        }
+    }
+
     @Test
     void authenticatesWithAProtocolV1Gateway() throws Exception {
         try (ServerSocket server = new ServerSocket(0)) {

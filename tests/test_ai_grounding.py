@@ -10,7 +10,7 @@ Modification():
 from __future__ import annotations
 
 from bot.mod.ai.provider.errors import ProviderUnavailableError
-from bot.mod.ai.provider.gemini import GeminiTransport, inspect_response_observation
+from bot.mod.ai.provider.gemini import GeminiTransport, _token_usage, inspect_response_observation
 
 
 class Node:
@@ -51,3 +51,18 @@ def test_dns_connect_failure_is_retryable_provider_unavailable() -> None:
     error = OSError("Cannot connect to host generativelanguage.googleapis.com:443 [nodename nor servname provided]")
 
     assert isinstance(GeminiTransport._translate_error(error), ProviderUnavailableError)
+
+
+def test_gemini_usage_metadata_maps_to_provider_neutral_tokens() -> None:
+    response = Node(usage_metadata=Node(
+        prompt_token_count=11,
+        candidates_token_count=7,
+        thoughts_token_count=3,
+        total_token_count=21,
+    ))
+
+    usage = _token_usage(response)
+
+    assert usage is not None
+    assert (usage.input_tokens, usage.output_tokens, usage.thinking_tokens, usage.total_tokens) == (11, 7, 3, 21)
+    assert usage.estimated is False

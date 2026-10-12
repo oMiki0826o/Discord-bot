@@ -22,6 +22,7 @@ from .providers.local_tar import LocalTarBackupProvider
 from .providers.local_tmux import LocalTmuxControlProvider
 from .repositories.history import JsonHistoryRepository
 from .repositories.schedules import JsonScheduleRepository
+from .repositories.health import JsonScheduleHealthRepository
 
 MODULE_VERSION = "0.1.0"
 MODULE_DISPLAY_NAME = "Minecraft 備份與回檔"
@@ -49,7 +50,24 @@ async def setup(bot, *, settings_registry=None, data_dir: Path | None = None) ->
     control = LocalTmuxControlProvider(timeout_seconds=float(raw["control_timeout_seconds"]))
     archive = LocalTarBackupProvider()
     coordinator = BackupCoordinator(control, archive, history, OperationLockPool())
-    schedules = BackupScheduleService({item.server_id: item for item in settings.servers}, coordinator, JsonScheduleRepository(data_dir / "schedules.json"))
+    async def alert_owner(server_id, health) -> None:
+        from bot.core.discord.owner import resolve_owner_id
+
+        owner_id = await resolve_owner_id(bot)
+        user = bot.get_user(owner_id) or await bot.fetch_user(owner_id)
+        await user.send(
+            f"Minecraft 排程備份失敗：{server_id}\n"
+            f"連續失敗：{health.consecutive_failures}\n"
+            f"原因：{health.last_error or '未知'}"
+        )
+
+    schedules = BackupScheduleService(
+        {item.server_id: item for item in settings.servers},
+        coordinator,
+        JsonScheduleRepository(data_dir / "schedules.json"),
+        JsonScheduleHealthRepository(data_dir / "schedule_health.json"),
+        alert_sink=alert_owner,
+    )
     cog = McBackupOwnerCog(bot, settings=settings, coordinator=coordinator, schedules=schedules, confirmation_timeout_seconds=float(raw["confirmation_timeout_seconds"]))
     added = False
     try:

@@ -14,6 +14,7 @@ class BridgeMetadataTest {
             String metadata = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(metadata.contains("minecraft_bridge"));
             assertTrue(metadata.contains("io.miki.dmcc.bridge.BridgeMod"));
+            assertTrue(metadata.contains("\"fabric-api\""));
         }
     }
 }

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 /** Verifies lifecycle work happens off-thread and is released during shutdown. */
@@ -93,6 +94,70 @@ final class BridgeRuntimeTest {
                 Thread.sleep(10);
             }
             assertEquals("gateway unavailable", runtime.lastFailure().getMessage());
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    void publishesEventsOnTheDedicatedSenderInOrder() throws Exception {
+        CountDownLatch connected = new CountDownLatch(1);
+        CountDownLatch sent = new CountDownLatch(2);
+        java.util.List<String> types = new java.util.concurrent.CopyOnWriteArrayList<>();
+        BridgeRuntime runtime = new BridgeRuntime(() -> new BridgeConnection() {
+            @Override public void connect() { connected.countDown(); }
+            @Override public void send(ProtocolEnvelope envelope) { types.add(envelope.type()); sent.countDown(); }
+            @Override public void awaitDisconnect() throws InterruptedException { Thread.sleep(5_000); }
+            @Override public void close() { }
+        }, 1, 1);
+
+        runtime.start();
+        try {
+            assertTrue(connected.await(1, TimeUnit.SECONDS));
+            assertTrue(runtime.publishEvent(new ProtocolEnvelope(1, "first", "server", null, java.util.Map.of())));
+            CompletableFuture<Void> required = runtime.sendRequired(
+                new ProtocolEnvelope(1, "second", "server", "request", java.util.Map.of())
+            );
+            required.get(1, TimeUnit.SECONDS);
+            assertTrue(sent.await(1, TimeUnit.SECONDS));
+            assertEquals(java.util.List.of("first", "second"), types);
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    void rejectsOverflowWithoutBlockingTheCaller() throws Exception {
+        CountDownLatch connected = new CountDownLatch(1);
+        CountDownLatch releaseSend = new CountDownLatch(1);
+        BridgeRuntime runtime = new BridgeRuntime(() -> new BridgeConnection() {
+            @Override public void connect() { connected.countDown(); }
+            @Override public void send(ProtocolEnvelope envelope) throws IOException {
+                try {
+                    releaseSend.await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("send interrupted", exception);
+                }
+            }
+            @Override public void awaitDisconnect() throws InterruptedException { Thread.sleep(5_000); }
+            @Override public void close() { releaseSend.countDown(); }
+        }, 1, 1);
+
+        runtime.start();
+        try {
+            assertTrue(connected.await(1, TimeUnit.SECONDS));
+            int rejected = 0;
+            long started = System.nanoTime();
+            for (int index = 0; index < 400; index++) {
+                if (!runtime.publishEvent(new ProtocolEnvelope(
+                    1, "event", "server", null, java.util.Map.of("index", index)
+                ))) rejected++;
+            }
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertTrue(rejected > 0);
+            assertTrue(runtime.droppedEvents() > 0);
+            assertTrue(elapsedMillis < 500);
         } finally {
             runtime.close();
         }

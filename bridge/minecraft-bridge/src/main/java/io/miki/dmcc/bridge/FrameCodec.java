@@ -1,6 +1,4 @@
 /*
- * test_mod/minecraft-bridge/src/main/java/io/miki/dmcc/bridge/FrameCodec.java
- *
  * Encodes and validates the unsigned 32-bit big-endian length prefix used by
  * DMCC Protocol v1.  JSON interpretation belongs to a higher protocol layer.
  */

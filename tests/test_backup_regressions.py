@@ -15,6 +15,7 @@ import pytest
 from bot.mod.mc_backup.domain.errors import BackupOperationError
 from bot.mod.mc_backup.domain.models import ManagedBackupServer
 from bot.mod.mc_backup.application.schedules import BackupScheduleService
+from bot.mod.mc_backup.repositories.health import JsonScheduleHealthRepository
 from bot.mod.mc_backup.commands.owner import McBackupOwnerCog
 from bot.mod.mc_backup.providers.local_tar import LocalTarBackupProvider
 from bot.mod.mc_backup.repositories.json_file import AtomicJsonFile
@@ -112,3 +113,69 @@ def test_owner_status_reports_schedule_failure(tmp_path: Path) -> None:
         assert "OSError: disk full" in ctx.messages[0]
 
     asyncio.run(run())
+
+
+def test_schedule_health_and_alert_cooldown_survive_restart(tmp_path: Path) -> None:
+    class Coordinator:
+        async def create(self, _server) -> None:
+            raise OSError("disk full")
+
+    alerts: list[int] = []
+
+    async def alert(_server_id, health) -> None:
+        alerts.append(health.consecutive_failures)
+
+    server = _server(tmp_path / "server", tmp_path / "backups")
+    health_repository = JsonScheduleHealthRepository(tmp_path / "health.json")
+    first = BackupScheduleService(
+        {server.server_id: server},
+        Coordinator(),
+        JsonScheduleRepository(tmp_path / "schedules.json"),
+        health_repository,
+        alert_sink=alert,
+        alert_cooldown_seconds=3600,
+    )
+    asyncio.run(first.run_due([server.server_id]))
+
+    restarted = BackupScheduleService(
+        {server.server_id: server},
+        Coordinator(),
+        JsonScheduleRepository(tmp_path / "schedules.json"),
+        health_repository,
+        alert_sink=alert,
+        alert_cooldown_seconds=3600,
+    )
+    asyncio.run(restarted.run_due([server.server_id]))
+
+    assert restarted.health(server.server_id).consecutive_failures == 2
+    assert alerts == [1]
+
+
+def test_failed_backup_alert_is_retried_without_waiting_for_cooldown(tmp_path: Path) -> None:
+    class Coordinator:
+        async def create(self, _server) -> None:
+            raise OSError("disk full")
+
+    attempts: list[int] = []
+
+    async def alert(_server_id, health) -> None:
+        attempts.append(health.consecutive_failures)
+        if len(attempts) == 1:
+            raise RuntimeError("Discord unavailable")
+
+    server = _server(tmp_path / "server", tmp_path / "backups")
+    service = BackupScheduleService(
+        {server.server_id: server},
+        Coordinator(),
+        JsonScheduleRepository(tmp_path / "schedules.json"),
+        JsonScheduleHealthRepository(tmp_path / "health.json"),
+        alert_sink=alert,
+        alert_cooldown_seconds=3600,
+    )
+
+    asyncio.run(service.run_due([server.server_id]))
+    assert service.health(server.server_id).last_alert_at is None
+    asyncio.run(service.run_due([server.server_id]))
+
+    assert attempts == [1, 2]
+    assert service.health(server.server_id).last_alert_at is not None

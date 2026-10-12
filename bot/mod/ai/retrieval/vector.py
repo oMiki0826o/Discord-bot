@@ -55,6 +55,17 @@ class VectorRepository:
                 (source_kind, item_id, user_id, channel_id, model, len(vector), content_hash, blob, now),
             )
 
+    def matches(self, *, source_kind: str, item_id: str, model: str, content_hash: str) -> bool:
+        """Return whether an embedding already matches its content and model."""
+
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT content_hash FROM retrieval_embeddings "
+                "WHERE source_kind = ? AND item_id = ? AND model = ?",
+                (source_kind, item_id, model),
+            ).fetchone()
+        return row is not None and str(row["content_hash"]) == content_hash
+
     def nearest(self, *, source_kind: str, query: tuple[float, ...], model: str, limit: int, user_id: str = "", channel_id: str = "") -> tuple[tuple[str, float], ...]:
         filters = ["source_kind = ?", "model = ?"]
         parameters: list[object] = [source_kind, model]
@@ -69,4 +80,3 @@ class VectorRepository:
         scored = [(str(row["item_id"]), cosine_similarity(query, unpack_vector(bytes(row["vector_blob"]), dimensions=int(row["dimensions"])))) for row in rows if int(row["dimensions"]) == len(query)]
         scored.sort(key=lambda item: (-item[1], item[0]))
         return tuple(scored[:limit])
-

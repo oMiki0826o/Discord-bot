@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -65,7 +66,12 @@ public final class BridgeClient implements BridgeConnection {
             lastFailure = null;
         }
         try {
-            Socket opened = new Socket(settings.gatewayHost(), settings.gatewayPort());
+            Socket opened = new Socket();
+            opened.connect(
+                new InetSocketAddress(settings.gatewayHost(), settings.gatewayPort()),
+                settings.connectTimeoutMillis()
+            );
+            opened.setSoTimeout(settings.authenticationTimeoutMillis());
             synchronized (lifecycleLock) {
                 if (state != State.CONNECTING) {
                     opened.close();
@@ -73,7 +79,7 @@ public final class BridgeClient implements BridgeConnection {
                 }
                 socket = opened;
             }
-            send(new ProtocolEnvelope(1, "handshake", settings.serverId(), null, Map.of("bridge_version", "0.2.0")));
+            send(new ProtocolEnvelope(1, "handshake", settings.serverId(), null, Map.of("bridge_version", "0.2.1")));
             ProtocolEnvelope challenge = receive();
             if (!challenge.type().equals("challenge")) {
                 throw new ProtocolException("expected challenge from gateway");
@@ -88,6 +94,7 @@ public final class BridgeClient implements BridgeConnection {
             if (!result.type().equals("login_success")) {
                 throw new ProtocolException("gateway rejected Bridge authentication");
             }
+            opened.setSoTimeout(settings.readTimeoutMillis());
             synchronized (lifecycleLock) {
                 if (socket == null) {
                     throw new IOException("Bridge connection closed during authentication");

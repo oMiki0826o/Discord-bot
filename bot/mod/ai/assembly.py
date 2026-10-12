@@ -140,24 +140,31 @@ class AiModule:
 
     async def sync_owner_data(self) -> tuple[int, int]:
         """Apply manual-memory source data and rebuild its dependent knowledge index."""
-        validation = self.owner_data.validate()
-        if not validation.valid:
-            raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
-        with self.owner_data.materialize_snapshot(validation) as snapshot:
-            snapshot_manual = ManualMemorySyncService(
-                self.manual_memory.database,
-                snapshot / "users_memory",
-            )
-            snapshot_prompts = PromptSourceLoader(
-                resource_dir=self.prompts.resource_dir,
-                override_dir=snapshot / "prompt",
-            )
-            prompt_sources = snapshot_prompts.load()
-            records = snapshot_manual.sync().records
-            documents = await self.rebuild_knowledge(snapshot / "knowledge")
-            self.owner_data.mark_snapshot_applied(validation, snapshot)
-            self.prompts.install(prompt_sources)
-        return records, documents
+        self.owner_data.set_sync_state("staging")
+        try:
+            validation = self.owner_data.validate()
+            if not validation.valid:
+                raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
+            with self.owner_data.materialize_snapshot(validation) as snapshot:
+                snapshot_manual = ManualMemorySyncService(
+                    self.manual_memory.database,
+                    snapshot / "users_memory",
+                )
+                snapshot_prompts = PromptSourceLoader(
+                    resource_dir=self.prompts.resource_dir,
+                    override_dir=snapshot / "prompt",
+                )
+                prompt_sources = snapshot_prompts.load()
+                self.owner_data.set_sync_state("applying")
+                records = snapshot_manual.sync().records
+                documents = await self.rebuild_knowledge(snapshot / "knowledge")
+                self.owner_data.mark_snapshot_applied(validation, snapshot)
+                self.prompts.install(prompt_sources)
+            self.owner_data.set_sync_state("completed")
+            return records, documents
+        except Exception as exc:
+            self.owner_data.set_sync_state("failed", f"{type(exc).__name__}: {exc}")
+            raise
 
 
 def build_module(
@@ -199,7 +206,7 @@ def build_module(
     provider = ProviderRuntime(
         transport,
         quota=QuotaManager(default_cooldown_seconds=settings.quota_cooldown_seconds),
-        usage_recorder=operations.record_usage,
+        usage_recorder=operations.record_provider_usage,
         error_recorder=operations.record_error,
         trace_recorder=operations.record_provider_trace,
     )

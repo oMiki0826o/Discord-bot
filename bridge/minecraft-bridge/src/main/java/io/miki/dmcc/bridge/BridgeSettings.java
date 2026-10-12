@@ -1,6 +1,4 @@
 /*
- * test_mod/minecraft-bridge/src/main/java/io/miki/dmcc/bridge/BridgeSettings.java
- *
  * Owns the file-level configuration required for one Fabric server to find and
  * authenticate against one Python DMCC Gateway.
  */
@@ -15,8 +13,16 @@ public record BridgeSettings(
     String serverId,
     String gatewayHost,
     int gatewayPort,
-    String authenticationSecret
+    String authenticationSecret,
+    int connectTimeoutMillis,
+    int authenticationTimeoutMillis,
+    int readTimeoutMillis,
+    long pendingRequestTtlMillis
 ) {
+    public BridgeSettings(String serverId, String gatewayHost, int gatewayPort, String authenticationSecret) {
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000);
+    }
+
     /** Parses a standard Java properties stream without doing filesystem I/O. */
     public static BridgeSettings fromReader(Reader reader) throws IOException {
         Properties properties = new Properties();
@@ -37,7 +43,16 @@ public record BridgeSettings(
         if (gatewayPort < 1 || gatewayPort > 65535) {
             throw new ProtocolException("gateway_port must be between 1 and 65535");
         }
-        return new BridgeSettings(serverId, gatewayHost, gatewayPort, secret);
+        return new BridgeSettings(
+            serverId,
+            gatewayHost,
+            gatewayPort,
+            secret,
+            positiveInt(properties, "connect_timeout_millis", 5_000),
+            positiveInt(properties, "authentication_timeout_millis", 15_000),
+            positiveInt(properties, "read_timeout_millis", 60_000),
+            positiveInt(properties, "pending_request_ttl_millis", 120_000)
+        );
     }
 
     private static String required(Properties properties, String key) {
@@ -46,5 +61,17 @@ public record BridgeSettings(
             throw new ProtocolException(key + " must be non-empty");
         }
         return value.trim();
+    }
+
+    private static int positiveInt(Properties properties, String key, int fallback) {
+        String raw = properties.getProperty(key);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value < 1) throw new NumberFormatException();
+            return value;
+        } catch (NumberFormatException exception) {
+            throw new ProtocolException(key + " must be a positive integer", exception);
+        }
     }
 }

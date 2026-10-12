@@ -5,3 +5,7 @@ gateway_host=127.0.0.1
 gateway_port=8765
 # Must exactly match the corresponding Bot-side servers[].secret value.
 authentication_secret=replace-with-a-long-random-secret
+connect_timeout_millis=5000
+authentication_timeout_millis=15000
+read_timeout_millis=60000
+pending_request_ttl_millis=120000

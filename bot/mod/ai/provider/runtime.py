@@ -11,11 +11,12 @@ Modification():
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from typing import Callable, Protocol
 
 from .errors import ProviderEmptyResponseError, ProviderError, ProviderQuotaError, ProviderTimeoutError, ProviderUnavailableError
-from .models import GenerationRequest, ProviderResponse
+from .models import GenerationRequest, ProviderResponse, TokenUsage
 from .quota import QuotaManager
 
 
@@ -28,8 +29,11 @@ class StreamingProviderTransport(ProviderTransport, Protocol):
     def stream(self, request: GenerationRequest, model: str) -> AsyncIterator[str]: ...
 
 
+logger = logging.getLogger("bot.mod.ai.provider.runtime")
+
+
 class ProviderRuntime:
-    def __init__(self, transport: ProviderTransport, *, quota: QuotaManager, usage_recorder: Callable[[str, str, str, str], None] | None = None, error_recorder: Callable[[str, str, str], None] | None = None, trace_recorder: Callable[[str, str, str, str], None] | None = None) -> None:
+    def __init__(self, transport: ProviderTransport, *, quota: QuotaManager, usage_recorder: Callable[[str, str, TokenUsage], None] | None = None, error_recorder: Callable[[str, str, str], None] | None = None, trace_recorder: Callable[[str, str, str, str], None] | None = None) -> None:
         self.transport = transport
         self.quota = quota
         self._usage_recorder = usage_recorder
@@ -73,8 +77,14 @@ class ProviderRuntime:
                     raise
                 else:
                     self.quota.clear(model)
-                    if self._usage_recorder is not None:
-                        self._usage_recorder(request.user_id, response.model or model, request.prompt, response.text)
+                    usage = response.usage or self._estimated_usage(request.prompt, response.text)
+                    self._record_observation(
+                        "usage",
+                        self._usage_recorder,
+                        request.user_id,
+                        response.model or model,
+                        usage,
+                    )
                     self._record_trace(request, response.model or model, "success")
                     return response
         if last_error is not None:
@@ -138,8 +148,13 @@ class ProviderRuntime:
                 else:
                     self.quota.clear(model)
                     response = "".join(parts)
-                    if self._usage_recorder is not None:
-                        self._usage_recorder(request.user_id, model, request.prompt, response)
+                    self._record_observation(
+                        "usage",
+                        self._usage_recorder,
+                        request.user_id,
+                        model,
+                        self._estimated_usage(request.prompt, response),
+                    )
                     self._record_trace(request, model, "success")
                     return
         if last_error is not None:
@@ -152,9 +167,22 @@ class ProviderRuntime:
         await self.transport.close()
 
     def _record_error(self, request: GenerationRequest, model: str, error_type: str) -> None:
-        if self._error_recorder is not None:
-            self._error_recorder(request.user_id, model, error_type)
+        self._record_observation("error", self._error_recorder, request.user_id, model, error_type)
 
     def _record_trace(self, request: GenerationRequest, model: str, outcome: str) -> None:
-        if self._trace_recorder is not None:
-            self._trace_recorder(request.request_id, request.user_id, model, outcome)
+        self._record_observation("trace", self._trace_recorder, request.request_id, request.user_id, model, outcome)
+
+    @staticmethod
+    def _estimated_usage(prompt: str, response: str) -> TokenUsage:
+        input_tokens = max(1, len(prompt) // 3)
+        output_tokens = max(1, len(response) // 3)
+        return TokenUsage(input_tokens, output_tokens, input_tokens + output_tokens, estimated=True)
+
+    @staticmethod
+    def _record_observation(name: str, recorder: Callable[..., None] | None, *args: object) -> None:
+        if recorder is None:
+            return
+        try:
+            recorder(*args)
+        except Exception:
+            logger.warning("AI provider %s recorder failed", name, exc_info=True)

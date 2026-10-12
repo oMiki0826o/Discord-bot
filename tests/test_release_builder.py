@@ -38,7 +38,9 @@ def test_release_filter_keeps_public_project_files() -> None:
     assert "settings/README.md" in names
     assert "docs/RELEASE.md" in names
     assert "requirements.txt" in names
-    assert "requirements-dev.txt" in names
+    assert "requirements-lock.txt" in names
+    assert "tests/test_release_builder.py" not in names
+    assert "bridge/minecraft-bridge/build.gradle" not in names
 
 
 def test_release_files_reject_symlinks_and_unknown_top_level_files(tmp_path: Path) -> None:

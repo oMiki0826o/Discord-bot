@@ -356,6 +356,17 @@ _MIGRATION_12: tuple[str, ...] = (
     )""",
 )
 
+_MIGRATION_14: tuple[str, ...] = (
+    """CREATE TABLE ai_data_sync_state (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        status TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL
+    )""",
+    """INSERT INTO ai_data_sync_state (singleton, status, detail, updated_at)
+    VALUES (1, 'idle', '', 0)""",
+)
+
 
 # ── Database ──────────────────────
 
@@ -516,6 +527,13 @@ class AiDatabase:
                 connection.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                     (13, int(time.time())),
+                )
+            if 14 not in applied:
+                for statement in _MIGRATION_14:
+                    connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (14, int(time.time())),
                 )
 
     @staticmethod

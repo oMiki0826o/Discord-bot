@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from .errors import ProviderError, ProviderQuotaError, ProviderUnavailableError
-from .models import GenerationRequest, ProviderObservation, ProviderResponse, ProviderToolCall
+from .models import GenerationRequest, ProviderObservation, ProviderResponse, ProviderToolCall, TokenUsage
 
 _RETRY_RE = re.compile(r"(?:retryDelay|retry in)[^0-9]*(\d+(?:\.\d+)?)", re.IGNORECASE)
 
@@ -68,6 +68,17 @@ def _has_successful_url_context(response: Any) -> bool:
             if status.endswith("SUCCESS"):
                 return True
     return False
+
+
+def _token_usage(response: Any) -> TokenUsage | None:
+    metadata = _read(response, "usage_metadata")
+    if metadata is None:
+        return None
+    input_tokens = int(_read(metadata, "prompt_token_count", 0) or 0)
+    output_tokens = int(_read(metadata, "candidates_token_count", 0) or 0)
+    thinking_tokens = int(_read(metadata, "thoughts_token_count", 0) or 0)
+    total_tokens = int(_read(metadata, "total_token_count", input_tokens + output_tokens + thinking_tokens) or 0)
+    return TokenUsage(input_tokens, output_tokens, total_tokens, thinking_tokens)
 
 
 class GeminiTransport:
@@ -138,6 +149,7 @@ class GeminiTransport:
                 requested_web=request.use_web,
                 requested_url_context=request.use_url_context,
             ),
+            _token_usage(response),
         )
 
     async def stream(self, request: GenerationRequest, model: str) -> AsyncIterator[str]:

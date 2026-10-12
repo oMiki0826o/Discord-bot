@@ -2,6 +2,16 @@
 
 本專案以 Git 推送可追蹤檔案到公開 GitHub repository. 不要使用 GitHub 網頁直接拖曳整個工作目錄, 因為那樣不會套用 `.gitignore`.
 
+## v0.2.1 — Runtime Safety & Data Consistency
+
+- Knowledge 驗證、快照與索引共用完整文字來源格式。
+- 未變更的 Knowledge chunk 會復用相同模型的 embedding。
+- Provider 觀測記錄失敗不會丟棄已完成回覆，並採用 provider usage metadata。
+- Fabric Bridge 事件使用有界傳送佇列，玩家狀態回呼切回 Server Main Thread。
+- Bridge 加入 connect/read timeout、pending request TTL 與 Fabric API 依賴宣告。
+- Backup schedule health 可跨重啟恢復，相同錯誤告警有冷卻。
+- Runtime ZIP 排除 CI、tests、dev requirements 與 Gradle 原始碼；完整原始碼仍保留在 GitHub。
+
 ## v0.2.0 — Reliability & Release Safety
 
 - 修正 DMCC 連線所有權與 Relay handler 錯誤隔離。

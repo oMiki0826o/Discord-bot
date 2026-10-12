@@ -11,6 +11,7 @@ Modification():
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -85,12 +86,19 @@ class HybridRetrievalService:
             chunk = self.knowledge.read_chunk(chunk_id)
             if chunk is None:
                 continue
+            digest = hashlib.sha256(chunk.content.encode()).hexdigest()
+            if self.vectors.matches(
+                source_kind="knowledge",
+                item_id=chunk_id,
+                model=self.embedding_model,
+                content_hash=digest,
+            ):
+                continue
             try:
                 vector = await self.embedder(chunk.content)
             except Exception:
                 logger.warning("Embedding index failed for %s; FTS remains available", chunk_id, exc_info=True)
                 continue
-            digest = hashlib.sha256(chunk.content.encode()).hexdigest()
             self.vectors.upsert(source_kind="knowledge", item_id=chunk_id, vector=vector, model=self.embedding_model, content_hash=digest, now=now)
         return chunk_ids
 
@@ -107,7 +115,14 @@ class HybridRetrievalService:
             return self._verify_knowledge_hits(lexical, limit=limit)
         try:
             vector = await self.embedder(query)
-            vector_ranking = tuple(item_id for item_id, _score in self.vectors.nearest(source_kind="knowledge", query=vector, model=self.embedding_model, limit=max(limit, 20)))
+            nearest = await asyncio.to_thread(
+                self.vectors.nearest,
+                source_kind="knowledge",
+                query=vector,
+                model=self.embedding_model,
+                limit=max(limit, 20),
+            )
+            vector_ranking = tuple(item_id for item_id, _score in nearest)
         except Exception:
             logger.warning("Embedding retrieval unavailable; falling back to FTS", exc_info=True)
             return self._verify_knowledge_hits(lexical, limit=limit)

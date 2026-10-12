@@ -77,6 +77,17 @@ class ProviderObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class TokenUsage:
+    """Provider-neutral token usage; estimated values are explicitly marked."""
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    thinking_tokens: int = 0
+    estimated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderResponse:
     text: str
     model: str
@@ -84,3 +95,4 @@ class ProviderResponse:
     raw: Any = field(default=None, repr=False, compare=False)
     model_content: Any = field(default=None, repr=False, compare=False)
     observation: ProviderObservation = field(default_factory=ProviderObservation)
+    usage: TokenUsage | None = None

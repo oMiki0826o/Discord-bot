@@ -106,6 +106,49 @@ def test_owner_data_preview_counts_knowledge_and_manual_records(tmp_path) -> Non
     assert report.knowledge_documents == 1
 
 
+def test_owner_data_snapshot_includes_every_supported_knowledge_format(tmp_path) -> None:
+    data = tmp_path / "data"
+    knowledge = data / "knowledge"
+    knowledge.mkdir(parents=True)
+    (knowledge / "guide.md").write_text("guide", encoding="utf-8")
+    (knowledge / "Server.java").write_text("class Server {}", encoding="utf-8")
+    (knowledge / "load.mcfunction").write_text("say loaded", encoding="utf-8")
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    service = OwnerDataService(
+        data,
+        manual_memory=ManualMemorySyncService(database, data / "users_memory"),
+        prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
+    )
+
+    validation = service.validate()
+    with service.materialize_snapshot(validation) as snapshot:
+        names = {
+            path.relative_to(snapshot).as_posix()
+            for path in snapshot.rglob("*")
+            if path.is_file()
+        }
+        service.mark_snapshot_applied(validation, snapshot)
+
+    assert validation.valid
+    assert validation.knowledge_documents == 3
+    assert names == {
+        "knowledge/Server.java",
+        "knowledge/guide.md",
+        "knowledge/load.mcfunction",
+    }
+    with database.connect() as connection:
+        stored = {
+            row[0]
+            for row in connection.execute(
+                "SELECT source_path FROM ai_data_manifest WHERE source_type = 'knowledge'"
+            )
+        }
+    assert stored == names
+
+
 def test_owner_data_preview_tracks_changed_and_removed_sources(tmp_path) -> None:
     data = tmp_path / "data"
     knowledge = data / "knowledge"
@@ -286,3 +329,21 @@ def test_owner_data_snapshot_stays_consistent_when_live_source_changes(tmp_path)
             "SELECT content_hash FROM ai_data_manifest WHERE source_path = 'knowledge/guide.md'"
         ).fetchone()[0]
     assert stored == __import__("hashlib").sha256(b"version A").hexdigest()
+
+
+def test_owner_data_sync_state_is_persistent(tmp_path) -> None:
+    data = tmp_path / "data"
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    service = OwnerDataService(
+        data,
+        manual_memory=ManualMemorySyncService(database, data / "users_memory"),
+        prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
+    )
+
+    service.set_sync_state("failed", "disk unavailable")
+
+    assert service.sync_state()["status"] == "failed"
+    assert service.sync_state()["detail"] == "disk unavailable"

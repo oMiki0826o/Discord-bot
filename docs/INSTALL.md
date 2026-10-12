@@ -6,7 +6,7 @@
 
 - Linux（Ubuntu / Debian 指令如下）、Python 3.11 以上、Git。
 - Discord Developer Portal 建立的 Bot Token。
-- 若使用 Minecraft：Java 21、Minecraft 1.21.8 Fabric Server、Fabric Loader 0.19.5 以上。
+- 若使用 Minecraft：Java 21、Minecraft 1.21.8 Fabric Server、Fabric Loader 0.19.5 以上與 Fabric API。
 - 若使用本機控制或備份：`tmux`、`tar`，Bot 與 Minecraft 必須由同一個 Linux 使用者執行。
 
 Ubuntu / Debian：

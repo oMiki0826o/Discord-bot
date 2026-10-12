@@ -56,7 +56,6 @@ _EXCLUDED_FILE_NAMES = frozenset(
 _EXCLUDED_SUFFIXES = frozenset({".db", ".log", ".pyc", ".pyo"})
 _ALLOWED_TOP_LEVEL = frozenset({
     ".env.example",
-    ".github",
     ".gitignore",
     "LICENSE",
     "README.md",
@@ -65,12 +64,9 @@ _ALLOWED_TOP_LEVEL = frozenset({
     "bridge",
     "docs",
     "main.py",
-    "requirements-dev.txt",
     "requirements-lock.txt",
     "requirements.txt",
-    "ruff.toml",
     "settings",
-    "tests",
 })
 
 
@@ -95,6 +91,8 @@ def should_include(relative: Path) -> bool:
     if relative.name.startswith(".env.") and relative.name != ".env.example":
         return False
     if relative.parts[:2] == ("docs", "superpowers"):
+        return False
+    if relative.parts[:2] == ("bridge", "minecraft-bridge"):
         return False
     if relative.suffix.casefold() in _EXCLUDED_SUFFIXES:
         return False

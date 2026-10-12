@@ -1,6 +1,4 @@
 /*
- * test_mod/minecraft-bridge/src/test/java/io/miki/dmcc/bridge/FrameCodecTest.java
- *
  * Verifies the Java side of the DMCC Protocol v1 length-prefixed frame boundary.
  */
 package io.miki.dmcc.bridge;

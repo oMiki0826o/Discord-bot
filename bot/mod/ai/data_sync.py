@@ -4,8 +4,7 @@ bot/mod/ai/data_sync.py
 Modification():
 
 - 提供 Owner 可編輯 AI 資料來源的安全驗證。
-- 僅處理 `.json`、`.md`、`.txt` 文字資料，忽略其他非支援檔案。
-- Knowledge 文件僅支援 `.md` 與 `.txt`。
+- Knowledge 格式與 KnowledgeSourceReader 共用單一副檔名契約。
 - 維持來源檔案唯讀驗證，不主動修改來源或 SQLite。
 - 將 validation、文件統計與 manifest 合併為一次來源走訪，避免大型知識庫拖慢模組啟動。
 """
@@ -22,6 +21,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .errors import PromptSourceError
+from .knowledge.source import KNOWLEDGE_SOURCE_SUFFIXES
 from .memory.manual_sync import ManualMemorySyncService
 from .prompt.loader import PromptSourceLoader
 
@@ -33,12 +33,6 @@ SUPPORTED_TEXT_SUFFIXES = frozenset({
     ".md",
     ".txt",
 })
-
-KNOWLEDGE_SUFFIXES = frozenset({
-    ".md",
-    ".txt",
-})
-
 
 # ── 驗證報告 ──
 
@@ -188,6 +182,22 @@ class OwnerDataService:
 
         self._mark_applied(validation, source_root=source_root)
 
+    def set_sync_state(self, status: str, detail: str = "") -> None:
+        if status not in {"idle", "staging", "applying", "completed", "failed"}:
+            raise ValueError("invalid AI data sync status")
+        with self.manual_memory.database.transaction() as connection:
+            connection.execute(
+                "UPDATE ai_data_sync_state SET status = ?, detail = ?, updated_at = ? WHERE singleton = 1",
+                (status, detail[:500], int(time.time())),
+            )
+
+    def sync_state(self) -> dict[str, str | int]:
+        with self.manual_memory.database.connect() as connection:
+            row = connection.execute(
+                "SELECT status, detail, updated_at FROM ai_data_sync_state WHERE singleton = 1"
+            ).fetchone()
+        return {"status": str(row["status"]), "detail": str(row["detail"]), "updated_at": int(row["updated_at"])}
+
     @contextmanager
     def materialize_snapshot(self, validation: OwnerDataReport):
         """Copy validated bytes to an immutable per-sync source directory."""
@@ -239,13 +249,13 @@ class OwnerDataService:
                 relative.startswith("knowledge/")
                 and path.is_file()
                 and not path.is_symlink()
-                and path.suffix.casefold() in KNOWLEDGE_SUFFIXES
+                and path.suffix.casefold() in KNOWLEDGE_SOURCE_SUFFIXES
                 and path.name != "填寫說明.md"
             ):
                 knowledge_documents += 1
 
             # 不支援的副檔名不屬於 AI 可編輯資料來源。
-            if not self._is_supported_text_source(path):
+            if not self._is_supported_text_source(path, relative):
                 continue
 
             if path.is_symlink():
@@ -294,7 +304,7 @@ class OwnerDataService:
 
             if (
                 relative.startswith("knowledge/")
-                and path.suffix.casefold() in KNOWLEDGE_SUFFIXES
+                and path.suffix.casefold() in KNOWLEDGE_SOURCE_SUFFIXES
                 and path.name != "填寫說明.md"
                 and not text.strip()
             ):
@@ -364,7 +374,7 @@ class OwnerDataService:
             if (
                 path.is_file()
                 and not path.is_symlink()
-                and path.suffix.casefold() in KNOWLEDGE_SUFFIXES
+                and path.suffix.casefold() in KNOWLEDGE_SOURCE_SUFFIXES
                 and path.name != "填寫說明.md"
             )
         )
@@ -387,10 +397,9 @@ class OwnerDataService:
             if not path.is_file() or path.is_symlink():
                 continue
 
-            if not self._is_supported_text_source(path):
-                continue
-
             relative = path.relative_to(root).as_posix()
+            if not self._is_supported_text_source(path, relative):
+                continue
 
             if relative.startswith("users_memory/"):
                 source_type = "user_memory"
@@ -470,10 +479,13 @@ class OwnerDataService:
     # ── 共用工具 ──
 
     @staticmethod
-    def _is_supported_text_source(path: Path) -> bool:
+    def _is_supported_text_source(path: Path, relative: str) -> bool:
         """判斷檔案是否屬於允許讀取的文字資料格式。"""
 
-        return path.suffix.casefold() in SUPPORTED_TEXT_SUFFIXES
+        suffix = path.suffix.casefold()
+        if relative.startswith("knowledge/"):
+            return suffix in KNOWLEDGE_SOURCE_SUFFIXES
+        return suffix in SUPPORTED_TEXT_SUFFIXES
 
     @staticmethod
     def _source_type(relative: str) -> str | None:
