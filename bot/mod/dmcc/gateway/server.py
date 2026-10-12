@@ -172,8 +172,8 @@ class Gateway:
         except (ConnectionError, asyncio.IncompleteReadError, ProtocolError):
             return
         finally:
-            self.manager.unregister(connection.server_id, connection)
-            if connection.server_id is not None:
+            removed = self.manager.unregister(connection.server_id, connection)
+            if removed and connection.server_id is not None:
                 self.requests.cancel_server(connection.server_id)
             self._peers.discard(connection)
             await connection.close()

@@ -39,11 +39,13 @@ class ConnectionManager:
         self._connections[server_id] = connection
         return True
 
-    def unregister(self, server_id: str | None, connection: Connection) -> None:
-        """只在 Registry 仍指向同一連線時移除 Server。"""
+    def unregister(self, server_id: str | None, connection: Connection) -> bool:
+        """只移除該連線擁有的 Server，並回報是否確實移除。"""
 
         if server_id is not None and self._connections.get(server_id) is connection:
             del self._connections[server_id]
+            return True
+        return False
 
     def all(self) -> tuple[Connection, ...]:
         """回傳目前連線快照，供 Gateway teardown 使用。"""

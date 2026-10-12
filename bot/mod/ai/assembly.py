@@ -115,18 +115,20 @@ class AiModule:
         status["owner_blocks"] = self.mirror.repository.owner_block_count()
         return status
 
-    async def rebuild_knowledge(self) -> int:
+    async def rebuild_knowledge(self, source_dir: Path | None = None) -> int:
         import time
 
         count = 0
-        if not self.knowledge_dir.is_dir():
+        knowledge_dir = self.knowledge_dir if source_dir is None else Path(source_dir)
+        if not knowledge_dir.is_dir():
             return 0
         source_ids: set[str] = set()
-        for path in sorted(self.knowledge_dir.rglob("*")):
+        reader = KnowledgeSourceReader(knowledge_dir)
+        for path in sorted(knowledge_dir.rglob("*")):
             if not path.is_file() or path.suffix.casefold() not in KNOWLEDGE_SOURCE_SUFFIXES:
                 continue
-            relative = path.relative_to(self.knowledge_dir).as_posix()
-            document = KnowledgeSourceReader(self.knowledge_dir).read(relative)
+            relative = path.relative_to(knowledge_dir).as_posix()
+            document = reader.read(relative)
             if not document.content.strip():
                 logger.warning("Skipping blank knowledge source: %s", relative)
                 continue
@@ -138,10 +140,23 @@ class AiModule:
 
     async def sync_owner_data(self) -> tuple[int, int]:
         """Apply manual-memory source data and rebuild its dependent knowledge index."""
-        records = self.manual_memory.sync().records
-        documents = await self.rebuild_knowledge()
-        self.prompts.reload()
-        self.owner_data.mark_applied()
+        validation = self.owner_data.validate()
+        if not validation.valid:
+            raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
+        with self.owner_data.materialize_snapshot(validation) as snapshot:
+            snapshot_manual = ManualMemorySyncService(
+                self.manual_memory.database,
+                snapshot / "users_memory",
+            )
+            snapshot_prompts = PromptSourceLoader(
+                resource_dir=self.prompts.resource_dir,
+                override_dir=snapshot / "prompt",
+            )
+            prompt_sources = snapshot_prompts.load()
+            records = snapshot_manual.sync().records
+            documents = await self.rebuild_knowledge(snapshot / "knowledge")
+            self.owner_data.mark_snapshot_applied(validation, snapshot)
+            self.prompts.install(prompt_sources)
         return records, documents
 
 
@@ -178,7 +193,6 @@ def build_module(
     if not validation.valid:
         raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
     manual_memory.sync()
-    owner_data.mark_applied()
     global_memory = GlobalMemoryService(data_root / "prompt" / "memory.json", prompts=prompts)
 
     transport = GeminiTransport(read_secret()) if transport is None else transport

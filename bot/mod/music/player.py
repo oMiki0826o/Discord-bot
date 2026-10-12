@@ -202,36 +202,36 @@ class GuildPlayer:
     async def _play_next(self) -> None:
         """
         從佇列取出下一首並開始播放。
-        佇列空時啟動閒置計時器；串流提取失敗時跳過並遞迴嘗試下一首。
+        佇列空時啟動閒置計時器；串流提取失敗時以迴圈跳過。
         """
-        finished_song = self.queue.current
-        if finished_song is not None:
-            await self._delete_now_playing_message(finished_song.queue_id)
+        while True:
+            finished_song = self.queue.current
+            if finished_song is not None:
+                await self._delete_now_playing_message(finished_song.queue_id)
 
-        if not self._vc or not self._vc.is_connected():
+            if not self._vc or not self._vc.is_connected():
+                return
+
+            song = self.queue.advance()
+            if not song:
+                self._start_idle_timer()
+                return
+
+            if not await self._start_song(song):
+                continue
+
+            if self._auto_notify and self.text_channel:
+                from bot.mod.music.embeds import now_playing_embed
+                from bot.mod.music.views import MusicControls
+                try:
+                    message = await self.text_channel.send(
+                        embed=now_playing_embed(song, self.queue),
+                        view=MusicControls(self),
+                    )
+                    await self.set_now_playing_message(message, song)
+                except discord.HTTPException as exc:
+                    log.warning("[%s] 無法發送自動通知：%s", self.guild.name, exc)
             return
-
-        song = self.queue.advance()
-
-        if not song:
-            self._start_idle_timer()
-            return
-
-        if not await self._start_song(song):
-            await self._play_next()
-            return
-
-        if self._auto_notify and self.text_channel:
-            from bot.mod.music.embeds import now_playing_embed
-            from bot.mod.music.views  import MusicControls
-            try:
-                message = await self.text_channel.send(
-                    embed=now_playing_embed(song, self.queue),
-                    view=MusicControls(self),
-                )
-                await self.set_now_playing_message(message, song)
-            except discord.HTTPException as exc:
-                log.warning("[%s] 無法發送自動通知：%s", self.guild.name, exc)
 
     async def _start_song(self, song: Song, retry_attempt: int = 0) -> bool:
         """以最新串流 URL 啟動指定歌曲；擷取失敗時會重試同一首。"""

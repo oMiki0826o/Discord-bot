@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from bot.mod.ai.data_sync import OwnerDataService
 from bot.mod.ai.data import initialize_data_dir
 from bot.mod.ai.database import AiDatabase
@@ -120,8 +122,8 @@ def test_owner_data_preview_tracks_changed_and_removed_sources(tmp_path) -> None
         prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
     )
 
-    first = service.preview()
-    service.mark_applied()
+    first = service.validate()
+    service.mark_applied(first)
     source.write_text("second", encoding="utf-8")
     second = service.preview()
     source.unlink()
@@ -203,8 +205,84 @@ def test_owner_data_validation_scans_the_knowledge_tree_once(tmp_path, monkeypat
     monkeypatch.setattr(Path, "rglob", counted_rglob)
 
     report = service.validate()
-    service.mark_applied()
 
     assert report.valid
     assert report.knowledge_documents == 1
     assert scans == 1
+
+
+def test_owner_data_preview_cannot_supply_manifest_for_later_apply(tmp_path) -> None:
+    data = tmp_path / "data"
+    knowledge = data / "knowledge"
+    knowledge.mkdir(parents=True)
+    source = knowledge / "guide.md"
+    source.write_text("version A", encoding="utf-8")
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    service = OwnerDataService(
+        data,
+        manual_memory=ManualMemorySyncService(database, data / "users_memory"),
+        prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
+    )
+
+    preview = service.preview()
+    source.write_text("version B", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="validated snapshot"):
+        service.mark_applied(preview)
+
+
+def test_owner_data_apply_rejects_source_changed_after_validation(tmp_path) -> None:
+    data = tmp_path / "data"
+    knowledge = data / "knowledge"
+    knowledge.mkdir(parents=True)
+    source = knowledge / "guide.md"
+    source.write_text("version A", encoding="utf-8")
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    service = OwnerDataService(
+        data,
+        manual_memory=ManualMemorySyncService(database, data / "users_memory"),
+        prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
+    )
+
+    validation = service.validate()
+    source.write_text("version B", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="changed after validation"):
+        service.mark_applied(validation)
+
+
+def test_owner_data_snapshot_stays_consistent_when_live_source_changes(tmp_path) -> None:
+    data = tmp_path / "data"
+    knowledge = data / "knowledge"
+    knowledge.mkdir(parents=True)
+    source = knowledge / "guide.md"
+    source.write_text("version A", encoding="utf-8")
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    service = OwnerDataService(
+        data,
+        manual_memory=ManualMemorySyncService(database, data / "users_memory"),
+        prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
+    )
+    validation = service.validate()
+
+    with service.materialize_snapshot(validation) as snapshot:
+        source.write_text("version B", encoding="utf-8")
+        assert (snapshot / "knowledge" / "guide.md").read_text(encoding="utf-8") == "version A"
+        service.mark_snapshot_applied(validation, snapshot)
+
+    report = service.preview()
+    assert report.changed_sources == 1
+    with database.connect() as connection:
+        stored = connection.execute(
+            "SELECT content_hash FROM ai_data_manifest WHERE source_path = 'knowledge/guide.md'"
+        ).fetchone()[0]
+    assert stored == __import__("hashlib").sha256(b"version A").hexdigest()

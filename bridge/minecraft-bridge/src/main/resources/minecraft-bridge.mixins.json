@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "io.miki.dmcc.bridge.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "GameModeCommandMixin",
+    "PlayerAdvancementsMixin",
+    "ServerPlayerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -9,10 +9,14 @@ Modification():
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
+from types import SimpleNamespace
 
 from bot.mod.music.database import MusicDatabase
 from bot.mod.music.migration import LegacyFavoritesMigrator
+from bot.mod.music.player import GuildPlayer
+from bot.mod.music.song import Song
 from pathlib import Path
 
 
@@ -38,3 +42,31 @@ def test_play_command_keeps_search_for_single_song_mode() -> None:
     source = (Path(__file__).resolve().parents[1] / "bot/mod/music/command.py").read_text(encoding="utf-8")
 
     assert 'if mode == "playlist" and not is_youtube_url(url):' in source
+
+
+def test_play_next_skips_many_unplayable_songs_without_recursion(monkeypatch) -> None:
+    async def run() -> None:
+        player = GuildPlayer(SimpleNamespace(), SimpleNamespace(name="guild"))
+        player._vc = SimpleNamespace(is_connected=lambda: True)
+        monkeypatch.setattr(player, "_delete_now_playing_message", lambda *_args: asyncio.sleep(0))
+        attempts = 0
+
+        async def cannot_start(_song) -> bool:
+            nonlocal attempts
+            attempts += 1
+            return False
+
+        monkeypatch.setattr(player, "_start_song", cannot_start)
+        monkeypatch.setattr(player, "_start_idle_timer", lambda: None)
+        for index in range(1100):
+            player.queue._queue.append(Song(
+                title=str(index), webpage_url="https://example.test", uploader="",
+                duration=1, thumbnail=None, requester=SimpleNamespace(),
+            ))
+
+        await player._play_next()
+
+        assert attempts == 1100
+        assert player.queue.current is None
+
+    asyncio.run(run())

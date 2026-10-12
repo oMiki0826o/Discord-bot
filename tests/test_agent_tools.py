@@ -49,6 +49,18 @@ class _KnowledgeRetryModel:
         return ModelTurn(final_text="found it", model="test")
 
 
+class _BudgetExhaustionModel:
+    def __init__(self) -> None:
+        self.allow_tools: list[bool] = []
+
+    async def generate_turn(self, request, transcript, declarations, *, allow_tools):
+        del request, transcript, declarations
+        self.allow_tools.append(allow_tools)
+        if allow_tools:
+            return ModelTurn(function_calls=(ToolCall("lookup", {"turn": len(self.allow_tools)}),), model="test")
+        return ModelTurn(final_text="Final answer from observations.", model="test")
+
+
 def test_agent_reserves_a_final_model_turn_after_an_empty_tool_observation() -> None:
     async def empty_handler(arguments, context):
         del arguments, context
@@ -101,6 +113,34 @@ def test_agent_allows_knowledge_search_to_rephrase_after_empty_result() -> None:
     assert result.text == "found it"
     assert result.model_turns == 3
     assert result.tool_calls == 2
+
+
+def test_agent_reserves_last_model_turn_for_final_answer() -> None:
+    async def handler(arguments, context):
+        del context
+        return {"turn": arguments["turn"]}
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        "lookup", "lookup", "knowledge", frozenset({"turn"}), handler,
+        required_argument_names=frozenset({"turn"}), argument_types={"turn": "integer"},
+    ))
+    model = _BudgetExhaustionModel()
+    request = RuntimeRequest(
+        request_id="request", user_id="user", channel_id="channel", prompt="prompt",
+        system_instruction="system", model_candidates=("test",), capabilities=frozenset({"knowledge"}),
+    )
+
+    result = asyncio.run(AgentRuntime(
+        model, registry,
+        AgentSettings(max_model_turns=3, max_tool_calls=5, tool_timeout_seconds=1, total_timeout_seconds=5),
+    ).run(request))
+
+    assert model.allow_tools == [True, True, False]
+    assert result.text == "Final answer from observations."
+    assert result.model_turns == 3
+    assert result.tool_calls == 2
+    assert result.stop_reason.value == "forced_finalize"
 
 
 def test_agent_tool_output_is_bounded_before_returning_to_the_model() -> None:

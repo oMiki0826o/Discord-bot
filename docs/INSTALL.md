@@ -101,8 +101,14 @@ mkdir -p /srv/minecraft-backups/survival
 git pull
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m pytest -q
 python main.py
+```
+
+若要在部署機執行測試，需先安裝鎖定的開發依賴：
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
 不要提交 `.env`、`settings/*.json`、`data/` 或世界與備份檔。這些都是你的部署資料，不會隨 Git 更新。

@@ -11,6 +11,7 @@ import asyncio
 import copy
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,7 +19,10 @@ from bot.mod.dmcc.protocol.codec import FrameDecoder, ProtocolError, encode_fram
 from bot.mod.dmcc.protocol.models import Envelope
 from bot.mod.dmcc.config import DEFAULT_SETTINGS, DmccSettings, SettingsError
 from bot.mod.dmcc.domain.models import ProcessState
+from bot.mod.dmcc.events import MinecraftEvent
+from bot.mod.dmcc.gateway.server import Gateway
 from bot.mod.dmcc.providers.control.mcsm import McsmControlProvider
+from bot.mod.dmcc.services.relay import RelayService
 from bot.mod.dmcc.services.requests import RequestService
 
 
@@ -87,5 +91,72 @@ def test_local_tmux_target_and_mcsm_contract(tmp_path: Path) -> None:
         assert await provider.status() is ProcessState.RUNNING
         await provider.start()
         assert [call[:2] for call in client.calls] == [("GET", "/api/instance"), ("GET", "/api/protected_instance/open")]
+
+    asyncio.run(run())
+
+
+def test_duplicate_connection_cleanup_does_not_cancel_owner_request(monkeypatch) -> None:
+    """A rejected peer must not cancel work owned by the registered peer."""
+
+    class Reader:
+        async def read(self, _size):
+            return b""
+
+    class DuplicateConnection:
+        server_id = "survival"
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    async def run() -> None:
+        gateway = Gateway(SimpleNamespace(
+            request_timeout_seconds=1,
+            frame_max_bytes=1024,
+        ))
+        owner = object()
+        assert gateway.manager.register("survival", owner)
+        monkeypatch.setattr("bot.mod.dmcc.gateway.server.Connection", DuplicateConnection)
+
+        sent = asyncio.Event()
+
+        async def sender(_envelope) -> None:
+            sent.set()
+
+        gateway.requests = RequestService(sender, timeout_seconds=1)
+        pending = asyncio.create_task(
+            gateway.requests.request("survival", "console.request", {"command": "list"})
+        )
+        await sent.wait()
+        await gateway._handle_client(Reader(), object())
+        await asyncio.sleep(0)
+
+        assert not pending.done()
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+
+    asyncio.run(run())
+
+
+def test_relay_handler_failure_isolated_from_other_handlers(caplog) -> None:
+    async def run() -> None:
+        relay = RelayService()
+        delivered: list[str] = []
+
+        async def broken(_event) -> None:
+            raise RuntimeError("discord unavailable")
+
+        async def healthy(event) -> None:
+            delivered.append(event.type)
+
+        relay.subscribe(broken)
+        relay.subscribe(healthy)
+        await relay.publish(MinecraftEvent("player_join", "survival", {}))
+
+        assert delivered == ["player_join"]
+        assert "discord unavailable" in caplog.text
 
     asyncio.run(run())

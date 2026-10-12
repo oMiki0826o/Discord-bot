@@ -15,8 +15,10 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from .errors import PromptSourceError
@@ -50,6 +52,12 @@ class OwnerDataReport:
     changed_sources: int = 0
     removed_sources: int = 0
     issues: tuple[str, ...] = ()
+    _manifest: tuple[tuple[str, str, str], ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
+    _can_apply: bool = field(default=False, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,12 +89,20 @@ class OwnerDataService:
         self.manual_memory = manual_memory
         self.prompts = prompts
         self.max_source_bytes = max_source_bytes
-        self._validated_manifest: dict[str, tuple[str, str]] | None = None
-
     # ── 公開介面 ──
 
     def validate(self) -> OwnerDataReport:
         """驗證目前所有受支援的 Owner 可編輯資料來源。"""
+
+        return self._inspect(can_apply=True)
+
+    def preview(self) -> OwnerDataReport:
+        """唯讀預覽資料狀態，不產生可供套用的驗證憑證。"""
+
+        return self._inspect(can_apply=False)
+
+    def _inspect(self, *, can_apply: bool) -> OwnerDataReport:
+        """建立一次性來源快照；是否可套用由呼叫用途明確決定。"""
 
         snapshot = self._source_snapshot()
         issues = list(snapshot.issues)
@@ -107,7 +123,6 @@ class OwnerDataService:
         changed, removed = self._manifest_diff(snapshot.manifest)
 
         valid = not issues
-        self._validated_manifest = dict(snapshot.manifest) if valid else None
         return OwnerDataReport(
             valid=valid,
             manual_records=records,
@@ -115,20 +130,30 @@ class OwnerDataService:
             changed_sources=changed,
             removed_sources=removed,
             issues=tuple(issues),
+            _manifest=tuple(
+                (path, content_hash, source_type)
+                for path, (content_hash, source_type) in sorted(snapshot.manifest.items())
+            ),
+            _can_apply=can_apply and valid,
         )
 
-    def preview(self) -> OwnerDataReport:
-        """以與正式驗證相同的唯讀契約預覽資料狀態。"""
+    def mark_applied(self, validation: OwnerDataReport) -> None:
+        """同步成功後記錄同一份且仍未變動的驗證快照。"""
 
-        return self.validate()
+        self._mark_applied(validation, source_root=None)
 
-    def mark_applied(self) -> None:
-        """僅在同步成功後記錄目前已驗證的來源快照。"""
-
-        sources = self._validated_manifest
-        self._validated_manifest = None
-        if sources is None:
-            sources = self._source_manifest()
+    def _mark_applied(
+        self,
+        validation: OwnerDataReport,
+        *,
+        source_root: Path | None,
+    ) -> None:
+        sources = self._validation_sources(validation)
+        current = self._source_manifest(source_root)
+        if current != sources:
+            if source_root is None:
+                raise RuntimeError("AI data sources changed after validation; retry synchronization")
+            raise RuntimeError("materialized AI data snapshot does not match validation")
 
         with self.manual_memory.database.transaction() as connection:
             connection.execute("DELETE FROM ai_data_manifest")
@@ -153,6 +178,34 @@ class OwnerDataService:
                     for path, (content_hash, source_type) in sources.items()
                 ],
             )
+
+    def mark_snapshot_applied(
+        self,
+        validation: OwnerDataReport,
+        source_root: Path,
+    ) -> None:
+        """記錄已由同一 immutable snapshot 完成的同步結果。"""
+
+        self._mark_applied(validation, source_root=source_root)
+
+    @contextmanager
+    def materialize_snapshot(self, validation: OwnerDataReport):
+        """Copy validated bytes to an immutable per-sync source directory."""
+
+        sources = self._validation_sources(validation)
+        with TemporaryDirectory(prefix="discord-bot-ai-sync-") as directory:
+            snapshot = Path(directory)
+            for relative, (expected_hash, _source_type) in sources.items():
+                source = self.root / relative
+                if source.is_symlink() or not source.is_file():
+                    raise RuntimeError("AI data sources changed after validation; retry synchronization")
+                raw = source.read_bytes()
+                if hashlib.sha256(raw).hexdigest() != expected_hash:
+                    raise RuntimeError("AI data sources changed after validation; retry synchronization")
+                target = snapshot / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(raw)
+            yield snapshot
 
     # ── 來源掃描 ──
 
@@ -318,22 +371,26 @@ class OwnerDataService:
 
     # ── 來源 Manifest ──
 
-    def _source_manifest(self) -> dict[str, tuple[str, str]]:
+    def _source_manifest(
+        self,
+        source_root: Path | None = None,
+    ) -> dict[str, tuple[str, str]]:
         """建立目前受支援資料來源的內容雜湊快照。"""
 
         result: dict[str, tuple[str, str]] = {}
+        root = self.root if source_root is None else Path(source_root)
 
-        if not self.root.is_dir():
+        if not root.is_dir():
             return result
 
-        for path in sorted(self.root.rglob("*")):
+        for path in sorted(root.rglob("*")):
             if not path.is_file() or path.is_symlink():
                 continue
 
             if not self._is_supported_text_source(path):
                 continue
 
-            relative = path.relative_to(self.root).as_posix()
+            relative = path.relative_to(root).as_posix()
 
             if relative.startswith("users_memory/"):
                 source_type = "user_memory"
@@ -358,6 +415,17 @@ class OwnerDataService:
             )
 
         return result
+
+    @staticmethod
+    def _validation_sources(
+        validation: OwnerDataReport,
+    ) -> dict[str, tuple[str, str]]:
+        if not validation.valid or not validation._can_apply:
+            raise RuntimeError("mark_applied requires a valid validated snapshot")
+        return {
+            path: (content_hash, source_type)
+            for path, content_hash, source_type in validation._manifest
+        }
 
     def _manifest_diff(
         self,

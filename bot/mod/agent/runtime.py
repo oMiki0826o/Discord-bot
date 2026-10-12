@@ -64,7 +64,17 @@ class AgentRuntime:
         used_model = ""
         force_final = False
         while model_turns < self.settings.max_model_turns:
-            allow_tools = bool(request.capabilities) and tool_calls < self.settings.max_tool_calls and not force_final
+            reserved_final = (
+                bool(request.capabilities)
+                and model_turns == self.settings.max_model_turns - 1
+            )
+            if reserved_final:
+                force_final = True
+            allow_tools = (
+                bool(request.capabilities)
+                and tool_calls < self.settings.max_tool_calls
+                and not force_final
+            )
             declarations = self.registry.declarations(request.capabilities) if allow_tools else ()
             model_turns += 1
             turn = await self.model.generate_turn(request, transcript, declarations, allow_tools=allow_tools)

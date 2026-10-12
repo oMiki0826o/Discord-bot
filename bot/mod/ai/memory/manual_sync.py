@@ -10,10 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import tempfile
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +36,6 @@ class ManualMemorySyncService:
         documents = self._prepare_documents()
         rows = []
         for path, user_id, document in documents:
-            self._atomic_write(path, document)
             rows.extend(self._rows(path, user_id, document))
         with self.database.transaction() as connection:
             connection.execute("DELETE FROM manual_memory_search")
@@ -107,30 +103,24 @@ class ManualMemorySyncService:
             text = f"使用者偏好{key}：{value if not isinstance(value, list) else '、'.join(map(str, value))}"
             memories.append({"key": f"preference.{key}", "category": "preference", "content": text, "importance": 4})
         normalized = []
-        for item in memories:
+        for index, item in enumerate(memories):
             if not isinstance(item, dict) or not isinstance(item.get("content"), str) or not item["content"].strip():
                 raise ValueError("memory content must not be blank")
             key = str(item.get("key") or "general." + hashlib.sha256(item["content"].casefold().encode()).hexdigest()[:16]).casefold()
             importance = item.get("importance", 3)
             if not isinstance(importance, int) or isinstance(importance, bool) or not 1 <= importance <= 5:
                 raise ValueError("importance must be 1..5")
+            category = str(item.get("category") or key.split(".", 1)[0])
+            content = item["content"].strip()
+            stable_identity = json.dumps(
+                [payload["user_id"], index, key, category, content],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
             normalized.append({
-                "id": str(item.get("id") or "mem_" + uuid.uuid4().hex), "key": key,
-                "category": str(item.get("category") or key.split(".", 1)[0]), "content": item["content"].strip(),
+                "id": str(item.get("id") or "manual-" + hashlib.sha256(stable_identity.encode()).hexdigest()[:32]), "key": key,
+                "category": category, "content": content,
                 "importance": importance, "source": "manual", "updated_at": str(item.get("updated_at") or now),
                 "confidence": 1.0, "version": int(item.get("version") or 1),
             })
         return {"user_id": payload["user_id"], "preferences": preferences, "memories": normalized}
-
-    @staticmethod
-    def _atomic_write(path: Path, payload: dict) -> None:
-        fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(name, path)
-        finally:
-            Path(name).unlink(missing_ok=True)

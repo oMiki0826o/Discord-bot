@@ -42,7 +42,16 @@ class McBackupOwnerCog(commands.Cog):
                 state = "running" if await self._coordinator.is_running(server) else "stopped"
             except Exception:
                 state = "unknown"
-            states.append(f"{server.server_id}: {state}")
+            health = self._schedules.health(server.server_id)
+            schedule = ""
+            if health.consecutive_failures:
+                schedule = (
+                    f" schedule_failures={health.consecutive_failures}"
+                    f" last_error={health.last_error}"
+                )
+            elif health.last_success_at is not None:
+                schedule = f" schedule_last_success={health.last_success_at.isoformat()}"
+            states.append(f"{server.server_id}: {state}{schedule}")
         await ctx.send("MC backup status: " + (", ".join(states) if states else "no configured servers"))
 
     @mcbackup_group.command(name="list")

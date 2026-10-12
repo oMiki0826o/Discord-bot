@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "minecraft_bridge",
+  "version": "${version}",
+  "name": "Minecraft Bridge",
+  "description": "DMCC Protocol v1 bridge for a Python Discord Bot gateway.",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "io.miki.dmcc.bridge.BridgeMod"
+    ]
+  },
+  "mixins": [
+    "minecraft-bridge.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "1.21.8",
+    "java": ">=21"
+  }
+}

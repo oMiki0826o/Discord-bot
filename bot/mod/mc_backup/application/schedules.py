@@ -11,11 +11,23 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..domain.models import BackupSchedule, ManagedBackupServer
 from ..repositories.schedules import JsonScheduleRepository
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleHealth:
+    consecutive_failures: int = 0
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    last_error: str | None = None
 
 
 class BackupScheduleService:
@@ -29,11 +41,17 @@ class BackupScheduleService:
         self._coordinator = coordinator
         self._repository = repository
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._health: dict[str, ScheduleHealth] = {}
         self._closed = False
 
     @property
     def active_server_ids(self) -> set[str]:
         return set(self._tasks)
+
+    def health(self, server_id: str) -> ScheduleHealth:
+        """Return the latest observable schedule result for one server."""
+
+        return self._health.get(server_id, ScheduleHealth())
 
     async def start(self) -> None:
         self._closed = False
@@ -67,8 +85,19 @@ class BackupScheduleService:
                 continue
             try:
                 await self._coordinator.create(server)  # type: ignore[attr-defined]
-            except Exception:
+            except Exception as exc:
+                previous = self.health(server_id)
+                self._health[server_id] = ScheduleHealth(
+                    consecutive_failures=previous.consecutive_failures + 1,
+                    last_success_at=previous.last_success_at,
+                    last_failure_at=datetime.now(timezone.utc),
+                    last_error=f"{type(exc).__name__}: {str(exc)[:500]}",
+                )
+                logger.exception("Scheduled backup failed server_id=%s", server_id)
                 continue
+            self._health[server_id] = ScheduleHealth(
+                last_success_at=datetime.now(timezone.utc),
+            )
 
     def _start_worker(self, schedule: BackupSchedule) -> None:
         if schedule.server_id not in self._servers or schedule.server_id in self._tasks:

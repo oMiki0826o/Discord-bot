@@ -32,3 +32,6 @@ docs/superpowers/
 dist/
 .coverage
 htmlcov/
+**/.gradle/
+**/build/
+**/logs/

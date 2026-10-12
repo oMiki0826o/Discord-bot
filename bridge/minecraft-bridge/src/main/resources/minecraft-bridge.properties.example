@@ -1,0 +1,7 @@
+# Unique ID configured in the Bot settings/dmcc.json servers list.
+server_id=survival
+# The Python Discord Bot's DMCC Gateway. Keep it localhost when both run on one host.
+gateway_host=127.0.0.1
+gateway_port=8765
+# Must exactly match the corresponding Bot-side servers[].secret value.
+authentication_secret=replace-with-a-long-random-secret

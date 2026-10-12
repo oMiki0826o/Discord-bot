@@ -38,6 +38,7 @@ _EXCLUDED_DIRECTORY_NAMES = frozenset(
         "data",
         "dist",
         "htmlcov",
+        "logs",
         "tools",
         "venv",
     }
@@ -53,6 +54,24 @@ _EXCLUDED_FILE_NAMES = frozenset(
     }
 )
 _EXCLUDED_SUFFIXES = frozenset({".db", ".log", ".pyc", ".pyo"})
+_ALLOWED_TOP_LEVEL = frozenset({
+    ".env.example",
+    ".github",
+    ".gitignore",
+    "LICENSE",
+    "README.md",
+    "VERSION",
+    "bot",
+    "bridge",
+    "docs",
+    "main.py",
+    "requirements-dev.txt",
+    "requirements-lock.txt",
+    "requirements.txt",
+    "ruff.toml",
+    "settings",
+    "tests",
+})
 
 
 def read_version() -> str:
@@ -67,6 +86,8 @@ def read_version() -> str:
 def should_include(relative: Path) -> bool:
     """判斷工作目錄內的檔案是否允許進入公開發布包。"""
 
+    if not relative.parts or relative.parts[0] not in _ALLOWED_TOP_LEVEL:
+        return False
     if any(part in _EXCLUDED_DIRECTORY_NAMES for part in relative.parts[:-1]):
         return False
     if relative.name in _EXCLUDED_FILE_NAMES:
@@ -82,14 +103,17 @@ def should_include(relative: Path) -> bool:
     return True
 
 
-def release_files() -> tuple[Path, ...]:
+def release_files(project_root: Path = PROJECT_ROOT) -> tuple[Path, ...]:
     """取得排序後的發布檔案清單。"""
 
+    root = project_root.resolve(strict=True)
     return tuple(
         path
-        for path in sorted(PROJECT_ROOT.rglob("*"))
-        if path.is_file()
-        and should_include(path.relative_to(PROJECT_ROOT))
+        for path in sorted(root.rglob("*"))
+        if not path.is_symlink()
+        and path.is_file()
+        and path.resolve(strict=True).is_relative_to(root)
+        and should_include(path.relative_to(root))
     )
 
 

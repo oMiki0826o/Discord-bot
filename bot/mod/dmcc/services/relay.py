@@ -12,6 +12,7 @@ Modification():
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+import logging
 
 from ..events import MinecraftEvent
 
@@ -20,6 +21,7 @@ from ..events import MinecraftEvent
 
 
 RelayHandler = Callable[[MinecraftEvent], Awaitable[None]]
+logger = logging.getLogger(__name__)
 
 
 class RelayService:
@@ -35,7 +37,15 @@ class RelayService:
             self._handlers.append(handler)
 
     async def publish(self, event: MinecraftEvent) -> None:
-        """依註冊順序送出事件，避免隱藏的背景任務與例外。"""
+        """依序送出事件，並隔離個別 Application Handler 的失敗。"""
 
         for handler in tuple(self._handlers):
-            await handler(event)
+            try:
+                await handler(event)
+            except Exception:
+                logger.exception(
+                    "DMCC relay handler failed event=%s server_id=%s handler=%r",
+                    event.type,
+                    event.server_id,
+                    handler,
+                )

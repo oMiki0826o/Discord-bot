@@ -11,7 +11,11 @@ Modification():
 
 from __future__ import annotations
 
-from tools.build_release import PROJECT_ROOT, release_files, should_include
+import hashlib
+from pathlib import Path
+import zipfile
+
+from tools.build_release import PROJECT_ROOT, build_release, release_files, should_include
 
 
 def test_release_filter_excludes_private_runtime_content() -> None:
@@ -23,6 +27,7 @@ def test_release_filter_excludes_private_runtime_content() -> None:
     assert not should_include(PROJECT_ROOT.joinpath(".env.production").relative_to(PROJECT_ROOT))
     assert not should_include(PROJECT_ROOT.joinpath(".superpowers/sdd/task.md").relative_to(PROJECT_ROOT))
     assert not should_include(PROJECT_ROOT.joinpath("docs/superpowers/plans/internal.md").relative_to(PROJECT_ROOT))
+    assert not should_include(PROJECT_ROOT.joinpath("bridge/minecraft-bridge/logs/latest.log.gz").relative_to(PROJECT_ROOT))
     assert not should_include(PROJECT_ROOT.joinpath("tools/build_release.py").relative_to(PROJECT_ROOT))
 
 
@@ -34,3 +39,31 @@ def test_release_filter_keeps_public_project_files() -> None:
     assert "docs/RELEASE.md" in names
     assert "requirements.txt" in names
     assert "requirements-dev.txt" in names
+
+
+def test_release_files_reject_symlinks_and_unknown_top_level_files(tmp_path: Path) -> None:
+    (tmp_path / "bot").mkdir()
+    (tmp_path / "bot" / "app.py").write_text("print('ok')", encoding="utf-8")
+    outside = tmp_path.parent / f"{tmp_path.name}-private.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (tmp_path / "bot" / "linked.py").symlink_to(outside)
+    (tmp_path / "private-notes.txt").write_text("do not publish", encoding="utf-8")
+
+    names = {path.relative_to(tmp_path).as_posix() for path in release_files(tmp_path)}
+
+    assert names == {"bot/app.py"}
+
+
+def test_release_zip_is_reproducible_valid_and_contains_required_files(tmp_path: Path) -> None:
+    first = build_release(tmp_path / "first.zip")
+    second = build_release(tmp_path / "second.zip")
+
+    assert hashlib.sha256(first.read_bytes()).digest() == hashlib.sha256(second.read_bytes()).digest()
+    with zipfile.ZipFile(first) as archive:
+        assert archive.testzip() is None
+        names = set(archive.namelist())
+    prefix = "Discord-Bot-v" + (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    assert f"{prefix}/main.py" in names
+    assert f"{prefix}/README.md" in names
+    assert all("/.env" not in name or name.endswith("/.env.example") for name in names)
+    assert all("/data/" not in name for name in names)

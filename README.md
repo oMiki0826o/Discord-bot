@@ -1,6 +1,6 @@
 # Discord Bot
 
-![Version](https://img.shields.io/badge/version-v0.1.0-blue)
+![Version](https://img.shields.io/badge/version-v0.2.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tech](https://img.shields.io/badge/stack-Python%20%2B%20discord.py-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-orange)
@@ -25,7 +25,7 @@
 
 這是一個以 `discord.py` 開發的模組化 Discord Bot. Core 負責 Discord Client, 設定, 日誌, SQLite 基礎設施與模組生命週期. 伺服器管理, 音樂, 訊息, 工單與 AI 等功能則各自放在 `bot/mod/`, 可以獨立載入, 卸載與維護.
 
-目前版本為 `v0.1.0`, 專案狀態為開發中. 原始碼公開於 [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
+目前版本為 `v0.2.0`, 專案狀態為開發中. 原始碼公開於 [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
 
 ### 功能
 
@@ -135,7 +135,7 @@ $bot stop
 
 A modular Discord Bot built with `discord.py`. Core owns the Discord client, settings, logging, SQLite infrastructure, module lifecycle, and shared interfaces. User-facing features live independently under `bot/mod/` so they can be loaded, unloaded, and maintained without coupling feature logic into startup code.
 
-The current version is `v0.1.0` and the project is under active development. Source code is available at [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
+The current version is `v0.2.0` and the project is under active development. Source code is available at [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
 
 ### Features
 

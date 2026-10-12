@@ -57,7 +57,7 @@ SQLite schema 與 repository 應由使用資料的模組擁有。Core 的 `bot/c
 
 ```bash
 python -m pytest -q
-python -m ruff check bot tests main.py
+python -m ruff check bot tools tests main.py
 python -m compileall -q bot tools tests main.py
 git diff --check
 ```
@@ -92,7 +92,7 @@ Web／URL Context 與模型可用性屬於外部服務能力，不能只靠單�
 
 ## GitHub 推送前檢查
 
-請使用 Git 或 GitHub Desktop 推送, 不要在 GitHub 網頁直接上傳整個工作目錄。`.gitignore` 會排除 `.env`, `data/`, `settings/*.json`, 虛擬環境, cache, `dist/` 與 `tools/`。
+請使用 Git 或 GitHub Desktop 推送, 不要在 GitHub 網頁直接上傳整個工作目錄。`.gitignore` 會排除 `.env`, `data/`, `settings/*.json`, 虛擬環境, cache 與 `dist/`。`tools/` 是 CI 與維護所需的公開原始碼，但正式使用者 ZIP 會排除它。
 
 ```bash
 git add .

@@ -95,3 +95,31 @@ def test_memory_worker_persists_an_accepted_candidate_and_exports_owner_mirror(t
     document = json.loads(output.read_text(encoding="utf-8"))
     assert document["user_id"] == event.user_id
     assert document["memories"][0]["memory_key"] == "reply_language"
+
+
+def test_memory_extraction_retry_is_idempotent_after_memory_side_effect(tmp_path) -> None:
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    events = EventRepository(database)
+    event = events.append(NewEvent(
+        "event", "123456789012345678", "channel", None, "conversation",
+        EventRole.USER, "Please remember I prefer Traditional Chinese.", 100,
+    ))
+    extractor = ProviderMemoryExtractor(
+        provider=_CandidateProvider(),
+        memory_service=MemoryService(
+            database=database,
+            event_repository=events,
+            memory_repository=MemoryRepository(database),
+        ),
+        model_candidates=("test",),
+        mirror=MemoryMirrorService(database, tmp_path / "auto_memory"),
+    )
+
+    asyncio.run(extractor(event))
+    asyncio.run(extractor(event))
+
+    with database.connect() as connection:
+        assert connection.execute("SELECT count(*) FROM memories").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM memory_candidates").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM memory_evidence").fetchone()[0] == 1

@@ -49,6 +49,13 @@ class PromptSourceLoader:
         self._cached = generation
         return generation
 
+    def install(self, sources: PromptSources) -> None:
+        """Atomically publish sources already validated from a sync snapshot."""
+
+        if not isinstance(sources, PromptSources):
+            raise TypeError("sources must be PromptSources")
+        self._cached = sources
+
     def list_personas(self) -> tuple[str, ...]:
         root = self.override_dir / "personas"
         if not root.is_dir():
