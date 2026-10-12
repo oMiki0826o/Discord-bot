@@ -367,6 +367,17 @@ _MIGRATION_14: tuple[str, ...] = (
     VALUES (1, 'idle', '', 0)""",
 )
 
+_MIGRATION_15: tuple[str, ...] = (
+    "ALTER TABLE ai_data_sync_state ADD COLUMN operation_id TEXT NOT NULL DEFAULT ''",
+)
+
+_MIGRATION_16: tuple[str, ...] = (
+    "ALTER TABLE ai_usage ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens >= 0)",
+    "ALTER TABLE ai_usage ADD COLUMN thinking_tokens INTEGER NOT NULL DEFAULT 0 CHECK (thinking_tokens >= 0)",
+    "ALTER TABLE ai_usage ADD COLUMN estimated INTEGER NOT NULL DEFAULT 1 CHECK (estimated IN (0, 1))",
+    "UPDATE ai_usage SET total_tokens = input_tokens + output_tokens WHERE total_tokens = 0",
+)
+
 
 # ── Database ──────────────────────
 
@@ -534,6 +545,20 @@ class AiDatabase:
                 connection.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                     (14, int(time.time())),
+                )
+            if 15 not in applied:
+                for statement in _MIGRATION_15:
+                    connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (15, int(time.time())),
+                )
+            if 16 not in applied:
+                for statement in _MIGRATION_16:
+                    connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (16, int(time.time())),
                 )
 
     @staticmethod

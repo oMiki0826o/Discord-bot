@@ -182,21 +182,27 @@ class OwnerDataService:
 
         self._mark_applied(validation, source_root=source_root)
 
-    def set_sync_state(self, status: str, detail: str = "") -> None:
-        if status not in {"idle", "staging", "applying", "completed", "failed"}:
+    def set_sync_state(self, status: str, detail: str = "", *, operation_id: str = "") -> None:
+        if status not in {"idle", "staging", "applying", "completed", "failed", "cancelled"}:
             raise ValueError("invalid AI data sync status")
         with self.manual_memory.database.transaction() as connection:
             connection.execute(
-                "UPDATE ai_data_sync_state SET status = ?, detail = ?, updated_at = ? WHERE singleton = 1",
-                (status, detail[:500], int(time.time())),
+                "UPDATE ai_data_sync_state SET status = ?, detail = ?, operation_id = ?, updated_at = ? "
+                "WHERE singleton = 1",
+                (status, detail[:500], operation_id[:64], int(time.time())),
             )
 
     def sync_state(self) -> dict[str, str | int]:
         with self.manual_memory.database.connect() as connection:
             row = connection.execute(
-                "SELECT status, detail, updated_at FROM ai_data_sync_state WHERE singleton = 1"
+                "SELECT status, detail, operation_id, updated_at FROM ai_data_sync_state WHERE singleton = 1"
             ).fetchone()
-        return {"status": str(row["status"]), "detail": str(row["detail"]), "updated_at": int(row["updated_at"])}
+        return {
+            "status": str(row["status"]),
+            "detail": str(row["detail"]),
+            "operation_id": str(row["operation_id"]),
+            "updated_at": int(row["updated_at"]),
+        }
 
     @contextmanager
     def materialize_snapshot(self, validation: OwnerDataReport):

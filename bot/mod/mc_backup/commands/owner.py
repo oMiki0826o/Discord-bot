@@ -51,6 +51,8 @@ class McBackupOwnerCog(commands.Cog):
                 )
             elif health.last_success_at is not None:
                 schedule = f" schedule_last_success={health.last_success_at.isoformat()}"
+            if health.persistence_error:
+                schedule += f" health_persistence_error={health.persistence_error}"
             states.append(f"{server.server_id}: {state}{schedule}")
         await ctx.send("MC backup status: " + (", ".join(states) if states else "no configured servers"))
 

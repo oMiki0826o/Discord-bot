@@ -17,10 +17,11 @@ public record BridgeSettings(
     int connectTimeoutMillis,
     int authenticationTimeoutMillis,
     int readTimeoutMillis,
-    long pendingRequestTtlMillis
+    long pendingRequestTtlMillis,
+    int gracefulShutdownTimeoutMillis
 ) {
     public BridgeSettings(String serverId, String gatewayHost, int gatewayPort, String authenticationSecret) {
-        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000);
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500);
     }
 
     /** Parses a standard Java properties stream without doing filesystem I/O. */
@@ -51,7 +52,8 @@ public record BridgeSettings(
             positiveInt(properties, "connect_timeout_millis", 5_000),
             positiveInt(properties, "authentication_timeout_millis", 15_000),
             positiveInt(properties, "read_timeout_millis", 60_000),
-            positiveInt(properties, "pending_request_ttl_millis", 120_000)
+            positiveInt(properties, "pending_request_ttl_millis", 120_000),
+            positiveInt(properties, "graceful_shutdown_timeout_millis", 1_500)
         );
     }
 

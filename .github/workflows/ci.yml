@@ -71,4 +71,4 @@ jobs:
         run: ./gradlew --no-daemon test remapJar
       - name: Verify published bridge artifact
         working-directory: bridge/minecraft-bridge
-        run: cmp build/libs/minecraft-bridge-0.2.1.jar ../java_bridge.jar
+        run: cmp build/libs/minecraft-bridge-0.2.2.jar ../java_bridge.jar

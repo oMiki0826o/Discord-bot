@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -55,6 +56,7 @@ public final class BridgeMod implements ModInitializer {
     private final Map<String, PendingPlayer> pendingLinkPlayers = new ConcurrentHashMap<>();
     private final Map<String, PendingPlayer> pendingUnlinkPlayers = new ConcurrentHashMap<>();
     private volatile long pendingRequestTtlMillis = 120_000;
+    private volatile int gracefulShutdownTimeoutMillis = 1_500;
     private final ScheduledExecutorService statsWorker = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "dmcc-bridge-stats");
         thread.setDaemon(true);
@@ -73,8 +75,10 @@ public final class BridgeMod implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> handlePlayerDisconnect(handler.getPlayer()));
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
             literal("dmcc")
-                .then(literal("link").executes(context -> requestLink(context.getSource().getEntity())))
-                .then(literal("unlink").executes(context -> requestUnlink(context.getSource().getEntity())))
+                .then(literal("link").executes(context -> requestLink(
+                    context.getSource().getServer(), context.getSource().getEntity())))
+                .then(literal("unlink").executes(context -> requestUnlink(
+                    context.getSource().getServer(), context.getSource().getEntity())))
         ));
         LOGGER.info("Minecraft Bridge initialized; waiting for server lifecycle.");
     }
@@ -107,6 +111,7 @@ public final class BridgeMod implements ModInitializer {
             BridgeSettings settings = BridgeSettings.fromReader(reader);
             serverId = settings.serverId();
             pendingRequestTtlMillis = settings.pendingRequestTtlMillis();
+            gracefulShutdownTimeoutMillis = settings.gracefulShutdownTimeoutMillis();
             runtime = new BridgeRuntime(
                 () -> new BridgeClient(settings, (client, envelope) -> handleGatewayPacket(server, client, envelope)),
                 1_000,
@@ -223,7 +228,7 @@ public final class BridgeMod implements ModInitializer {
     }
 
 
-    private int requestLink(net.minecraft.world.entity.Entity entity) {
+    private int requestLink(MinecraftServer server, net.minecraft.world.entity.Entity entity) {
         if (!(entity instanceof ServerPlayer player)) {
             return 0;
         }
@@ -238,7 +243,9 @@ public final class BridgeMod implements ModInitializer {
         active.sendRequired(new ProtocolEnvelope(1, "link_request", serverId, requestId,
             Map.of("minecraft_uuid", player.getStringUUID(), "minecraft_name", player.getName().getString())))
             .whenComplete((ignored, failure) -> {
-                if (failure != null) pendingLinkPlayers.remove(requestId);
+                if (failure != null && pendingLinkPlayers.remove(requestId) != null) {
+                    notifyPlayerFailure(server, player.getUUID(), "DMCC link request could not be sent.");
+                }
             });
         player.sendSystemMessage(Component.literal("DMCC: requesting a link code..."));
         return 1;
@@ -257,7 +264,7 @@ public final class BridgeMod implements ModInitializer {
         });
     }
 
-    private int requestUnlink(net.minecraft.world.entity.Entity entity) {
+    private int requestUnlink(MinecraftServer server, net.minecraft.world.entity.Entity entity) {
         if (!(entity instanceof ServerPlayer player)) return 0;
         BridgeRuntime active = runtime;
         if (active == null) {
@@ -270,7 +277,9 @@ public final class BridgeMod implements ModInitializer {
         active.sendRequired(new ProtocolEnvelope(1, "unlink_request", serverId, requestId,
             Map.of("minecraft_uuid", player.getStringUUID())))
             .whenComplete((ignored, failure) -> {
-                if (failure != null) pendingUnlinkPlayers.remove(requestId);
+                if (failure != null && pendingUnlinkPlayers.remove(requestId) != null) {
+                    notifyPlayerFailure(server, player.getUUID(), "DMCC unlink request could not be sent.");
+                }
             });
         return 1;
     }
@@ -344,12 +353,19 @@ public final class BridgeMod implements ModInitializer {
     private void handleServerInfoRequest(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
         if (envelope.requestId() == null) return;
         server.execute(() -> {
+            BridgeRuntime active = runtime;
+            if (active == null) return;
+            Throwable senderFailure = active.lastSenderFailure();
             sendRequired(new ProtocolEnvelope(1, "server_info_response", envelope.serverId(), envelope.requestId(), Map.of(
                     "online_players", server.getPlayerCount(),
                     "max_players", server.getMaxPlayers(),
                     "player_names", server.getPlayerList().getPlayers().stream().map(player -> player.getName().getString()).toList(),
                     "minecraft_version", server.getServerVersion(),
-                    "motd", server.getMotd()
+                    "motd", server.getMotd(),
+                    "dmcc_required_queue", active.requiredQueueDepth(),
+                    "dmcc_event_queue", active.eventQueueDepth(),
+                    "dmcc_dropped_events", active.droppedEvents(),
+                    "dmcc_last_sender_failure", senderFailure == null ? "" : senderFailure.getClass().getSimpleName()
                 )), "server info response");
         });
     }
@@ -372,14 +388,17 @@ public final class BridgeMod implements ModInitializer {
     private void handleLogRequest(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
         if (envelope.requestId() == null || !"latest.log".equals(envelope.data().get("name"))) return;
         Path logPath = server.getServerDirectory().resolve("logs").resolve("latest.log").normalize();
-        try {
-            String content = Files.exists(logPath) ? Files.readString(logPath) : "";
-            if (content.length() > 32_768) content = content.substring(content.length() - 32_768);
-            sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(), Map.of("content", content)), "log response");
-        } catch (IOException exception) {
-            sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
-                Map.of("error", "latest.log is unavailable")), "log error response");
-        }
+        statsWorker.execute(() -> {
+            try {
+                String content = LogTailReader.read(logPath, 131_072);
+                if (content.length() > 32_768) content = content.substring(content.length() - 32_768);
+                sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
+                    Map.of("content", content)), "log response");
+            } catch (IOException exception) {
+                sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
+                    Map.of("error", "latest.log is unavailable")), "log error response");
+            }
+        });
     }
 
     /**
@@ -467,8 +486,12 @@ public final class BridgeMod implements ModInitializer {
 
     private void stopRuntime() {
         if (runtime != null) {
-            sendServerStopping();
-            runtime.close();
+            ProtocolEnvelope stopping = new ProtocolEnvelope(
+                1, "server_stopping", serverId, null, Map.of()
+            );
+            if (!runtime.closeGracefully(stopping, Duration.ofMillis(gracefulShutdownTimeoutMillis))) {
+                LOGGER.warn("DMCC server_stopping was not delivered before shutdown");
+            }
             runtime = null;
         }
         pendingLinkPlayers.clear();
@@ -487,11 +510,6 @@ public final class BridgeMod implements ModInitializer {
             });
     }
 
-    private void sendServerStopping() {
-        if (serverId == null) return;
-        runtime.publishEvent(new ProtocolEnvelope(1, "server_stopping", serverId, null, Map.of()));
-    }
-
     private void sendRequired(ProtocolEnvelope envelope, String description) {
         BridgeRuntime active = runtime;
         if (active == null) return;
@@ -505,5 +523,12 @@ public final class BridgeMod implements ModInitializer {
         pendingLinkPlayers.values().removeIf(item -> item.playerId().equals(playerId));
         pendingUnlinkPlayers.values().removeIf(item -> item.playerId().equals(playerId));
         relayPlayerEvent("player_quit", player);
+    }
+
+    private static void notifyPlayerFailure(MinecraftServer server, UUID playerId, String message) {
+        server.execute(() -> {
+            ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+            if (player != null) player.sendSystemMessage(Component.literal(message));
+        });
     }
 }

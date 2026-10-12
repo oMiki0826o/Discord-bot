@@ -45,3 +45,5 @@ DMCC_SURVIVAL_SECRET=請換成一段長且隨機的密碼
 ```
 
 Bridge 需要 Fabric API，設定位置為 `<Minecraft資料夾>/config/minecraft-bridge.properties`；`server_id`、port 和 `authentication_secret` 必須與上方設定一致。啟動後可用 `$dmcc server-status survival` 查詢，並由 Owner 使用 `$dmcc power survival start|stop|restart` 控制。不同主機請勿把 gateway 改成公開 IP。
+
+Bridge 將必要請求回覆與一般玩家事件分開排隊。一般事件滿載時可以丟棄並累計診斷數字，必要回覆保有獨立容量；關服時會在有限期限內送出 `server_stopping`，不會無期限阻塞 Minecraft 關閉流程。`latest.log` 僅在背景讀取有限檔尾。

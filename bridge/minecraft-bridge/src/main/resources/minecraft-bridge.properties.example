@@ -9,3 +9,4 @@ connect_timeout_millis=5000
 authentication_timeout_millis=15000
 read_timeout_millis=60000
 pending_request_ttl_millis=120000
+graceful_shutdown_timeout_millis=1500

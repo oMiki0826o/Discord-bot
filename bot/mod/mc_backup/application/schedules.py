@@ -31,6 +31,7 @@ class ScheduleHealth:
     last_error: str | None = None
     failure_fingerprint: str | None = None
     last_alert_at: datetime | None = None
+    persistence_error: str | None = None
 
 
 class BackupScheduleService:
@@ -139,29 +140,42 @@ class BackupScheduleService:
     def _set_health(self, server_id: str, health: ScheduleHealth) -> None:
         self._health[server_id] = health
         if self._health_repository is not None:
-            self._health_repository.set(server_id, {
-                "consecutive_failures": health.consecutive_failures,
-                "last_success_at": encode_datetime(health.last_success_at),
-                "last_failure_at": encode_datetime(health.last_failure_at),
-                "last_error": health.last_error,
-                "failure_fingerprint": health.failure_fingerprint,
-                "last_alert_at": encode_datetime(health.last_alert_at),
-            })
+            try:
+                self._health_repository.set(server_id, {
+                    "consecutive_failures": health.consecutive_failures,
+                    "last_success_at": encode_datetime(health.last_success_at),
+                    "last_failure_at": encode_datetime(health.last_failure_at),
+                    "last_error": health.last_error,
+                    "failure_fingerprint": health.failure_fingerprint,
+                    "last_alert_at": encode_datetime(health.last_alert_at),
+                    "persistence_error": None,
+                })
+            except Exception as exc:
+                self._health[server_id] = replace(
+                    health,
+                    persistence_error=f"{type(exc).__name__}: {str(exc)[:300]}",
+                )
+                logger.exception("Scheduled backup health persistence failed server_id=%s", server_id)
 
     def _load_health(self) -> dict[str, ScheduleHealth]:
         if self._health_repository is None:
             return {}
-        return {
-            server_id: ScheduleHealth(
-                consecutive_failures=int(item.get("consecutive_failures", 0)),
-                last_success_at=decode_datetime(item.get("last_success_at")),
-                last_failure_at=decode_datetime(item.get("last_failure_at")),
-                last_error=None if item.get("last_error") is None else str(item["last_error"]),
-                failure_fingerprint=None if item.get("failure_fingerprint") is None else str(item["failure_fingerprint"]),
-                last_alert_at=decode_datetime(item.get("last_alert_at")),
-            )
-            for server_id, item in self._health_repository.all().items()
-        }
+        try:
+            return {
+                server_id: ScheduleHealth(
+                    consecutive_failures=int(item.get("consecutive_failures", 0)),
+                    last_success_at=decode_datetime(item.get("last_success_at")),
+                    last_failure_at=decode_datetime(item.get("last_failure_at")),
+                    last_error=None if item.get("last_error") is None else str(item["last_error"]),
+                    failure_fingerprint=None if item.get("failure_fingerprint") is None else str(item["failure_fingerprint"]),
+                    last_alert_at=decode_datetime(item.get("last_alert_at")),
+                    persistence_error=None if item.get("persistence_error") is None else str(item["persistence_error"]),
+                )
+                for server_id, item in self._health_repository.all().items()
+            }
+        except Exception:
+            logger.exception("Scheduled backup health could not be loaded; starting with in-memory state")
+            return {}
 
     async def _worker(self, schedule: BackupSchedule) -> None:
         try:
@@ -169,7 +183,10 @@ class BackupScheduleService:
                 await asyncio.sleep(self._seconds_until(schedule))
                 if self._closed:
                     return
-                await self.run_due([schedule.server_id])
+                try:
+                    await self.run_due([schedule.server_id])
+                except Exception:
+                    logger.exception("Scheduled backup iteration failed server_id=%s", schedule.server_id)
         except asyncio.CancelledError:
             raise
 

@@ -74,8 +74,12 @@ def _token_usage(response: Any) -> TokenUsage | None:
     metadata = _read(response, "usage_metadata")
     if metadata is None:
         return None
-    input_tokens = int(_read(metadata, "prompt_token_count", 0) or 0)
-    output_tokens = int(_read(metadata, "candidates_token_count", 0) or 0)
+    raw_input = _read(metadata, "prompt_token_count")
+    raw_output = _read(metadata, "candidates_token_count")
+    if raw_input is None or raw_output is None:
+        return None
+    input_tokens = int(raw_input or 0)
+    output_tokens = int(raw_output or 0)
     thinking_tokens = int(_read(metadata, "thoughts_token_count", 0) or 0)
     total_tokens = int(_read(metadata, "total_token_count", input_tokens + output_tokens + thinking_tokens) or 0)
     return TokenUsage(input_tokens, output_tokens, total_tokens, thinking_tokens)

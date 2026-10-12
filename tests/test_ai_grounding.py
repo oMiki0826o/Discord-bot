@@ -66,3 +66,7 @@ def test_gemini_usage_metadata_maps_to_provider_neutral_tokens() -> None:
     assert usage is not None
     assert (usage.input_tokens, usage.output_tokens, usage.thinking_tokens, usage.total_tokens) == (11, 7, 3, 21)
     assert usage.estimated is False
+
+
+def test_incomplete_gemini_usage_metadata_falls_back_to_estimation() -> None:
+    assert _token_usage(Node(usage_metadata=Node(total_token_count=9))) is None

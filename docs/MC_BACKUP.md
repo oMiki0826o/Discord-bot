@@ -31,3 +31,5 @@ mkdir -p /srv/minecraft-backups/survival
 ```
 
 `server_dir`、`backup_dir` 都必須是已存在的絕對路徑，且備份目錄不能位於伺服器目錄中。以 Owner 身分先執行 `$mcbackup status`、`$mcbackup create`，確認 archive 可建立；再對測試世界完成一次 restore，才啟用排程。備份並不是異地備援，請另外同步 `/srv/minecraft-backups/` 到其他磁碟或主機。
+
+排程健康狀態以記憶體狀態維持執行，並以 atomic JSON 做 best-effort 持久化。即使磁碟已滿或健康檔不可寫，排程 worker 仍會繼續、記錄錯誤並嘗試通知 Owner；`$mcbackup status` 會顯示健康狀態持久化錯誤。

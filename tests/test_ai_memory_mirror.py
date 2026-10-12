@@ -330,6 +330,17 @@ def test_schema_v13_upgrades_legacy_memory_status_without_losing_rows(tmp_path) 
             created_at INTEGER NOT NULL,
             PRIMARY KEY (memory_id, event_id, candidate_id, relation)
         );
+        CREATE TABLE ai_usage (
+            usage_id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        INSERT INTO ai_usage (
+            user_id, model, input_tokens, output_tokens, created_at
+        ) VALUES ('user', 'legacy', 5, 3, 1);
         INSERT INTO memories VALUES (
             'mem-1', '123456789012345678', 'global', '123456789012345678',
             'preference', 'drink', '"tea"', 1.0, 4, 'active', 1, 1, 1, NULL, NULL
@@ -355,4 +366,8 @@ def test_schema_v13_upgrades_legacy_memory_status_without_losing_rows(tmp_path) 
         ).fetchone()[0] == "retracted"
         assert connection.execute(
             "SELECT max(version) FROM schema_migrations"
-        ).fetchone()[0] == 14
+        ).fetchone()[0] == 16
+        usage = connection.execute(
+            "SELECT total_tokens, thinking_tokens, estimated FROM ai_usage"
+        ).fetchone()
+        assert tuple(usage) == (8, 0, 1)

@@ -2,6 +2,15 @@
 
 本專案以 Git 推送可追蹤檔案到公開 GitHub repository. 不要使用 GitHub 網頁直接拖曳整個工作目錄, 因為那樣不會套用 `.gitignore`.
 
+## v0.2.2 — Failure Isolation & Lifecycle Safety
+
+- Bridge 必要回覆與一般事件使用獨立有界佇列，單一封包錯誤不會終止 sender。
+- Minecraft 關閉時限時送出 `server_stopping`，並明確結束所有 pending Future。
+- Link／Unlink 傳送失敗會通知玩家；大型日誌只在背景讀取有限檔尾。
+- Backup 健康狀態持久化失敗不會停止排程或阻止 Owner 告警。
+- AI Owner data sync 加入互斥、取消狀態、安全重試與成功後才清除舊索引。
+- AI usage 完整保存 total、thinking 與 estimated token metadata。
+
 ## v0.2.1 — Runtime Safety & Data Consistency
 
 - Knowledge 驗證、快照與索引共用完整文字來源格式。

@@ -16,6 +16,7 @@ import pytest
 from bot.mod.ai.database import AiDatabase
 from bot.mod.ai.guard import GuardRejectedError, RequestGuard
 from bot.mod.ai.operations import AiOperations
+from bot.mod.ai.provider.models import TokenUsage
 
 
 def test_banned_user_is_rejected_by_request_guard(tmp_path) -> None:
@@ -107,6 +108,26 @@ def test_usage_telemetry_is_aggregated_without_storing_prompt_content(tmp_path) 
     assert snapshot["token_estimate"] > 0
     assert snapshot["provider_errors"] == 1
     assert "private prompt" not in str(snapshot)
+
+
+def test_provider_usage_persists_complete_actual_and_estimated_fields(tmp_path) -> None:
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    operations = AiOperations(database, now=lambda: 100)
+    operations.record_provider_usage("user-a", "gemini", TokenUsage(11, 7, 21, 3))
+    operations.record_provider_usage("user-a", "stream", TokenUsage(5, 2, 7, estimated=True))
+
+    with database.connect() as connection:
+        rows = connection.execute(
+            "SELECT input_tokens, output_tokens, total_tokens, thinking_tokens, estimated "
+            "FROM ai_usage ORDER BY usage_id"
+        ).fetchall()
+
+    assert tuple(rows[0]) == (11, 7, 21, 3, 0)
+    assert tuple(rows[1]) == (5, 2, 7, 0, 1)
+    snapshot = operations.dashboard_snapshot(hours=24)
+    assert snapshot["total_tokens"] == 28
+    assert snapshot["estimated_tokens"] == 7
 
 
 

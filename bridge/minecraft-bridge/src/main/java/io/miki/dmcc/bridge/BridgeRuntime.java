@@ -1,13 +1,17 @@
 package io.miki.dmcc.bridge;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -16,6 +20,8 @@ import org.slf4j.LoggerFactory;
 /** Runs blocking Bridge connection work away from Minecraft's server thread. */
 public final class BridgeRuntime implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger("minecraft_bridge/runtime");
+    private static final int REQUIRED_QUEUE_CAPACITY = 64;
+    private static final int EVENT_QUEUE_CAPACITY = 256;
     private final Supplier<BridgeConnection> connectionFactory;
     private final long initialDelayMillis;
     private final long maximumDelayMillis;
@@ -30,11 +36,15 @@ public final class BridgeRuntime implements AutoCloseable {
         thread.setDaemon(true);
         return thread;
     });
-    private final BlockingQueue<Outbound> outbound = new ArrayBlockingQueue<>(256);
+    private final BlockingQueue<Outbound> requiredOutbound;
+    private final BlockingQueue<Outbound> eventOutbound;
     private final AtomicLong droppedEvents = new AtomicLong();
+    private final AtomicBoolean acceptingEvents = new AtomicBoolean();
+    private final AtomicBoolean closed = new AtomicBoolean();
     private volatile boolean running;
     private volatile BridgeConnection connection;
     private volatile Throwable lastFailure;
+    private volatile Throwable lastSenderFailure;
 
     public BridgeRuntime(Supplier<BridgeConnection> connectionFactory, long initialDelayMillis, long maximumDelayMillis) {
         this(connectionFactory, initialDelayMillis, maximumDelayMillis, () -> { });
@@ -46,15 +56,30 @@ public final class BridgeRuntime implements AutoCloseable {
         long maximumDelayMillis,
         Runnable connectedCallback
     ) {
+        this(connectionFactory, initialDelayMillis, maximumDelayMillis, connectedCallback,
+            REQUIRED_QUEUE_CAPACITY, EVENT_QUEUE_CAPACITY);
+    }
+
+    BridgeRuntime(
+        Supplier<BridgeConnection> connectionFactory,
+        long initialDelayMillis,
+        long maximumDelayMillis,
+        Runnable connectedCallback,
+        int requiredCapacity,
+        int eventCapacity
+    ) {
         this.connectionFactory = connectionFactory;
         this.initialDelayMillis = initialDelayMillis;
         this.maximumDelayMillis = maximumDelayMillis;
         this.connectedCallback = connectedCallback;
+        this.requiredOutbound = new ArrayBlockingQueue<>(requiredCapacity);
+        this.eventOutbound = new ArrayBlockingQueue<>(eventCapacity);
     }
 
     public void start() {
         if (running) return;
         running = true;
+        acceptingEvents.set(true);
         worker.execute(this::run);
         sender.execute(this::sendLoop);
     }
@@ -65,8 +90,8 @@ public final class BridgeRuntime implements AutoCloseable {
 
     /** Enqueue a best-effort Minecraft event without blocking the server thread. */
     public boolean publishEvent(ProtocolEnvelope envelope) {
-        if (!running) return false;
-        boolean accepted = outbound.offer(new Outbound(envelope, null));
+        if (!running || !acceptingEvents.get()) return false;
+        boolean accepted = eventOutbound.offer(new Outbound(envelope, null));
         if (!accepted) droppedEvents.incrementAndGet();
         return accepted;
     }
@@ -74,7 +99,7 @@ public final class BridgeRuntime implements AutoCloseable {
     /** Enqueue a response whose caller needs an explicit success or failure signal. */
     public CompletableFuture<Void> sendRequired(ProtocolEnvelope envelope) {
         CompletableFuture<Void> result = new CompletableFuture<>();
-        if (!running || !outbound.offer(new Outbound(envelope, result))) {
+        if (!running || !requiredOutbound.offer(new Outbound(envelope, result))) {
             result.completeExceptionally(new RejectedExecutionException("DMCC outbound queue is unavailable"));
         }
         return result;
@@ -82,6 +107,26 @@ public final class BridgeRuntime implements AutoCloseable {
 
     public long droppedEvents() {
         return droppedEvents.get();
+    }
+
+    public int requiredQueueDepth() {
+        return requiredOutbound.size();
+    }
+
+    public int eventQueueDepth() {
+        return eventOutbound.size();
+    }
+
+    public int requiredQueueCapacity() {
+        return requiredOutbound.size() + requiredOutbound.remainingCapacity();
+    }
+
+    public int eventQueueCapacity() {
+        return eventOutbound.size() + eventOutbound.remainingCapacity();
+    }
+
+    public Throwable lastSenderFailure() {
+        return lastSenderFailure;
     }
 
     /** Sends a packet only while the current Bridge TCP client is authenticated. */
@@ -133,10 +178,11 @@ public final class BridgeRuntime implements AutoCloseable {
     }
 
     private void sendLoop() {
-        while (running || !outbound.isEmpty()) {
+        while (running || !requiredOutbound.isEmpty() || !eventOutbound.isEmpty()) {
             Outbound item;
             try {
-                item = outbound.poll(200, TimeUnit.MILLISECONDS);
+                item = requiredOutbound.poll();
+                if (item == null) item = eventOutbound.poll(100, TimeUnit.MILLISECONDS);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 return;
@@ -145,30 +191,65 @@ public final class BridgeRuntime implements AutoCloseable {
             try {
                 send(item.envelope());
                 if (item.result() != null) item.result().complete(null);
-            } catch (IOException exception) {
+            } catch (Exception exception) {
+                lastSenderFailure = exception;
                 if (item.result() != null) item.result().completeExceptionally(exception);
-                else lastFailure = exception;
+                else droppedEvents.incrementAndGet();
             }
         }
     }
 
+    /** Flush one required lifecycle packet within a bounded deadline, then close. */
+    public boolean closeGracefully(ProtocolEnvelope finalEnvelope, Duration timeout) {
+        if (timeout.isNegative() || timeout.isZero()) {
+            throw new IllegalArgumentException("graceful shutdown timeout must be positive");
+        }
+        acceptingEvents.set(false);
+        CompletableFuture<Void> sent = sendRequired(finalEnvelope);
+        boolean delivered = false;
+        try {
+            sent.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            delivered = true;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            lastSenderFailure = exception;
+        } catch (ExecutionException | TimeoutException exception) {
+            lastSenderFailure = exception;
+        } finally {
+            close();
+        }
+        return delivered;
+    }
+
     @Override
     public void close() {
+        if (!closed.compareAndSet(false, true)) return;
+        acceptingEvents.set(false);
         running = false;
         BridgeConnection active = connection;
         if (active != null) active.close();
         worker.shutdownNow();
         sender.shutdownNow();
         IOException closed = new IOException("DMCC Bridge runtime is closed");
+        failPending(requiredOutbound, closed);
+        eventOutbound.clear();
+        awaitTermination(worker, "connection");
+        awaitTermination(sender, "sender");
+    }
+
+    private static void failPending(BlockingQueue<Outbound> queue, IOException failure) {
         Outbound pending;
-        while ((pending = outbound.poll()) != null) {
-            if (pending.result() != null) pending.result().completeExceptionally(closed);
+        while ((pending = queue.poll()) != null) {
+            if (pending.result() != null) pending.result().completeExceptionally(failure);
         }
+    }
+
+    private static void awaitTermination(ExecutorService executor, String name) {
         try {
-            worker.awaitTermination(2, TimeUnit.SECONDS);
+            executor.awaitTermination(2, TimeUnit.SECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            LOGGER.debug("Interrupted while waiting for DMCC Bridge worker shutdown", exception);
+            LOGGER.debug("Interrupted while waiting for DMCC Bridge {} worker shutdown", name, exception);
         }
     }
 

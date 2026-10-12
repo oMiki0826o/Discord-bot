@@ -30,7 +30,7 @@ final class BridgeClientTest {
                 }
             });
             BridgeSettings settings = new BridgeSettings(
-                "survival", "127.0.0.1", server.getLocalPort(), "secret", 500, 50, 60_000, 120_000
+                "survival", "127.0.0.1", server.getLocalPort(), "secret", 500, 50, 60_000, 120_000, 1_500
             );
             BridgeClient client = new BridgeClient(settings);
             try {

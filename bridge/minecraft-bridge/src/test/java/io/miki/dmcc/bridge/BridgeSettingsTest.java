@@ -21,6 +21,7 @@ final class BridgeSettingsTest {
         assertEquals("127.0.0.1", settings.gatewayHost());
         assertEquals(8765, settings.gatewayPort());
         assertEquals("shared-secret", settings.authenticationSecret());
+        assertEquals(1_500, settings.gracefulShutdownTimeoutMillis());
     }
 
     @Test

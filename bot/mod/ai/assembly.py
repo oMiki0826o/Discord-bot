@@ -15,11 +15,13 @@ Modification():
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from collections.abc import Awaitable, Callable
 import logging
+import uuid
 
 from bot.config import OWNER_ID
 
@@ -90,6 +92,7 @@ class AiModule:
     watcher: MemoryMirrorWatcher | None = None
     _mirror_prepared: bool = False
     _closed: bool = False
+    _sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def start(self) -> None:
         if self._closed:
@@ -115,13 +118,13 @@ class AiModule:
         status["owner_blocks"] = self.mirror.repository.owner_block_count()
         return status
 
-    async def rebuild_knowledge(self, source_dir: Path | None = None) -> int:
+    async def _upsert_knowledge(self, source_dir: Path | None = None) -> tuple[int, set[str]]:
         import time
 
         count = 0
         knowledge_dir = self.knowledge_dir if source_dir is None else Path(source_dir)
         if not knowledge_dir.is_dir():
-            return 0
+            return 0, set()
         source_ids: set[str] = set()
         reader = KnowledgeSourceReader(knowledge_dir)
         for path in sorted(knowledge_dir.rglob("*")):
@@ -135,36 +138,54 @@ class AiModule:
             await self.retrieval.index_document(document, now=int(time.time()))
             source_ids.add(relative)
             count += 1
+        return count, source_ids
+
+    async def rebuild_knowledge(self, source_dir: Path | None = None) -> int:
+        count, source_ids = await self._upsert_knowledge(source_dir)
         self.knowledge.remove_sources_not_in(source_ids)
         return count
 
     async def sync_owner_data(self) -> tuple[int, int]:
         """Apply manual-memory source data and rebuild its dependent knowledge index."""
-        self.owner_data.set_sync_state("staging")
+        operation_id = uuid.uuid4().hex
+        async with self._sync_lock:
+            self._record_sync_state("staging", operation_id=operation_id)
+            try:
+                validation = self.owner_data.validate()
+                if not validation.valid:
+                    raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
+                with self.owner_data.materialize_snapshot(validation) as snapshot:
+                    snapshot_manual = ManualMemorySyncService(
+                        self.manual_memory.database,
+                        snapshot / "users_memory",
+                    )
+                    snapshot_prompts = PromptSourceLoader(
+                        resource_dir=self.prompts.resource_dir,
+                        override_dir=snapshot / "prompt",
+                    )
+                    prompt_sources = snapshot_prompts.load()
+                    self._record_sync_state("applying", operation_id=operation_id)
+                    records = snapshot_manual.sync().records
+                    documents, source_ids = await self._upsert_knowledge(snapshot / "knowledge")
+                    self.knowledge.remove_sources_not_in(source_ids)
+                    self.owner_data.mark_snapshot_applied(validation, snapshot)
+                    self.prompts.install(prompt_sources)
+                self._record_sync_state("completed", operation_id=operation_id)
+                return records, documents
+            except asyncio.CancelledError:
+                self._record_sync_state("cancelled", "synchronization cancelled", operation_id=operation_id)
+                raise
+            except Exception as exc:
+                self._record_sync_state(
+                    "failed", f"{type(exc).__name__}: {exc}", operation_id=operation_id
+                )
+                raise
+
+    def _record_sync_state(self, status: str, detail: str = "", *, operation_id: str) -> None:
         try:
-            validation = self.owner_data.validate()
-            if not validation.valid:
-                raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
-            with self.owner_data.materialize_snapshot(validation) as snapshot:
-                snapshot_manual = ManualMemorySyncService(
-                    self.manual_memory.database,
-                    snapshot / "users_memory",
-                )
-                snapshot_prompts = PromptSourceLoader(
-                    resource_dir=self.prompts.resource_dir,
-                    override_dir=snapshot / "prompt",
-                )
-                prompt_sources = snapshot_prompts.load()
-                self.owner_data.set_sync_state("applying")
-                records = snapshot_manual.sync().records
-                documents = await self.rebuild_knowledge(snapshot / "knowledge")
-                self.owner_data.mark_snapshot_applied(validation, snapshot)
-                self.prompts.install(prompt_sources)
-            self.owner_data.set_sync_state("completed")
-            return records, documents
-        except Exception as exc:
-            self.owner_data.set_sync_state("failed", f"{type(exc).__name__}: {exc}")
-            raise
+            self.owner_data.set_sync_state(status, detail, operation_id=operation_id)
+        except Exception:
+            logger.warning("AI data sync state persistence failed status=%s", status, exc_info=True)
 
 
 def build_module(

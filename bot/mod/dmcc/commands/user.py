@@ -85,6 +85,15 @@ class DmccUserCog(commands.Cog):
                     "Online: " + self._player_names(response.get("player_names")),
                     f"Minecraft: {response.get('minecraft_version', '?')}",
                     f"MOTD: {response.get('motd', '')}",
+                    (
+                        "Outbound queues: "
+                        f"required {response.get('required_queue_depth', '?')}/"
+                        f"{response.get('required_queue_capacity', '?')}, "
+                        f"events {response.get('event_queue_depth', '?')}/"
+                        f"{response.get('event_queue_capacity', '?')}"
+                    ),
+                    f"Dropped events: {response.get('dropped_events', '?')}",
+                    f"Last sender failure: {response.get('last_sender_failure') or 'none'}",
                 )
             ),
             ephemeral=True,

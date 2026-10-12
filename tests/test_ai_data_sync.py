@@ -10,6 +10,7 @@ Modification():
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import pytest
 from bot.mod.ai.data_sync import OwnerDataService
 from bot.mod.ai.data import initialize_data_dir
 from bot.mod.ai.database import AiDatabase
+from bot.mod.ai.assembly import AiModule
 from bot.mod.ai.memory.manual_sync import ManualMemorySyncService
 from bot.mod.ai.prompt.loader import PromptSourceLoader
 from bot.mod.ai.knowledge.source import KnowledgeSourceReader
@@ -34,6 +36,74 @@ def _write_prompt_resources(root) -> None:
     (root / "system.txt").write_text("system", encoding="utf-8")
     (root / "personas" / "default" / "persona.txt").write_text("persona", encoding="utf-8")
     (root / "personas" / "default" / "background.txt").write_text("background", encoding="utf-8")
+
+
+class _KnowledgeRecorder:
+    def __init__(self) -> None:
+        self.pruned: list[set[str]] = []
+
+    def remove_sources_not_in(self, source_ids: set[str]) -> None:
+        self.pruned.append(set(source_ids))
+
+
+class _ControlledRetrieval:
+    def __init__(self, *, fail: bool = False, pause: bool = False) -> None:
+        self.fail = fail
+        self.pause = pause
+        self.active = 0
+        self.max_active = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def index_document(self, _document, *, now: int) -> None:
+        del now
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        self.started.set()
+        try:
+            if self.fail:
+                raise RuntimeError("index unavailable")
+            if self.pause:
+                await self.release.wait()
+            else:
+                await asyncio.sleep(0)
+        finally:
+            self.active -= 1
+
+
+def _sync_module(tmp_path: Path, retrieval: _ControlledRetrieval) -> tuple[AiModule, OwnerDataService, _KnowledgeRecorder]:
+    data = tmp_path / "data"
+    knowledge_dir = data / "knowledge"
+    knowledge_dir.mkdir(parents=True)
+    (knowledge_dir / "guide.md").write_text("# Guide\nUseful text", encoding="utf-8")
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    manual = ManualMemorySyncService(database, data / "users_memory")
+    prompts = PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt")
+    owner_data = OwnerDataService(data, manual_memory=manual, prompts=prompts)
+    knowledge = _KnowledgeRecorder()
+    module = AiModule(
+        service=None,
+        attachments=None,
+        worker=None,
+        settings=None,
+        knowledge=knowledge,
+        retrieval=retrieval,
+        profiles=None,
+        prompts=prompts,
+        knowledge_dir=knowledge_dir,
+        manual_memory=manual,
+        global_memory=None,
+        operations=None,
+        summaries=None,
+        search_cache=None,
+        provider=None,
+        owner_data=owner_data,
+        mirror=None,
+    )
+    return module, owner_data, knowledge
 
 
 def test_initialize_data_dir_deploys_all_complete_persona_profiles_without_overwriting(tmp_path) -> None:
@@ -347,3 +417,62 @@ def test_owner_data_sync_state_is_persistent(tmp_path) -> None:
 
     assert service.sync_state()["status"] == "failed"
     assert service.sync_state()["detail"] == "disk unavailable"
+    assert service.sync_state()["operation_id"] == ""
+
+    service.set_sync_state("cancelled", "cancelled", operation_id="operation-1")
+    assert service.sync_state()["status"] == "cancelled"
+    assert service.sync_state()["operation_id"] == "operation-1"
+
+
+def test_ai_owner_data_sync_serializes_concurrent_requests(tmp_path) -> None:
+    async def scenario() -> None:
+        retrieval = _ControlledRetrieval(pause=True)
+        module, owner_data, knowledge = _sync_module(tmp_path, retrieval)
+
+        first = asyncio.create_task(module.sync_owner_data())
+        await retrieval.started.wait()
+        second = asyncio.create_task(module.sync_owner_data())
+        await asyncio.sleep(0)
+        assert retrieval.max_active == 1
+
+        retrieval.release.set()
+        assert await first == (0, 1)
+        assert await second == (0, 1)
+        assert retrieval.max_active == 1
+        assert len(knowledge.pruned) == 2
+        assert owner_data.sync_state()["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_ai_owner_data_sync_cancellation_is_recorded_and_does_not_prune(tmp_path) -> None:
+    async def scenario() -> None:
+        retrieval = _ControlledRetrieval(pause=True)
+        module, owner_data, knowledge = _sync_module(tmp_path, retrieval)
+
+        task = asyncio.create_task(module.sync_owner_data())
+        await retrieval.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        state = owner_data.sync_state()
+        assert state["status"] == "cancelled"
+        assert state["operation_id"]
+        assert knowledge.pruned == []
+
+    asyncio.run(scenario())
+
+
+def test_ai_owner_data_sync_index_failure_preserves_existing_sources(tmp_path) -> None:
+    async def scenario() -> None:
+        retrieval = _ControlledRetrieval(fail=True)
+        module, owner_data, knowledge = _sync_module(tmp_path, retrieval)
+
+        with pytest.raises(RuntimeError, match="index unavailable"):
+            await module.sync_owner_data()
+
+        assert knowledge.pruned == []
+        assert owner_data.sync_state()["status"] == "failed"
+
+    asyncio.run(scenario())

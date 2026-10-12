@@ -179,3 +179,69 @@ def test_failed_backup_alert_is_retried_without_waiting_for_cooldown(tmp_path: P
 
     assert attempts == [1, 2]
     assert service.health(server.server_id).last_alert_at is not None
+
+
+def test_health_persistence_failure_does_not_block_alert_or_next_run(tmp_path: Path) -> None:
+    class Coordinator:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def create(self, _server) -> None:
+            self.calls += 1
+            raise OSError("disk full")
+
+    class BrokenHealthRepository:
+        def all(self):
+            raise OSError("health disk unavailable")
+
+        def set(self, _server_id, _value) -> None:
+            raise OSError("health disk unavailable")
+
+    alerts: list[int] = []
+
+    async def alert(_server_id, health) -> None:
+        alerts.append(health.consecutive_failures)
+
+    server = _server(tmp_path / "server", tmp_path / "backups")
+    coordinator = Coordinator()
+    service = BackupScheduleService(
+        {server.server_id: server},
+        coordinator,
+        JsonScheduleRepository(tmp_path / "schedules.json"),
+        BrokenHealthRepository(),  # type: ignore[arg-type]
+        alert_sink=alert,
+    )
+
+    asyncio.run(service.run_due([server.server_id]))
+    asyncio.run(service.run_due([server.server_id]))
+
+    assert coordinator.calls == 2
+    assert alerts == [1]
+    assert service.health(server.server_id).consecutive_failures == 2
+    assert "health disk unavailable" in (service.health(server.server_id).persistence_error or "")
+
+
+def test_success_health_persistence_failure_remains_observable(tmp_path: Path) -> None:
+    class Coordinator:
+        async def create(self, _server) -> None:
+            return None
+
+    class BrokenHealthRepository:
+        def all(self):
+            return {}
+
+        def set(self, _server_id, _value) -> None:
+            raise OSError("read only filesystem")
+
+    server = _server(tmp_path / "server", tmp_path / "backups")
+    service = BackupScheduleService(
+        {server.server_id: server},
+        Coordinator(),
+        JsonScheduleRepository(tmp_path / "schedules.json"),
+        BrokenHealthRepository(),  # type: ignore[arg-type]
+    )
+
+    asyncio.run(service.run_due([server.server_id]))
+
+    assert service.health(server.server_id).last_success_at is not None
+    assert "read only filesystem" in (service.health(server.server_id).persistence_error or "")

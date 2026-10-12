@@ -49,8 +49,13 @@ class AiOperations:
     def record_provider_usage(self, user_id: str, model: str, usage: TokenUsage) -> None:
         with self._database.transaction() as connection:
             connection.execute(
-                "INSERT INTO ai_usage (user_id, model, input_tokens, output_tokens, created_at) VALUES (?, ?, ?, ?, ?)",
-                (user_id, model, usage.input_tokens, usage.output_tokens, self._now()),
+                "INSERT INTO ai_usage "
+                "(user_id, model, input_tokens, output_tokens, total_tokens, thinking_tokens, estimated, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_id, model, usage.input_tokens, usage.output_tokens,
+                    usage.total_tokens, usage.thinking_tokens, int(usage.estimated), self._now(),
+                ),
             )
 
     def record_error(self, user_id: str, model: str, error_type: str) -> None:
@@ -167,10 +172,22 @@ class AiOperations:
             pending_jobs = int(connection.execute("SELECT count(*) FROM memory_jobs WHERE status != 'completed'").fetchone()[0])
             summary_count = int(connection.execute("SELECT count(*) FROM conversation_summaries").fetchone()[0])
             rows = connection.execute("SELECT json_extract(metadata_json, '$.model') AS model, count(*) AS requests FROM events WHERE role = 'assistant' AND created_at >= ? GROUP BY model", (since,)).fetchall()
-            token_estimate = int(connection.execute("SELECT coalesce(sum(input_tokens + output_tokens), 0) FROM ai_usage WHERE created_at >= ?", (since,)).fetchone()[0])
+            total_tokens = int(connection.execute(
+                "SELECT coalesce(sum(total_tokens), 0) FROM ai_usage WHERE created_at >= ?", (since,)
+            ).fetchone()[0])
+            estimated_tokens = int(connection.execute(
+                "SELECT coalesce(sum(total_tokens), 0) FROM ai_usage WHERE created_at >= ? AND estimated = 1",
+                (since,),
+            ).fetchone()[0])
             provider_errors = int(connection.execute("SELECT count(*) FROM ai_provider_errors WHERE created_at >= ?", (since,)).fetchone()[0])
         by_model = {str(row["model"]): int(row["requests"]) for row in rows if row["model"]}
-        return {"hours": hours, "requests_24h": requests, "active_users": users, "active_memories": active_memories, "pending_jobs": pending_jobs, "summaries": summary_count, "by_model": by_model, "token_estimate": token_estimate, "provider_errors": provider_errors}
+        return {
+            "hours": hours, "requests_24h": requests, "active_users": users,
+            "active_memories": active_memories, "pending_jobs": pending_jobs,
+            "summaries": summary_count, "by_model": by_model,
+            "total_tokens": total_tokens, "estimated_tokens": estimated_tokens,
+            "token_estimate": total_tokens, "provider_errors": provider_errors,
+        }
 
     def list_memories(self, user_id: str, *, limit: int = 50) -> tuple[dict[str, Any], ...]:
         if not user_id.strip():
