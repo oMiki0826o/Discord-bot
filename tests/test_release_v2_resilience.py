@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
+import threading
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -28,17 +28,26 @@ from bot.mod.ai.service import AIRequest, AIService
 
 def test_video_metadata_does_not_block_event_loop(monkeypatch) -> None:
     async def exercise() -> None:
-        monkeypatch.setattr(AttachmentService, "_video_metadata", staticmethod(
-            lambda suffix, data: (time.sleep(0.08), "video")[1],
-        ))
+        event_loop_thread = threading.get_ident()
+        worker_threads: list[int] = []
+
+        def video_metadata(_suffix: str, _data: bytes) -> str:
+            worker_threads.append(threading.get_ident())
+            return "video"
+
+        monkeypatch.setattr(
+            AttachmentService,
+            "_video_metadata",
+            staticmethod(video_metadata),
+        )
         service = AttachmentService(AttachmentSettings(1, 1_000, 1_000, 1_000))
-        task = asyncio.create_task(service.process((
+        result = await service.process((
             AttachmentInput("clip.mp4", "video/mp4", b"video", 5),
-        )))
-        started = time.perf_counter()
-        await asyncio.sleep(0.01)
-        assert time.perf_counter() - started < 0.06
-        assert (await task)[0].text == "video"
+        ))
+
+        assert result[0].text == "video"
+        assert worker_threads
+        assert worker_threads[0] != event_loop_thread
 
     asyncio.run(exercise())
 
