@@ -33,7 +33,19 @@ def test_discord_identity_context_marks_unknown_mentions_without_guessing() -> N
 
 
 def test_dashboard_operational_summary_only_renders_aggregate_values() -> None:
-    assert dashboard_operational_summary({"token_estimate": 1234, "provider_errors": 2}) == "Estimated tokens: 1,234\nProvider errors: 2"
+    assert dashboard_operational_summary({
+        "actual_tokens": 900,
+        "actual_requests": 3,
+        "estimated_tokens": 334,
+        "estimated_requests": 1,
+        "thinking_tokens": 120,
+        "provider_errors": 2,
+    }) == (
+        "Actual tokens: 900 (3 requests)\n"
+        "Estimated tokens: 334 (1 requests)\n"
+        "Thinking tokens: 120\n"
+        "Provider errors: 2"
+    )
 
 
 def test_user_context_renderer_uses_only_known_profile_fields() -> None:

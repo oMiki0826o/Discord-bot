@@ -41,6 +41,7 @@ from .guard import RequestGuard
 from .history.repository import EventRepository
 from .history.search import HistorySearchService
 from .knowledge.service import KnowledgeService
+from .knowledge.staging import KnowledgeStagingSession
 from .knowledge.source import KNOWLEDGE_SOURCE_SUFFIXES, KnowledgeSourceReader
 from .memory.repository import MemoryRepository
 from .memory.service import MemoryService
@@ -118,43 +119,102 @@ class AiModule:
         status["owner_blocks"] = self.mirror.repository.owner_block_count()
         return status
 
-    async def _upsert_knowledge(self, source_dir: Path | None = None) -> tuple[int, set[str]]:
-        import time
+    def _knowledge_staging(self) -> KnowledgeStagingSession:
+        return KnowledgeStagingSession(
+            self.manual_memory.database,
+            chunk_chars=self.knowledge.chunk_chars,
+            embedder=self.retrieval.embedder,
+            embedding_model=self.retrieval.embedding_model,
+        )
 
-        count = 0
-        knowledge_dir = self.knowledge_dir if source_dir is None else Path(source_dir)
-        if not knowledge_dir.is_dir():
-            return 0, set()
-        source_ids: set[str] = set()
-        reader = KnowledgeSourceReader(knowledge_dir)
-        for path in sorted(knowledge_dir.rglob("*")):
-            if not path.is_file() or path.suffix.casefold() not in KNOWLEDGE_SOURCE_SUFFIXES:
-                continue
-            relative = path.relative_to(knowledge_dir).as_posix()
-            document = reader.read(relative)
-            if not document.content.strip():
-                logger.warning("Skipping blank knowledge source: %s", relative)
-                continue
-            await self.retrieval.index_document(document, now=int(time.time()))
-            source_ids.add(relative)
-            count += 1
-        return count, source_ids
+    async def rebuild_knowledge(
+        self,
+        source_dir: Path | None = None,
+        *,
+        full: bool = False,
+    ) -> int:
+        """Incrementally rebuild Knowledge through the shared publishing lock."""
 
-    async def rebuild_knowledge(self, source_dir: Path | None = None) -> int:
-        count, source_ids = await self._upsert_knowledge(source_dir)
-        self.knowledge.remove_sources_not_in(source_ids)
-        return count
+        async with self._sync_lock:
+            validation = self.owner_data.validate()
+            if not validation.valid:
+                raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
+            if source_dir is None and not full:
+                changed = tuple(
+                    path for path in validation.change_set.changed
+                    if path.startswith("knowledge/")
+                )
+                removed = tuple(
+                    path for path in validation.change_set.removed
+                    if path.startswith("knowledge/")
+                )
+                if not changed and not removed:
+                    self.owner_data.mark_types_applied(validation, {"knowledge"})
+                    return 0
+            staging = self._knowledge_staging()
+            staging.seed_active()
+            try:
+                if source_dir is not None:
+                    root = Path(source_dir)
+                    changed = tuple(
+                        path.relative_to(root).as_posix()
+                        for path in sorted(root.rglob("*"))
+                        if path.is_file() and path.suffix.casefold() in KNOWLEDGE_SOURCE_SUFFIXES
+                    )
+                    removed = self._staged_source_ids(staging) - set(changed)
+                    reader = KnowledgeSourceReader(root)
+                else:
+                    all_sources = tuple(
+                        path.removeprefix("knowledge/")
+                        for path in (*validation.change_set.changed, *validation.change_set.unchanged)
+                        if path.startswith("knowledge/")
+                    )
+                    changed = all_sources if full else tuple(
+                        path.removeprefix("knowledge/")
+                        for path in validation.change_set.changed
+                        if path.startswith("knowledge/")
+                    )
+                    removed = {
+                        path.removeprefix("knowledge/")
+                        for path in validation.change_set.removed
+                        if path.startswith("knowledge/")
+                    }
+                    reader = KnowledgeSourceReader(self.knowledge_dir)
+                for source_id in changed:
+                    await staging.apply_document(reader.read(source_id))
+                staging.remove_sources(set(removed))
+                staging.verify()
+                with self.manual_memory.database.transaction() as connection:
+                    staging.publish(connection)
+                if source_dir is None:
+                    self.owner_data.mark_types_applied(validation, {"knowledge"})
+                return len(changed)
+            finally:
+                staging.clear()
+
+    def _staged_source_ids(self, _staging: KnowledgeStagingSession) -> set[str]:
+        with self.manual_memory.database.connect() as connection:
+            return {
+                str(row[0])
+                for row in connection.execute("SELECT source_id FROM knowledge_sources_staging")
+            }
 
     async def sync_owner_data(self) -> tuple[int, int]:
         """Apply manual-memory source data and rebuild its dependent knowledge index."""
         operation_id = uuid.uuid4().hex
         async with self._sync_lock:
             self._record_sync_state("staging", operation_id=operation_id)
+            published = False
+            staging = self._knowledge_staging()
             try:
                 validation = self.owner_data.validate()
                 if not validation.valid:
                     raise ValueError("AI data validation failed: " + "; ".join(validation.issues[:3]))
-                with self.owner_data.materialize_snapshot(validation) as snapshot:
+                if not validation.change_set.changed and not validation.change_set.removed:
+                    self.owner_data.mark_applied(validation)
+                    self._record_sync_state("completed", operation_id=operation_id)
+                    return validation.manual_records, 0
+                with self.owner_data.materialize_snapshot(validation, changed_only=True) as snapshot:
                     snapshot_manual = ManualMemorySyncService(
                         self.manual_memory.database,
                         snapshot / "users_memory",
@@ -163,23 +223,58 @@ class AiModule:
                         resource_dir=self.prompts.resource_dir,
                         override_dir=snapshot / "prompt",
                     )
-                    prompt_sources = snapshot_prompts.load()
+                    prompt_changed = any(
+                        path.startswith("prompt/")
+                        for path in (*validation.change_set.changed, *validation.change_set.removed)
+                    )
+                    prompt_sources = snapshot_prompts.load() if prompt_changed else self.prompts.load()
                     self._record_sync_state("applying", operation_id=operation_id)
-                    records = snapshot_manual.sync().records
-                    documents, source_ids = await self._upsert_knowledge(snapshot / "knowledge")
-                    self.knowledge.remove_sources_not_in(source_ids)
-                    self.owner_data.mark_snapshot_applied(validation, snapshot)
-                    self.prompts.install(prompt_sources)
+                    staging.seed_active()
+                    snapshot_manual.seed_staging()
+                    snapshot_manual.stage_changed(
+                        validation.change_set.changed,
+                        validation.change_set.removed,
+                    )
+                    changed_knowledge = tuple(
+                        path.removeprefix("knowledge/")
+                        for path in validation.change_set.changed
+                        if path.startswith("knowledge/")
+                    )
+                    reader = KnowledgeSourceReader(snapshot / "knowledge")
+                    for source_id in changed_knowledge:
+                        await staging.apply_document(reader.read(source_id))
+                    staging.remove_sources({
+                        path.removeprefix("knowledge/")
+                        for path in validation.change_set.removed
+                        if path.startswith("knowledge/")
+                    })
+                    staging.verify()
+                    with self.manual_memory.database.transaction() as connection:
+                        staging.publish(connection)
+                        snapshot_manual.publish_staging(connection)
+                    published = True
+                    if prompt_changed:
+                        self.prompts.install(prompt_sources)
+                    self.owner_data.mark_applied(validation)
+                    with self.manual_memory.database.connect() as connection:
+                        records = int(connection.execute(
+                            "SELECT count(*) FROM manual_memory_records"
+                        ).fetchone()[0])
                 self._record_sync_state("completed", operation_id=operation_id)
-                return records, documents
+                return records, len(changed_knowledge)
             except asyncio.CancelledError:
                 self._record_sync_state("cancelled", "synchronization cancelled", operation_id=operation_id)
                 raise
             except Exception as exc:
                 self._record_sync_state(
-                    "failed", f"{type(exc).__name__}: {exc}", operation_id=operation_id
+                    "failed_published" if published else "failed",
+                    f"{type(exc).__name__}: {exc}",
+                    operation_id=operation_id,
                 )
                 raise
+            finally:
+                staging.clear()
+                self.manual_memory.clear_staging()
 
     def _record_sync_state(self, status: str, detail: str = "", *, operation_id: str) -> None:
         try:

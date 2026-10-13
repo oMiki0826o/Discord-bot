@@ -69,3 +69,12 @@ def test_release_zip_is_reproducible_valid_and_contains_required_files(tmp_path:
     assert f"{prefix}/README.md" in names
     assert all("/.env" not in name or name.endswith("/.env.example") for name in names)
     assert all("/data/" not in name for name in names)
+
+
+def test_ci_uploads_verified_runtime_and_bridge_artifacts() -> None:
+    workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert "needs: [test, bridge]" in workflow
+    assert workflow.count("uses: actions/upload-artifact@v4") == 2
+    assert "dist/Discord-Bot-v${{ steps.version.outputs.value }}.zip" in workflow
+    assert "path: bridge/java_bridge.jar" in workflow

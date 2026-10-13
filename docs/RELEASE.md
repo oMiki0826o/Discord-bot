@@ -2,6 +2,17 @@
 
 本專案以 Git 推送可追蹤檔案到公開 GitHub repository. 不要使用 GitHub 網頁直接拖曳整個工作目錄, 因為那樣不會套用 `.gitignore`.
 
+## v0.2.3 — Consistency & Protocol Contracts
+
+- AI Owner data 改用 staging tables 與短 SQLite transaction 原子發布。
+- Manifest 只重新讀取、驗證、切塊及 Embedding 有變更的來源。
+- `$ai data sync` 與 `$ai index rebuild` 共用索引鎖；rebuild 預設採增量模式。
+- Knowledge 以 Chunk 為單位重用 Embedding，局部修改不再重算整份文件。
+- 統一 Java/Python DMCC server-info 診斷欄位並顯示 queue capacity。
+- 隔離損壞的 Minecraft stats JSON，並修正 Bridge queue 測試時序假設。
+- AI Dashboard 分開顯示實測、推算及 Thinking Token。
+- GitHub Actions 上傳 Runtime ZIP 與驗證後的 Fabric Bridge JAR Artifact。
+
 ## v0.2.2 — Failure Isolation & Lifecycle Safety
 
 - Bridge 必要回覆與一般事件使用獨立有界佇列，單一封包錯誤不會終止 sender。

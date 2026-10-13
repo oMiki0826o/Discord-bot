@@ -128,6 +128,10 @@ def test_provider_usage_persists_complete_actual_and_estimated_fields(tmp_path) 
     snapshot = operations.dashboard_snapshot(hours=24)
     assert snapshot["total_tokens"] == 28
     assert snapshot["estimated_tokens"] == 7
+    assert snapshot["actual_tokens"] == 21
+    assert snapshot["thinking_tokens"] == 3
+    assert snapshot["actual_requests"] == 1
+    assert snapshot["estimated_requests"] == 1
 
 
 

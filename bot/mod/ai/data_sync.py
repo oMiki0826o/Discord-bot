@@ -37,6 +37,15 @@ SUPPORTED_TEXT_SUFFIXES = frozenset({
 # ── 驗證報告 ──
 
 @dataclass(frozen=True, slots=True)
+class SourceChangeSet:
+    """來源相對於最後一次成功套用版本的增量差異。"""
+
+    changed: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+    unchanged: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class OwnerDataReport:
     """Owner 可編輯 AI 資料的驗證結果。"""
 
@@ -45,8 +54,9 @@ class OwnerDataReport:
     knowledge_documents: int
     changed_sources: int = 0
     removed_sources: int = 0
+    change_set: SourceChangeSet = SourceChangeSet()
     issues: tuple[str, ...] = ()
-    _manifest: tuple[tuple[str, str, str], ...] = field(
+    _manifest: tuple[tuple[str, str, str, int, int], ...] = field(
         default=(),
         repr=False,
         compare=False,
@@ -60,7 +70,7 @@ class _SourceSnapshot:
 
     issues: tuple[str, ...]
     knowledge_documents: int
-    manifest: dict[str, tuple[str, str]]
+    manifest: dict[str, tuple[str, str, int, int]]
 
 
 # ── Owner 資料服務 ──
@@ -101,32 +111,43 @@ class OwnerDataService:
         snapshot = self._source_snapshot()
         issues = list(snapshot.issues)
 
-        records = 0
-        try:
-            records = self.manual_memory.validate().records
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            issues.append(f"users_memory: {exc}")
+        change_set = self._manifest_diff(snapshot.manifest)
+        user_memory_changed = any(
+            path.startswith("users_memory/")
+            for path in (*change_set.changed, *change_set.removed)
+        )
+        prompt_changed = any(
+            path.startswith("prompt/")
+            for path in (*change_set.changed, *change_set.removed)
+        )
 
-        issues.extend(self._validate_prompt_json())
+        records = self._stored_manual_record_count()
+        if user_memory_changed or not self._has_applied_manifest():
+            try:
+                records = self.manual_memory.validate().records
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                issues.append(f"users_memory: {exc}")
 
-        try:
-            self.prompts.load()
-        except (ValueError, PromptSourceError) as exc:
-            issues.append(f"prompt: {exc}")
-
-        changed, removed = self._manifest_diff(snapshot.manifest)
+        if prompt_changed or not self._has_applied_manifest():
+            issues.extend(self._validate_prompt_json())
+            try:
+                self.prompts.load()
+            except (ValueError, PromptSourceError) as exc:
+                issues.append(f"prompt: {exc}")
 
         valid = not issues
         return OwnerDataReport(
             valid=valid,
             manual_records=records,
             knowledge_documents=snapshot.knowledge_documents,
-            changed_sources=changed,
-            removed_sources=removed,
+            changed_sources=len(change_set.changed),
+            removed_sources=len(change_set.removed),
+            change_set=change_set,
             issues=tuple(issues),
             _manifest=tuple(
-                (path, content_hash, source_type)
-                for path, (content_hash, source_type) in sorted(snapshot.manifest.items())
+                (path, content_hash, source_type, source_size, source_mtime_ns)
+                for path, (content_hash, source_type, source_size, source_mtime_ns)
+                in sorted(snapshot.manifest.items())
             ),
             _can_apply=can_apply and valid,
         )
@@ -143,8 +164,18 @@ class OwnerDataService:
         source_root: Path | None,
     ) -> None:
         sources = self._validation_sources(validation)
-        current = self._source_manifest(source_root)
-        if current != sources:
+        current = (
+            self._source_snapshot().manifest
+            if source_root is None
+            else self._source_manifest(source_root)
+        )
+        comparable_current = {
+            path: (value[0], value[1]) for path, value in current.items()
+        }
+        comparable_sources = {
+            path: (value[0], value[1]) for path, value in sources.items()
+        }
+        if comparable_current != comparable_sources:
             if source_root is None:
                 raise RuntimeError("AI data sources changed after validation; retry synchronization")
             raise RuntimeError("materialized AI data snapshot does not match validation")
@@ -158,18 +189,23 @@ class OwnerDataService:
                     source_path,
                     content_hash,
                     source_type,
+                    source_size,
+                    source_mtime_ns,
                     applied_at
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         path,
                         content_hash,
                         source_type,
+                        source_size,
+                        source_mtime_ns,
                         int(time.time()),
                     )
-                    for path, (content_hash, source_type) in sources.items()
+                    for path, (content_hash, source_type, source_size, source_mtime_ns)
+                    in sources.items()
                 ],
             )
 
@@ -182,8 +218,47 @@ class OwnerDataService:
 
         self._mark_applied(validation, source_root=source_root)
 
+    def mark_types_applied(self, validation: OwnerDataReport, source_types: set[str]) -> None:
+        """Persist only the source families published by a partial rebuild."""
+
+        if not source_types or not source_types <= {"knowledge", "user_memory", "prompt"}:
+            raise ValueError("invalid AI data source type selection")
+        sources = {
+            path: value
+            for path, value in self._validation_sources(validation).items()
+            if value[1] in source_types
+        }
+        current = {
+            path: value
+            for path, value in self._source_snapshot().manifest.items()
+            if value[1] in source_types
+        }
+        if {
+            path: value[:2] for path, value in current.items()
+        } != {
+            path: value[:2] for path, value in sources.items()
+        }:
+            raise RuntimeError("AI data sources changed after validation; retry synchronization")
+        with self.manual_memory.database.transaction() as connection:
+            placeholders = ",".join("?" for _item in source_types)
+            connection.execute(
+                f"DELETE FROM ai_data_manifest WHERE source_type IN ({placeholders})",  # noqa: S608
+                tuple(sorted(source_types)),
+            )
+            connection.executemany(
+                "INSERT INTO ai_data_manifest "
+                "(source_path,content_hash,source_type,source_size,source_mtime_ns,applied_at) "
+                "VALUES (?,?,?,?,?,?)",
+                [
+                    (path, value[0], value[1], value[2], value[3], int(time.time()))
+                    for path, value in sources.items()
+                ],
+            )
+
     def set_sync_state(self, status: str, detail: str = "", *, operation_id: str = "") -> None:
-        if status not in {"idle", "staging", "applying", "completed", "failed", "cancelled"}:
+        if status not in {
+            "idle", "staging", "applying", "completed", "failed", "failed_published", "cancelled"
+        }:
             raise ValueError("invalid AI data sync status")
         with self.manual_memory.database.transaction() as connection:
             connection.execute(
@@ -205,13 +280,19 @@ class OwnerDataService:
         }
 
     @contextmanager
-    def materialize_snapshot(self, validation: OwnerDataReport):
+    def materialize_snapshot(self, validation: OwnerDataReport, *, changed_only: bool = False):
         """Copy validated bytes to an immutable per-sync source directory."""
 
         sources = self._validation_sources(validation)
         with TemporaryDirectory(prefix="discord-bot-ai-sync-") as directory:
             snapshot = Path(directory)
-            for relative, (expected_hash, _source_type) in sources.items():
+            selected = set(sources)
+            if changed_only:
+                selected = set(validation.change_set.changed)
+                if any(path.startswith("prompt/") for path in selected):
+                    selected.update(path for path in sources if path.startswith("prompt/"))
+            for relative in sorted(selected):
+                expected_hash, _source_type, _size, _mtime_ns = sources[relative]
                 source = self.root / relative
                 if source.is_symlink() or not source.is_file():
                     raise RuntimeError("AI data sources changed after validation; retry synchronization")
@@ -235,7 +316,8 @@ class OwnerDataService:
 
         issues: list[str] = []
         knowledge_documents = 0
-        manifest: dict[str, tuple[str, str]] = {}
+        manifest: dict[str, tuple[str, str, int, int]] = {}
+        previous = self._previous_manifest()
 
         if not self.root.exists():
             return _SourceSnapshot(
@@ -272,7 +354,9 @@ class OwnerDataService:
 
             try:
                 path.resolve(strict=True).relative_to(root)
-                size = path.stat().st_size
+                stat = path.stat()
+                size = stat.st_size
+                mtime_ns = stat.st_mtime_ns
             except (OSError, ValueError) as exc:
                 issues.append(
                     f"{relative}: cannot read source ({exc})"
@@ -285,19 +369,28 @@ class OwnerDataService:
                 )
                 continue
 
+            source_type = self._source_type(relative)
+            prior = previous.get(relative)
+            if (
+                source_type is not None
+                and prior is not None
+                and prior[1:] == (source_type, size, mtime_ns)
+            ):
+                manifest[relative] = prior
+                continue
+
             try:
                 raw = path.read_bytes()
             except OSError as exc:
-                issues.append(
-                    f"{relative}: cannot read source ({exc})"
-                )
+                issues.append(f"{relative}: cannot read source ({exc})")
                 continue
 
-            source_type = self._source_type(relative)
             if source_type is not None:
                 manifest[relative] = (
                     hashlib.sha256(raw).hexdigest(),
                     source_type,
+                    size,
+                    mtime_ns,
                 )
 
             try:
@@ -390,10 +483,10 @@ class OwnerDataService:
     def _source_manifest(
         self,
         source_root: Path | None = None,
-    ) -> dict[str, tuple[str, str]]:
+    ) -> dict[str, tuple[str, str, int, int]]:
         """建立目前受支援資料來源的內容雜湊快照。"""
 
-        result: dict[str, tuple[str, str]] = {}
+        result: dict[str, tuple[str, str, int, int]] = {}
         root = self.root if source_root is None else Path(source_root)
 
         if not root.is_dir():
@@ -418,6 +511,7 @@ class OwnerDataService:
 
             try:
                 raw = path.read_bytes()
+                stat = path.stat()
             except OSError:
                 continue
 
@@ -427,6 +521,8 @@ class OwnerDataService:
             result[relative] = (
                 hashlib.sha256(raw).hexdigest(),
                 source_type,
+                stat.st_size,
+                stat.st_mtime_ns,
             )
 
         return result
@@ -434,53 +530,61 @@ class OwnerDataService:
     @staticmethod
     def _validation_sources(
         validation: OwnerDataReport,
-    ) -> dict[str, tuple[str, str]]:
+    ) -> dict[str, tuple[str, str, int, int]]:
         if not validation.valid or not validation._can_apply:
             raise RuntimeError("mark_applied requires a valid validated snapshot")
         return {
-            path: (content_hash, source_type)
-            for path, content_hash, source_type in validation._manifest
+            path: (content_hash, source_type, source_size, source_mtime_ns)
+            for path, content_hash, source_type, source_size, source_mtime_ns
+            in validation._manifest
         }
 
     def _manifest_diff(
         self,
-        current: dict[str, tuple[str, str]] | None = None,
-    ) -> tuple[int, int]:
+        current: dict[str, tuple[str, str, int, int]] | None = None,
+    ) -> SourceChangeSet:
         """比較目前來源與上一次已套用來源的差異。"""
 
         if current is None:
             current = self._source_manifest()
 
+        previous = self._previous_manifest()
+        changed = tuple(
+            path for path, value in current.items()
+            if previous.get(path) is None or previous[path][:2] != value[:2]
+        )
+        removed = tuple(path for path in previous if path not in current)
+        unchanged = tuple(
+            path for path, value in current.items()
+            if previous.get(path) is not None and previous[path][:2] == value[:2]
+        )
+        return SourceChangeSet(changed, removed, unchanged)
+
+    def _previous_manifest(self) -> dict[str, tuple[str, str, int, int]]:
         with self.manual_memory.database.connect() as connection:
-            previous = {
-                str(row["source_path"]): (
-                    str(row["content_hash"]),
-                    str(row["source_type"]),
-                )
-                for row in connection.execute(
-                    """
-                    SELECT
-                        source_path,
-                        content_hash,
-                        source_type
-                    FROM ai_data_manifest
-                    """
-                )
-            }
+            rows = connection.execute(
+                "SELECT source_path, content_hash, source_type, source_size, source_mtime_ns "
+                "FROM ai_data_manifest"
+            ).fetchall()
+        return {
+            str(row["source_path"]): (
+                str(row["content_hash"]),
+                str(row["source_type"]),
+                int(row["source_size"]),
+                int(row["source_mtime_ns"]),
+            )
+            for row in rows
+        }
 
-        changed = sum(
-            1
-            for path, value in current.items()
-            if previous.get(path) != value
-        )
+    def _has_applied_manifest(self) -> bool:
+        with self.manual_memory.database.connect() as connection:
+            row = connection.execute("SELECT 1 FROM ai_data_manifest LIMIT 1").fetchone()
+        return row is not None
 
-        removed = sum(
-            1
-            for path in previous
-            if path not in current
-        )
-
-        return changed, removed
+    def _stored_manual_record_count(self) -> int:
+        with self.manual_memory.database.connect() as connection:
+            row = connection.execute("SELECT count(*) FROM manual_memory_records").fetchone()
+        return int(row[0])
 
     # ── 共用工具 ──
 

@@ -11,7 +11,7 @@ final class ProtocolEnvelopeTest {
     @Test
     void jsonRoundTripPreservesTheRequiredEnvelopeFields() {
         ProtocolEnvelope envelope = new ProtocolEnvelope(
-            1, "handshake", "survival", null, Map.of("bridge_version", "0.2.2")
+            1, "handshake", "survival", null, Map.of("bridge_version", "0.2.3")
         );
 
         assertEquals(envelope, ProtocolEnvelope.fromJson(envelope.toJson()));

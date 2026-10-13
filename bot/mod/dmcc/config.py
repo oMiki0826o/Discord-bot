@@ -129,6 +129,12 @@ class DmccSettings:
     def server_secret(self, server_id: str) -> str | None:
         return self._bridge_secrets.get(server_id)
 
+    @property
+    def recommended_bridge_read_timeout_millis(self) -> int:
+        """Minimum Java read timeout with two heartbeat intervals of safety margin."""
+
+        return int(self.heartbeat_interval_seconds * 3_000)
+
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):

@@ -366,7 +366,7 @@ def test_schema_v13_upgrades_legacy_memory_status_without_losing_rows(tmp_path) 
         ).fetchone()[0] == "retracted"
         assert connection.execute(
             "SELECT max(version) FROM schema_migrations"
-        ).fetchone()[0] == 16
+        ).fetchone()[0] == 18
         usage = connection.execute(
             "SELECT total_tokens, thinking_tokens, estimated FROM ai_usage"
         ).fetchone()

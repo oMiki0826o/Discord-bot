@@ -41,6 +41,7 @@ def _write_prompt_resources(root) -> None:
 class _KnowledgeRecorder:
     def __init__(self) -> None:
         self.pruned: list[set[str]] = []
+        self.chunk_chars = 2_000
 
     def remove_sources_not_in(self, source_ids: set[str]) -> None:
         self.pruned.append(set(source_ids))
@@ -54,6 +55,12 @@ class _ControlledRetrieval:
         self.max_active = 0
         self.started = asyncio.Event()
         self.release = asyncio.Event()
+        self.embedding_model = "test-embedding"
+        self.embedder = self._embed
+
+    async def _embed(self, content: str) -> tuple[float, ...]:
+        await self.index_document(content, now=0)
+        return (1.0, 0.0)
 
     async def index_document(self, _document, *, now: int) -> None:
         del now
@@ -424,10 +431,46 @@ def test_owner_data_sync_state_is_persistent(tmp_path) -> None:
     assert service.sync_state()["operation_id"] == "operation-1"
 
 
+def test_owner_data_validation_reads_only_sources_with_changed_metadata(tmp_path, monkeypatch) -> None:
+    data = tmp_path / "data"
+    knowledge = data / "knowledge"
+    knowledge.mkdir(parents=True)
+    source = knowledge / "guide.md"
+    source.write_text("stable", encoding="utf-8")
+    database = AiDatabase(tmp_path / "ai.db")
+    database.initialize()
+    resources = tmp_path / "resources"
+    _write_prompt_resources(resources)
+    service = OwnerDataService(
+        data,
+        manual_memory=ManualMemorySyncService(database, data / "users_memory"),
+        prompts=PromptSourceLoader(resource_dir=resources, override_dir=data / "prompt"),
+    )
+    first = service.validate()
+    service.mark_applied(first)
+    original = Path.read_bytes
+    reads = 0
+
+    def counted(path: Path) -> bytes:
+        nonlocal reads
+        if path == source:
+            reads += 1
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    unchanged = service.preview()
+    source.touch()
+    changed = service.preview()
+
+    assert unchanged.changed_sources == 0
+    assert changed.changed_sources == 0
+    assert reads == 1
+
+
 def test_ai_owner_data_sync_serializes_concurrent_requests(tmp_path) -> None:
     async def scenario() -> None:
         retrieval = _ControlledRetrieval(pause=True)
-        module, owner_data, knowledge = _sync_module(tmp_path, retrieval)
+        module, owner_data, _knowledge = _sync_module(tmp_path, retrieval)
 
         first = asyncio.create_task(module.sync_owner_data())
         await retrieval.started.wait()
@@ -437,9 +480,8 @@ def test_ai_owner_data_sync_serializes_concurrent_requests(tmp_path) -> None:
 
         retrieval.release.set()
         assert await first == (0, 1)
-        assert await second == (0, 1)
+        assert await second == (0, 0)
         assert retrieval.max_active == 1
-        assert len(knowledge.pruned) == 2
         assert owner_data.sync_state()["status"] == "completed"
 
     asyncio.run(scenario())

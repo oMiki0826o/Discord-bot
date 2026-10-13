@@ -378,6 +378,21 @@ _MIGRATION_16: tuple[str, ...] = (
     "UPDATE ai_usage SET total_tokens = input_tokens + output_tokens WHERE total_tokens = 0",
 )
 
+_MIGRATION_17: tuple[str, ...] = (
+    "CREATE TABLE IF NOT EXISTS ai_data_manifest (source_path TEXT PRIMARY KEY, content_hash TEXT NOT NULL, source_type TEXT NOT NULL, applied_at INTEGER NOT NULL)",
+    "ALTER TABLE ai_data_manifest ADD COLUMN source_size INTEGER NOT NULL DEFAULT -1",
+    "ALTER TABLE ai_data_manifest ADD COLUMN source_mtime_ns INTEGER NOT NULL DEFAULT -1",
+)
+
+_MIGRATION_18: tuple[str, ...] = (
+    "CREATE TABLE knowledge_sources_staging (source_id TEXT PRIMARY KEY, title TEXT NOT NULL, origin TEXT NOT NULL, content_hash TEXT NOT NULL, indexed_at INTEGER NOT NULL)",
+    "CREATE TABLE knowledge_chunks_staging (chunk_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, ordinal INTEGER NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, UNIQUE(source_id, ordinal))",
+    "CREATE VIRTUAL TABLE knowledge_search_staging USING fts5(chunk_id UNINDEXED, source_id UNINDEXED, search_text, tokenize = 'unicode61 remove_diacritics 2')",
+    "CREATE TABLE retrieval_embeddings_staging (source_kind TEXT NOT NULL, item_id TEXT NOT NULL, scope_user_id TEXT NOT NULL DEFAULT '', scope_channel_id TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, dimensions INTEGER NOT NULL, content_hash TEXT NOT NULL, vector_blob BLOB NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(source_kind, item_id, model))",
+    "CREATE TABLE manual_memory_records_staging (memory_id TEXT PRIMARY KEY, source_path TEXT NOT NULL, user_id TEXT NOT NULL, memory_key TEXT NOT NULL, category TEXT NOT NULL, content TEXT NOT NULL, importance INTEGER NOT NULL, confidence REAL NOT NULL, source TEXT NOT NULL, updated_at TEXT NOT NULL, version INTEGER NOT NULL, content_hash TEXT NOT NULL)",
+    "CREATE VIRTUAL TABLE manual_memory_search_staging USING fts5(memory_id UNINDEXED, user_id UNINDEXED, search_text, tokenize = 'unicode61 remove_diacritics 2')",
+)
+
 
 # ── Database ──────────────────────
 
@@ -559,6 +574,20 @@ class AiDatabase:
                 connection.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                     (16, int(time.time())),
+                )
+            if 17 not in applied:
+                for statement in _MIGRATION_17:
+                    connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (17, int(time.time())),
+                )
+            if 18 not in applied:
+                for statement in _MIGRATION_18:
+                    connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (18, int(time.time())),
                 )
 
     @staticmethod

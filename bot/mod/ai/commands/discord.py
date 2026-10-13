@@ -68,7 +68,11 @@ def dashboard_operational_summary(data: dict[str, Any]) -> str:
     """Format aggregate-only telemetry for the owner dashboard."""
 
     return (
-        f"Estimated tokens: {int(data.get('token_estimate', 0)):,}\n"
+        f"Actual tokens: {int(data.get('actual_tokens', 0)):,} "
+        f"({int(data.get('actual_requests', 0)):,} requests)\n"
+        f"Estimated tokens: {int(data.get('estimated_tokens', 0)):,} "
+        f"({int(data.get('estimated_requests', 0)):,} requests)\n"
+        f"Thinking tokens: {int(data.get('thinking_tokens', 0)):,}\n"
         f"Provider errors: {int(data.get('provider_errors', 0)):,}"
     )
 
@@ -505,9 +509,10 @@ def create_ai_cog(
 
         @ai_index.command(name="rebuild")
         @commands.is_owner()
-        async def ai_index_rebuild(self, ctx: commands.Context) -> None:
-            count = await self.module.rebuild_knowledge()
-            await ctx.send(f"Indexed {count} knowledge documents.")
+        async def ai_index_rebuild(self, ctx: commands.Context, full: bool = False) -> None:
+            count = await self.module.rebuild_knowledge(full=full)
+            mode = "full" if full else "incremental"
+            await ctx.send(f"Indexed {count} changed knowledge documents ({mode}).")
 
         @ai_index.command(name="status")
         @commands.is_owner()

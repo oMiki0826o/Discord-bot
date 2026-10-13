@@ -70,6 +70,15 @@ def test_dmcc_configuration_rejects_unsafe_gateway_and_boolean_values() -> None:
         DmccSettings.from_mapping(_settings(frame_max_bytes=262_145), environ={})
 
 
+def test_dmcc_reports_recommended_bridge_read_timeout() -> None:
+    settings = DmccSettings.from_mapping(
+        _settings(heartbeat_interval_seconds=20.0, heartbeat_timeout_seconds=60.0),
+        environ={},
+    )
+
+    assert settings.recommended_bridge_read_timeout_millis == 60_000
+
+
 def test_local_tmux_target_and_mcsm_contract(tmp_path: Path) -> None:
     raw = _settings(
         providers={"control": [{"provider_id": "local", "type": "local_tmux", "options": {"server_dir": str(tmp_path), "session_name": "minecraft", "start_argv": ["java", "-jar", "server.jar"]}}], "backup": []},

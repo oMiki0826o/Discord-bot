@@ -2,6 +2,7 @@ package io.miki.dmcc.bridge;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.fabricmc.api.ModInitializer;
@@ -28,6 +29,7 @@ import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
@@ -355,18 +357,17 @@ public final class BridgeMod implements ModInitializer {
         server.execute(() -> {
             BridgeRuntime active = runtime;
             if (active == null) return;
-            Throwable senderFailure = active.lastSenderFailure();
-            sendRequired(new ProtocolEnvelope(1, "server_info_response", envelope.serverId(), envelope.requestId(), Map.of(
-                    "online_players", server.getPlayerCount(),
-                    "max_players", server.getMaxPlayers(),
-                    "player_names", server.getPlayerList().getPlayers().stream().map(player -> player.getName().getString()).toList(),
-                    "minecraft_version", server.getServerVersion(),
-                    "motd", server.getMotd(),
-                    "dmcc_required_queue", active.requiredQueueDepth(),
-                    "dmcc_event_queue", active.eventQueueDepth(),
-                    "dmcc_dropped_events", active.droppedEvents(),
-                    "dmcc_last_sender_failure", senderFailure == null ? "" : senderFailure.getClass().getSimpleName()
-                )), "server info response");
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("online_players", server.getPlayerCount());
+            response.put("max_players", server.getMaxPlayers());
+            response.put("player_names", server.getPlayerList().getPlayers().stream()
+                .map(player -> player.getName().getString()).toList());
+            response.put("minecraft_version", server.getServerVersion());
+            response.put("motd", server.getMotd());
+            response.putAll(ServerInfoDiagnostics.from(active));
+            sendRequired(new ProtocolEnvelope(
+                1, "server_info_response", envelope.serverId(), envelope.requestId(), Map.copyOf(response)
+            ), "server info response");
         });
     }
 
@@ -447,8 +448,10 @@ public final class BridgeMod implements ModInitializer {
                                     String name = onlineNames.getOrDefault(uuid, uuidText);
                                     entries.add(Map.of("player_name", name, "value", value));
                                 }
-                            } catch (IllegalArgumentException ignored) {
-                                // Ignore malformed or non-player statistics files as upstream does.
+                            } catch (IOException | JsonParseException | IllegalStateException
+                                     | IllegalArgumentException exception) {
+                                LOGGER.warn("Skipping malformed Minecraft statistics file {}: {}",
+                                    path.getFileName(), exception.getClass().getSimpleName());
                             }
                         }
                     }

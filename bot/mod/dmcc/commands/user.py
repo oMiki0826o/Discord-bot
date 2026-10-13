@@ -28,6 +28,33 @@ from ..services.whitelist import whitelist_add_command
 _REQUEST_ERRORS = (ConnectionError, LookupError, TimeoutError, ValueError)
 
 
+def render_server_info(server_id: str, response: dict[str, object]) -> str:
+    """Render the shared Java/Python server-info protocol without hiding missing fields."""
+
+    def value(name: str) -> object:
+        return response[name] if name in response else "unavailable"
+
+    failure = value("last_sender_failure")
+    if failure == "":
+        failure = "none"
+    names = response.get("player_names")
+    online = ", ".join(str(item) for item in names) if isinstance(names, list) and names else "none"
+    return "\n".join((
+        f"Server: `{server_id}`",
+        f"Players: {response.get('online_players', '?')}/{response.get('max_players', '?')}",
+        f"Online: {online}",
+        f"Minecraft: {response.get('minecraft_version', '?')}",
+        f"MOTD: {response.get('motd', '')}",
+        (
+            "Outbound queues: "
+            f"required {value('required_queue_depth')}/{value('required_queue_capacity')}, "
+            f"events {value('event_queue_depth')}/{value('event_queue_capacity')}"
+        ),
+        f"Dropped events: {value('dropped_events')}",
+        f"Last sender failure: {failure}",
+    ))
+
+
 class DmccUserCog(commands.Cog):
     def __init__(
         self,
@@ -77,27 +104,7 @@ class DmccUserCog(commands.Cog):
         except _REQUEST_ERRORS as exc:
             await interaction.followup.send(f"DMCC server info failed: {exc}", ephemeral=True)
             return
-        await interaction.followup.send(
-            "\n".join(
-                (
-                    f"Server: `{server_id}`",
-                    f"Players: {response.get('online_players', '?')}/{response.get('max_players', '?')}",
-                    "Online: " + self._player_names(response.get("player_names")),
-                    f"Minecraft: {response.get('minecraft_version', '?')}",
-                    f"MOTD: {response.get('motd', '')}",
-                    (
-                        "Outbound queues: "
-                        f"required {response.get('required_queue_depth', '?')}/"
-                        f"{response.get('required_queue_capacity', '?')}, "
-                        f"events {response.get('event_queue_depth', '?')}/"
-                        f"{response.get('event_queue_capacity', '?')}"
-                    ),
-                    f"Dropped events: {response.get('dropped_events', '?')}",
-                    f"Last sender failure: {response.get('last_sender_failure') or 'none'}",
-                )
-            ),
-            ephemeral=True,
-        )
+        await interaction.followup.send(render_server_info(server_id, response), ephemeral=True)
 
     @dmcc_slash.command(name="console", description="Run a command on a connected Minecraft server")
     async def slash_console(self, interaction, server_id: str, command: str) -> None:

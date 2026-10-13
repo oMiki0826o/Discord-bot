@@ -52,6 +52,16 @@ jobs:
         run: python tools/build_release.py
       - name: Verify release archive
         run: python -m zipfile --test "dist/Discord-Bot-v$(cat VERSION).zip"
+      - name: Read release version
+        id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Upload runtime archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Discord-Bot-v${{ steps.version.outputs.value }}
+          path: dist/Discord-Bot-v${{ steps.version.outputs.value }}.zip
+          if-no-files-found: error
+          retention-days: 14
 
   bridge:
     runs-on: ubuntu-latest
@@ -71,4 +81,11 @@ jobs:
         run: ./gradlew --no-daemon test remapJar
       - name: Verify published bridge artifact
         working-directory: bridge/minecraft-bridge
-        run: cmp build/libs/minecraft-bridge-0.2.2.jar ../java_bridge.jar
+        run: cmp build/libs/minecraft-bridge-0.2.3.jar ../java_bridge.jar
+      - name: Upload verified Fabric bridge
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-bridge
+          path: bridge/java_bridge.jar
+          if-no-files-found: error
+          retention-days: 14

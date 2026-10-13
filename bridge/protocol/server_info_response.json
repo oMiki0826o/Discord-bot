@@ -1,0 +1,8 @@
+{
+  "required_queue_depth": "integer",
+  "required_queue_capacity": "integer",
+  "event_queue_depth": "integer",
+  "event_queue_capacity": "integer",
+  "dropped_events": "integer",
+  "last_sender_failure": "string"
+}

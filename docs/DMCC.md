@@ -4,6 +4,10 @@
 
 The gateway only listens on `127.0.0.1`; keep bridge secrets in `.env`, never in JSON. Protocol frames are limited to 262144 bytes on both sides. `local_tmux`, Pterodactyl, and MCSManager controls are configured as control providers; use the least privileged panel credential possible.
 
+Java Bridge 的 `read_timeout_millis` 應至少設為 Python Gateway
+`heartbeat_interval_seconds × 3000`，保留兩個 heartbeat interval 的延遲裕度。
+`/dmcc server-info` 會顯示 required/event queue 深度、容量、丟棄事件與最後傳送錯誤。
+
 Before production, validate HMAC authentication, relay, console requests, and each power action against a non-critical server.
 
 ## 最小 Linux 範例

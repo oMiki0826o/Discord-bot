@@ -179,6 +179,16 @@ class AiOperations:
                 "SELECT coalesce(sum(total_tokens), 0) FROM ai_usage WHERE created_at >= ? AND estimated = 1",
                 (since,),
             ).fetchone()[0])
+            thinking_tokens = int(connection.execute(
+                "SELECT coalesce(sum(thinking_tokens), 0) FROM ai_usage WHERE created_at >= ?",
+                (since,),
+            ).fetchone()[0])
+            actual_requests = int(connection.execute(
+                "SELECT count(*) FROM ai_usage WHERE created_at >= ? AND estimated = 0", (since,)
+            ).fetchone()[0])
+            estimated_requests = int(connection.execute(
+                "SELECT count(*) FROM ai_usage WHERE created_at >= ? AND estimated = 1", (since,)
+            ).fetchone()[0])
             provider_errors = int(connection.execute("SELECT count(*) FROM ai_provider_errors WHERE created_at >= ?", (since,)).fetchone()[0])
         by_model = {str(row["model"]): int(row["requests"]) for row in rows if row["model"]}
         return {
@@ -186,6 +196,10 @@ class AiOperations:
             "active_memories": active_memories, "pending_jobs": pending_jobs,
             "summaries": summary_count, "by_model": by_model,
             "total_tokens": total_tokens, "estimated_tokens": estimated_tokens,
+            "actual_tokens": total_tokens - estimated_tokens,
+            "thinking_tokens": thinking_tokens,
+            "actual_requests": actual_requests,
+            "estimated_requests": estimated_requests,
             "token_estimate": total_tokens, "provider_errors": provider_errors,
         }
 

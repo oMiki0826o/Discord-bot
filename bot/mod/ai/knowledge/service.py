@@ -145,20 +145,8 @@ class KnowledgeService:
             if existing is not None and str(existing["content_hash"]) == digest:
                 rows = connection.execute("SELECT chunk_id FROM knowledge_chunks WHERE source_id = ? ORDER BY ordinal", (document.source_id,)).fetchall()
                 return tuple(str(row["chunk_id"]) for row in rows)
-            old_ids = [str(row["chunk_id"]) for row in connection.execute("SELECT chunk_id FROM knowledge_chunks WHERE source_id = ?", (document.source_id,))]
-            for old_id in old_ids:
-                connection.execute("DELETE FROM knowledge_search WHERE chunk_id = ?", (old_id,))
-                connection.execute(
-                    "DELETE FROM retrieval_embeddings WHERE source_kind = 'knowledge' AND item_id = ?",
-                    (old_id,),
-                )
-            connection.execute("DELETE FROM knowledge_chunks WHERE source_id = ?", (document.source_id,))
-            connection.execute(
-                "INSERT INTO knowledge_sources (source_id, title, origin, content_hash, indexed_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_id) DO UPDATE SET title=excluded.title, origin=excluded.origin, content_hash=excluded.content_hash, indexed_at=excluded.indexed_at",
-                (document.source_id, document.title, document.origin, digest, now),
-            )
-            chunk_ids: list[str] = []
             occurrences: dict[str, int] = {}
+            prepared_chunks: list[tuple[str, int, str, str]] = []
             for ordinal, content in enumerate(chunks):
                 chunk_digest = hashlib.sha256(content.encode()).hexdigest()
                 occurrence = occurrences.get(chunk_digest, 0)
@@ -166,6 +154,23 @@ class KnowledgeService:
                 chunk_id = "knowledge_" + hashlib.sha256(
                     f"{document.source_id}:{chunk_digest}:{occurrence}".encode()
                 ).hexdigest()[:24]
+                prepared_chunks.append((chunk_id, ordinal, content, chunk_digest))
+            retained_ids = {item[0] for item in prepared_chunks}
+            old_ids = [str(row["chunk_id"]) for row in connection.execute("SELECT chunk_id FROM knowledge_chunks WHERE source_id = ?", (document.source_id,))]
+            for old_id in old_ids:
+                connection.execute("DELETE FROM knowledge_search WHERE chunk_id = ?", (old_id,))
+                if old_id not in retained_ids:
+                    connection.execute(
+                        "DELETE FROM retrieval_embeddings WHERE source_kind = 'knowledge' AND item_id = ?",
+                        (old_id,),
+                    )
+            connection.execute("DELETE FROM knowledge_chunks WHERE source_id = ?", (document.source_id,))
+            connection.execute(
+                "INSERT INTO knowledge_sources (source_id, title, origin, content_hash, indexed_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_id) DO UPDATE SET title=excluded.title, origin=excluded.origin, content_hash=excluded.content_hash, indexed_at=excluded.indexed_at",
+                (document.source_id, document.title, document.origin, digest, now),
+            )
+            chunk_ids: list[str] = []
+            for chunk_id, ordinal, content, chunk_digest in prepared_chunks:
                 connection.execute(
                     "INSERT INTO knowledge_chunks (chunk_id, source_id, ordinal, content, content_hash) VALUES (?, ?, ?, ?, ?)",
                     (chunk_id, document.source_id, ordinal, content, chunk_digest),

@@ -102,7 +102,7 @@ final class BridgeRuntimeTest {
     }
 
     @Test
-    void publishesEventsOnTheDedicatedSenderInOrder() throws Exception {
+    void preservesOrderWithinTheEventQueue() throws Exception {
         CountDownLatch connected = new CountDownLatch(1);
         CountDownLatch sent = new CountDownLatch(2);
         java.util.List<String> types = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -117,10 +117,7 @@ final class BridgeRuntimeTest {
         try {
             assertTrue(connected.await(1, TimeUnit.SECONDS));
             assertTrue(runtime.publishEvent(new ProtocolEnvelope(1, "first", "server", null, java.util.Map.of())));
-            CompletableFuture<Void> required = runtime.sendRequired(
-                new ProtocolEnvelope(1, "second", "server", "request", java.util.Map.of())
-            );
-            required.get(1, TimeUnit.SECONDS);
+            assertTrue(runtime.publishEvent(new ProtocolEnvelope(1, "second", "server", null, java.util.Map.of())));
             assertTrue(sent.await(1, TimeUnit.SECONDS));
             assertEquals(java.util.List.of("first", "second"), types);
         } finally {
