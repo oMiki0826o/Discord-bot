@@ -29,6 +29,15 @@ _TECHNICAL_KNOWLEDGE_CUES = (
     "更新抑制", "強轉", "紅石", "minecraft", "麥塊", "當機", "指令", "資料包",
     "程式碼", "源碼", "原始碼", "class", "method", "function", "api",
 )
+_INFORMATION_REQUEST_CUES = (
+    "什麼", "哪些", "如何", "怎麼", "為什麼", "原因", "差別", "比較", "介紹", "解釋",
+    "代表", "含義", "意思", "作用", "規則", "歷史", "背景", "資訊", "資料", "latest",
+    "what", "which", "how", "why", "difference", "compare", "explain", "meaning", "history",
+)
+_CASUAL_CONVERSATION_CUES = (
+    "你好", "哈囉", "晚安", "早安", "心情", "陪我", "聊天", "謝謝", "掰掰",
+    "hello", "hi ", "good morning", "good night", "how are you", "thanks", "bye",
+)
 
 _MODEL_ALIASES = {"gemini": "gemini", "flash": "flash", "gemma": "gemma", "agent": "agent"}
 _MODEL_DIRECTIVE_RE = re.compile(
@@ -46,6 +55,24 @@ def contains_url(text: str) -> bool:
     """Return whether text contains an HTTP(S) URL suitable for Gemini URL Context."""
 
     return _URL_RE.search(text) is not None
+
+
+def is_information_request(prompt: str) -> bool:
+    """判斷是否值得先查本機 Knowledge，而不把一般聊天視為檢索需求。"""
+
+    folded = prompt.casefold().strip()
+    if not folded or any(cue in folded for cue in _CASUAL_CONVERSATION_CUES):
+        return False
+    return (
+        contains_url(prompt)
+        or any(cue in folded for cue in (*_TECHNICAL_KNOWLEDGE_CUES, *_INFORMATION_REQUEST_CUES, *_WEB_CUES))
+    )
+
+
+def should_enable_web_fallback(route: "RouteRequest", *, has_knowledge: bool) -> bool:
+    """只有資訊問題查無本機 Knowledge 時才開放網路搜尋。"""
+
+    return route.wants_knowledge and not route.wants_web and not has_knowledge
 
 
 class Capability(StrEnum):
@@ -132,10 +159,7 @@ class Router:
             wants_memory=has_any(("我喜歡", "我偏好", "remember about me", "my preference")),
             wants_history=has_any(("上次", "之前說", "昨天", "said before", "last time")),
             wants_topic=has_any(("做到哪", "進度", "current status", "project state")),
-            wants_knowledge=has_any((
-                "資料庫", "知識庫", "原始碼", "source code", "knowledge",
-                *_TECHNICAL_KNOWLEDGE_CUES,
-            )),
+            wants_knowledge=is_information_request(prompt),
             wants_channel_context=has_any(("這個頻道", "大家剛剛", "this channel")),
             wants_skills=has_any(("怎麼做", "workflow", "skill")),
             wants_web=contains_url(prompt) or has_any(_WEB_CUES),

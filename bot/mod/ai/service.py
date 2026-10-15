@@ -22,10 +22,10 @@ from typing import Any
 from opencc import OpenCC
 
 from .config import AiSettings
-from .context.models import ContextRequest
+from .context.models import ContextRequest, ContextSource
 from .history.models import EventRole, NewEvent
 from .provider.models import BinaryPart
-from .routing import RouteRequest
+from .routing import RouteRequest, should_enable_web_fallback
 from .runtime.models import RuntimeRequest, RuntimeResult
 from .runtime.protocol import AiRuntime
 from .prompt.audit import redact_prompt
@@ -169,7 +169,11 @@ class AIService:
         try:
             user_event_id = f"{request.request_id}:user"
             self.events.append(NewEvent(user_event_id, request.user_id, request.channel_id, request.message_id, request.conversation_id, EventRole.USER, request.prompt, request.created_at, {"guild_id": request.guild_id}))
-            decision = self.router.route(request.route or self.router.infer(request.prompt, has_visual_attachment=bool(request.binary_parts)))
+            route = request.route or self.router.infer(
+                request.prompt,
+                has_visual_attachment=bool(request.binary_parts),
+            )
+            decision = self.router.route(route)
             is_gemma = decision.model_category == "gemma"
             context_request = ContextRequest(
                 user_id=request.user_id,
@@ -184,13 +188,21 @@ class AIService:
             context_pack = await self.context_planner.build(
                 context_request,
                 prompt=request.prompt,
-                route=request.route or self.router.infer(request.prompt, has_visual_attachment=bool(request.binary_parts)),
+                route=route,
                 initial_context=(
                     request.initial_context
                     + (() if self.user_context_provider is None else (render_user_context(self.user_context_provider(request.user_id)),))
                     + request.attachment_context
                 ),
             )
+            has_knowledge = any(
+                item.source is ContextSource.KNOWLEDGE
+                for item in getattr(context_pack, "items", ())
+            )
+            if should_enable_web_fallback(route, has_knowledge=has_knowledge):
+                # The local index was queried first.  Only an information
+                # request with no verified local evidence may consume Web.
+                decision = self.router.route(replace(route, wants_web=True))
             bundle = self.composer.compose(
                 sources=self.prompts.load(),
                 context=context_pack,
@@ -218,7 +230,13 @@ class AIService:
                 channel_id=request.channel_id,
                 guild_id=request.guild_id,
                 prompt=request.prompt,
-                system_instruction=bundle.system_instruction,
+                system_instruction=(
+                    bundle.system_instruction
+                    + ("\n\nLocal Knowledge returned no relevant evidence. "
+                       "Use Web only when it is needed to answer this factual request."
+                       if "web" in {item.value for item in decision.capabilities} and not route.wants_web
+                       else "")
+                ),
                 context_blocks=tuple(block.content for block in bundle.context_blocks),
                 binary_parts=request.binary_parts,
                 model_candidates=tuple(candidates),

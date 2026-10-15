@@ -18,7 +18,12 @@ from bot.mod.ai.config import AiSettings, DEFAULT_SETTINGS, model_selector_choic
 from bot.mod.ai.commands.discord import apply_model_selection
 from bot.mod.ai.provider.errors import ProviderQuotaError
 from bot.mod.ai.provider.models import ProviderResponse
-from bot.mod.ai.routing import RouteRequest, Router, extract_model_directive
+from bot.mod.ai.routing import (
+    RouteRequest,
+    Router,
+    extract_model_directive,
+    should_enable_web_fallback,
+)
 from bot.mod.ai.runtime.models import RuntimeRequest
 
 
@@ -171,3 +176,32 @@ def test_technical_how_to_question_prefetches_indexed_knowledge() -> None:
     route = Router().infer("怎麼做更新抑制器")
 
     assert route.wants_knowledge is True
+
+
+def test_general_factual_question_prefetches_knowledge_without_a_database_keyword() -> None:
+    route = Router().infer("太陽牌代表什麼？")
+
+    assert route.wants_knowledge is True
+    assert route.wants_web is False
+
+
+def test_casual_conversation_does_not_prefetch_knowledge_or_enable_web() -> None:
+    route = Router().infer("你今天心情怎麼樣？")
+
+    assert route.wants_knowledge is False
+    assert route.wants_web is False
+
+
+def test_missing_local_knowledge_enables_web_fallback_only_for_an_information_request() -> None:
+    route = Router().infer("太陽牌代表什麼？")
+
+    assert should_enable_web_fallback(route, has_knowledge=False) is True
+    assert should_enable_web_fallback(route, has_knowledge=True) is False
+
+
+def test_explicit_web_request_does_not_need_a_second_web_fallback_decision() -> None:
+    route = Router().infer("請搜尋最新塔羅展覽")
+
+    assert route.wants_knowledge is True
+    assert route.wants_web is True
+    assert should_enable_web_fallback(route, has_knowledge=False) is False
