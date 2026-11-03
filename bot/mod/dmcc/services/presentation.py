@@ -51,6 +51,7 @@ class ServerPresentation:
     label: str
     chat: RouteConfig
     events: RouteConfig
+    event_routes: Mapping[str, RouteConfig]
     event_channels: Mapping[str, str]
     templates: Mapping[str, str]
     disabled_events: frozenset[str]
@@ -84,26 +85,40 @@ class PresentationSettings:
                 raise PresentationError("presentation server_id must be text")
             if not isinstance(item, Mapping):
                 raise PresentationError("presentation server entry must be an object")
-            if set(item) - {"label", "chat", "events", "event_channels", "templates", "disabled_events"}:
+            if set(item) - {"label", "chat", "events", "event_routes", "event_channels", "templates", "disabled_events"}:
                 raise PresentationError("unknown presentation server option")
             label = item.get("label", server_id)
             if not isinstance(label, str) or not label.strip() or len(label) > 80:
                 raise PresentationError("presentation.label must be non-empty and at most 80 characters")
             chat = _route(item.get("chat", {}), env, f"{server_id}.chat")
             events = _route(item.get("events", {}), env, f"{server_id}.events")
+            raw_routes = item.get("event_routes", {})
             raw_channels = item.get("event_channels", {})
             raw_templates = item.get("templates", {})
             raw_disabled = item.get("disabled_events", [])
+            if not isinstance(raw_routes, Mapping):
+                raise PresentationError("event_routes must be an object")
             if not isinstance(raw_channels, Mapping):
                 raise PresentationError("event_channels must be an object")
             if not isinstance(raw_templates, Mapping):
                 raise PresentationError("templates must be an object")
             if not isinstance(raw_disabled, list):
                 raise PresentationError("disabled_events must be a list")
+            routes: dict[str, RouteConfig] = {}
+            for kind, value in raw_routes.items():
+                _event_name(kind)
+                if kind == "player_chat":
+                    raise PresentationError("player_chat must use the chat route")
+                routes[kind] = _route(value, env, f"{server_id}.event_routes.{kind}")
             channels: dict[str, str] = {}
             templates: dict[str, str] = {}
             for kind, value in raw_channels.items():
                 _event_name(kind)
+                if kind == "player_chat":
+                    raise PresentationError("player_chat must use chat.channel_id")
+                selected = routes.get(kind, events)
+                if selected.mode == "webhook":
+                    raise PresentationError("event_channels cannot redirect Webhook routes; configure event_routes with its own webhook")
                 channels[kind] = _channel(value)
             for kind, value in raw_templates.items():
                 _event_name(kind)
@@ -112,7 +127,7 @@ class PresentationSettings:
                 _event_name(kind)
             result[server_id] = ServerPresentation(
                 label.strip(), chat, events,
-                MappingProxyType(channels), MappingProxyType(templates),
+                MappingProxyType(routes), MappingProxyType(channels), MappingProxyType(templates),
                 frozenset(raw_disabled),
             )
         return cls(MappingProxyType(result))
@@ -143,7 +158,12 @@ def _template(raw: object, name: str) -> str:
     if not isinstance(raw, str) or not raw.strip() or len(raw) > 2000:
         raise PresentationError(f"{name} must be non-empty text of at most 2000 characters")
     try:
-        fields = [field for _, field, _, _ in Formatter().parse(raw) if field is not None]
+        fields = []
+        for _, name, format_spec, conversion in Formatter().parse(raw):
+            if name is not None:
+                if format_spec or conversion:
+                    raise PresentationError(f"{name} does not permit format modifiers")
+                fields.append(name)
     except ValueError as exc:
         raise PresentationError(f"{name} has malformed braces") from exc
     if any(field not in _FIELDS for field in fields):
@@ -207,7 +227,7 @@ def render_message(
     """Build one safe, bounded message without contacting Discord or Minecraft."""
     if event.type not in EVENT_TYPES or event.type in profile.disabled_events:
         return None
-    route = profile.chat if event.type == "player_chat" else profile.events
+    route = profile.chat if event.type == "player_chat" else profile.event_routes.get(event.type, profile.events)
     channel_id = profile.event_channels.get(event.type) or route.channel_id or default_channel
     if channel_id is None:
         return None
