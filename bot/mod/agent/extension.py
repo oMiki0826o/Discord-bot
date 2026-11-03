@@ -36,6 +36,7 @@ async def setup(bot) -> None:
     except OSError:
         logger.warning("Could not initialize editable Skill directory", exc_info=True)
     from .config import DEFAULT_SETTINGS, SETTINGS_NAME, build_settings_schema, AgentSettings
+    from .status_cog import AgentStatusCog
 
     raw = settings.register(
         SETTINGS_NAME,
@@ -49,6 +50,7 @@ async def setup(bot) -> None:
         read_only=True,
     )
     _loaded_runtimes[bot] = runtime
+    await bot.add_cog(AgentStatusCog(bot, AgentSettings.from_mapping(raw)))
 
 
 async def teardown(bot) -> None:
@@ -57,6 +59,7 @@ async def teardown(bot) -> None:
     runtime = _loaded_runtimes.pop(bot, None)
     if runtime is None:
         return
+    await bot.remove_cog("AgentStatusCog")
     from ..ai.api import unregister_runtime_extension
 
     removed = unregister_runtime_extension(bot, owner="agent")
