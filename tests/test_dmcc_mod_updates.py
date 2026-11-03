@@ -91,3 +91,34 @@ def test_mod_update_never_announces_unknown_or_incompatible_installed_versions()
         assert sender.messages == []
 
     asyncio.run(scenario())
+
+
+def test_mod_update_skips_cached_inventory_when_bridge_disconnects():
+    async def scenario():
+        calls = []
+        class Manager:
+            connected = True
+            def get(self, server_id):
+                return object() if self.connected else None
+
+        manager = Manager()
+        async def fetch(project, version):
+            calls.append(project)
+            return [
+                {"version_number": "1.1.0", "game_versions": ["1.21.8"], "loaders": ["fabric"]},
+                {"version_number": "1.0.0", "game_versions": ["1.21.8"], "loaders": ["fabric"]},
+            ]
+        sender = Sender()
+        service = ModUpdateService(_config(), sender, fetch_versions=fetch, connection_manager=manager)
+        await service.on_event(MinecraftEvent("server_started", "survival", {
+            "minecraft_version": "1.21.8",
+            "mods": [{"mod_id": "lithium", "version": "1.0.0"}],
+        }))
+        manager.connected = False
+        await service.run_once()
+        assert calls == []
+        assert sender.messages == []
+        manager.connected = True
+        await service.run_once()
+        assert len(sender.messages) == 1
+    asyncio.run(scenario())
