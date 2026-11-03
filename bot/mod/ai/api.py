@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .provider.models import GenerationRequest, ProviderPolicy, ProviderToolCall
+from .provider.models import GenerationRequest, ProviderPolicy, ProviderToolCall, TokenUsage
 from .provider.errors import ProviderQuotaError
 from .routing import contains_url
 from .runtime.host import RuntimeFactory, RuntimeHost
@@ -42,6 +42,7 @@ class ProviderTurn:
     function_calls: tuple[ProviderToolCall, ...]
     model: str
     model_content: Any = None
+    usage: TokenUsage | None = None
 
 
 @dataclass(slots=True)
@@ -119,7 +120,7 @@ class AiServices:
                 allow_combined_tools=False,
                 max_output_tokens=self._settings.max_output_tokens,
             ))
-        return ProviderTurn(response.text, response.tool_calls, response.model, response.model_content)
+        return ProviderTurn(response.text, response.tool_calls, response.model, response.model_content, response.usage)
 
     async def search_requester_memory(self, request: RuntimeRequest, query: str, *, limit: int = 20):
         if self._retrieval is None:

@@ -35,7 +35,7 @@ class AiModelAdapter:
             ToolCall(call.name, dict(call.arguments), call.thought_signature, call.call_id)
             for call in response.function_calls
         )
-        return ModelTurn(response.text, calls, response.model, response.model_content)
+        return ModelTurn(response.text, calls, response.model, response.model_content, response.usage)
 
     async def close(self) -> None:
         return None

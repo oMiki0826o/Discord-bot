@@ -147,3 +147,36 @@ def test_tool_registry_preserves_structured_truncation() -> None:
     assert isinstance(result.data, dict)
     assert result.data["truncated"] is True
     assert len(json.dumps(result.data, ensure_ascii=False)) <= 100
+
+
+def test_agent_aggregates_real_provider_usage_across_model_turns() -> None:
+    from bot.mod.agent.runtime import AgentRuntime, ModelTurn
+    from bot.mod.agent.config import AgentSettings
+    from bot.mod.agent.tools import Tool, ToolCall, ToolRegistry
+    from bot.mod.ai.runtime.models import RuntimeRequest
+
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        async def generate_turn(self, request, transcript, declarations, *, allow_tools):
+            del request, transcript, declarations, allow_tools
+            self.calls += 1
+            if self.calls == 1:
+                return ModelTurn(function_calls=(ToolCall("search", {}),), model="gemini",
+                                 usage=TokenUsage(120, 10, 135, 5))
+            return ModelTurn(final_text="Found.", model="gemini",
+                             usage=TokenUsage(200, 40, 250, 10))
+
+    async def handler(args, context):
+        del args, context
+        return {"found": True}
+
+    reg = ToolRegistry()
+    reg.register(Tool("search", "search", "knowledge", frozenset(), handler))
+    request = RuntimeRequest(request_id="r", user_id="u", channel_id="c", prompt="search",
+                             model_candidates=("gemini",), capabilities=frozenset({"knowledge"}))
+    runtime = AgentRuntime(Model(), reg, AgentSettings(3, 4, 10, 2))
+    result = asyncio.run(runtime.run(request))
+    assert result.text == "Found."
+    assert result.usage == TokenUsage(320, 50, 385, 15)
