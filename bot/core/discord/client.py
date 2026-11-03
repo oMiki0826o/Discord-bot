@@ -61,6 +61,7 @@ class DiscordBot(commands.Bot):
 
         self._ready_once = False
         self._module_loader: ModuleLoader | None = None
+        self._presence_override: tuple[str, str, str] | None = None
 
     async def is_owner(self, user: discord.abc.User) -> bool:
         """套用全專案共用的 Owner Policy。"""
@@ -206,6 +207,23 @@ class DiscordBot(commands.Bot):
 
     # ── Presence ──────────────────────
 
+    def set_presence_override(self, owner: str, activity_text: str, status: str) -> bool:
+        """Set an explicitly configured module-owned override without stealing another's."""
+        if not owner or not activity_text or status not in {"online", "idle", "dnd", "invisible"}:
+            raise ValueError("Invalid Presence override")
+        existing = self._presence_override
+        if existing is not None and existing[0] != owner:
+            return False
+        self._presence_override = (owner, activity_text[:128], status)
+        return True
+
+    async def clear_presence_override(self, owner: str) -> None:
+        """Restore the user's normal Presence only if this module owns the override."""
+        existing = self._presence_override
+        if existing is not None and existing[0] == owner:
+            self._presence_override = None
+            await self.refresh_presence()
+
     async def refresh_presence(
         self,
     ) -> tuple[
@@ -215,6 +233,11 @@ class DiscordBot(commands.Bot):
         """重新讀取 Settings 並更新 Discord Presence。"""
 
         activity, status = build_presence()
+        override = self._presence_override
+        if override is not None:
+            _, text, overridden_status = override
+            activity = discord.Game(name=text)
+            status = getattr(discord.Status, overridden_status)
 
         await self.change_presence(
             activity=activity,
