@@ -1,4 +1,10 @@
-"""Authenticated Minecraft events to Discord.
+"""bot/mod/dmcc/services/minecraft_discord_relay.py
+
+Modification():
+
+- Preserve legacy relay behavior while supporting Minecraft presentation routing.
+
+Authenticated Minecraft events to Discord.
 
 The legacy one-channel Bot route remains intact unless a server explicitly
 opts into a presentation profile. No Discord API calls occur in this service.
