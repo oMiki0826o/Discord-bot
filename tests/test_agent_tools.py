@@ -290,3 +290,22 @@ def test_agent_preserves_full_provider_tool_context_in_the_tool_transcript() -> 
     ).run(request))
 
     assert result.text == "verified"
+
+
+def test_unsafe_mcp_failure_is_sanitized_in_tool_result() -> None:
+    async def handler(arguments, context):
+        del arguments, context
+        raise ConnectionError("private MCP password and address")
+
+    registry = ToolRegistry()
+    registry.register(Tool("knowledge", "search", "knowledge", frozenset(), handler))
+    request = RuntimeRequest(
+        request_id="req", user_id="user", channel_id="channel", prompt="query",
+        model_candidates=("gemini",), capabilities=frozenset({"knowledge"}),
+    )
+    result = asyncio.run(
+        registry.execute(ToolCall("knowledge", {}), ToolContext(request, request.capabilities, 2)),
+    )
+    assert result.ok is False
+    assert result.error == "tool_unavailable"
+    assert "password" not in repr(result)
