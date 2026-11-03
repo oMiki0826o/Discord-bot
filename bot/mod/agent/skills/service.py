@@ -1,6 +1,9 @@
 """
 bot/mod/agent/skills/service.py
 Read editable SKILL.md files with strict paths, sizes and encoding.
+
+Modification():
+- Strengthen AI/Agent correctness and compatibility.
 """
 from __future__ import annotations
 

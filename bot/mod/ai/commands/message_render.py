@@ -1,7 +1,10 @@
 """
 bot/mod/ai/commands/message_render.py
 
-Discord-native, neutral usage footer. Never invent token counts."""
+Discord-native, neutral usage footer. Never invent token counts.
+Modification():
+- Strengthen AI/Agent correctness and compatibility.
+"""
 from __future__ import annotations
 from ..runtime.models import RuntimeResult
 

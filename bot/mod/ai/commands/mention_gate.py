@@ -1,7 +1,10 @@
 """
 bot/mod/ai/commands/mention_gate.py
 
-Only a direct leading mention of the real bot may trigger conversational AI."""
+Only a direct leading mention of the real bot may trigger conversational AI.
+Modification():
+- Strengthen AI/Agent correctness and compatibility.
+"""
 from __future__ import annotations
 import re
 
