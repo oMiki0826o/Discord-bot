@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_bridge_artifact_is_built_in_ci_from_matching_sources() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "./gradlew --no-daemon test remapJar" in workflow
+    assert "./gradlew --no-daemon" in workflow
+    assert "test remapJar" in workflow
+    assert "-Pminecraft_version=" in workflow
     assert "cp build/libs/minecraft-bridge-0.2.4.jar ../java_bridge.jar" in workflow
     assert "sha256sum java_bridge.jar > SHA256SUMS" in workflow
     assert "uses: actions/download-artifact@v4" in workflow
