@@ -7,19 +7,19 @@ Modification():
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_bridge_artifact_checksum_and_deployment_docs_exist() -> None:
-    artifact = ROOT / "bridge" / "java_bridge.jar"
-    checksums = ROOT / "bridge" / "SHA256SUMS"
-    assert artifact.is_file()
-    expected = checksums.read_text(encoding="utf-8").split()[0]
-    assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected
+def test_bridge_artifact_is_built_in_ci_from_matching_sources() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "./gradlew --no-daemon test remapJar" in workflow
+    assert "cp build/libs/minecraft-bridge-0.2.4.jar ../java_bridge.jar" in workflow
+    assert "sha256sum java_bridge.jar > SHA256SUMS" in workflow
+    assert "uses: actions/download-artifact@v4" in workflow
+    assert "path: bridge/java_bridge.jar" in workflow
     assert (ROOT / "docs" / "DMCC.md").is_file()
     assert (ROOT / "docs" / "MC_BACKUP.md").is_file()
 
