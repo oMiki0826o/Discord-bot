@@ -271,9 +271,11 @@ def render_message(
         "label": str(data.get("advancement_type", "")).strip(),
     }
     if event.type == "player_chat":
-        content = values["message"] if route.mode == "webhook" else (
-            f"[{profile.label}] <{values['player']}> {values['message']}"
+        template = profile.templates.get(
+            "player_chat",
+            "{message}" if route.mode == "webhook" else "[{server}] <{player}> {message}",
         )
+        content = template.format_map(values)
     else:
         content = profile.templates.get(event.type, _EVENT_TEMPLATES[event.type]).format_map(values)
     content = content.strip()[:1950]
