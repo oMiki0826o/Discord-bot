@@ -174,7 +174,7 @@ public final class BridgeMod implements ModInitializer {
         try {
             active.publishEvent(new ProtocolEnvelope(
                 1, "server_metrics", serverId, null,
-                MetricSnapshot.from(server.getAverageNanosPerTick() / 1_000_000.0, server.getPlayerCount(), server.getMaxPlayers())
+                MetricSnapshot.from(server.getAverageTickTimeNanos() / 1_000_000.0, server.getPlayerCount(), server.getMaxPlayers())
             ));
         } catch (IllegalArgumentException invalid) {
             LOGGER.debug("Unable to capture Minecraft server timing: {}", invalid.getMessage());
