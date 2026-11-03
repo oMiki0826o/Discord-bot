@@ -66,9 +66,9 @@ def _config(**options):
         "interval_seconds": 60,
         "servers": {"survival": {
             "label": "生存服",
-            "alert_channel_id": "111",
-            "topic_channel_id": "222",
-            "status_voice_channel_id": "333",
+            "alert_channel_id": "111111111111111111",
+            "topic_channel_id": "222222222222222222",
+            "status_voice_channel_id": "333333333333333333",
             "mspt_threshold": 45,
             "mspt_recovery": 40,
             **options,
@@ -99,28 +99,28 @@ def test_monitor_alert_recovery_presence_and_changed_only_edits():
         })
         await monitor.on_event(event(49.0))
         await monitor.run_once()
-        assert bot.channels["111"].sent == []
+        assert bot.channels["111111111111111111"].sent == []
         assert bot.presence == ("dmcc", "Minecraft | 3 人在線", "online")
-        assert bot.channels["222"].edits[-1]["topic"] == "生存服 | Online | 3/20 | 49.0 MSPT"
-        assert bot.channels["333"].edits[-1]["name"] == "生存服 · Online"
+        assert bot.channels["222222222222222222"].edits[-1]["topic"] == "生存服 | Online | 3/20 | 49.0 MSPT"
+        assert bot.channels["333333333333333333"].edits[-1]["name"] == "生存服 · Online"
         clock[0] += 60
         await monitor.on_event(event(50.0))
         await monitor.run_once()
-        assert len(bot.channels["111"].sent) == 1
-        assert "MSPT" in bot.channels["111"].sent[0][0]
+        assert len(bot.channels["111111111111111111"].sent) == 1
+        assert "MSPT" in bot.channels["111111111111111111"].sent[0][0]
         await monitor.run_once()
-        assert len(bot.channels["111"].sent) == 1
-        assert len(bot.channels["222"].edits) == 1  # Discord channel edits have a cooldown.
+        assert len(bot.channels["111111111111111111"].sent) == 1
+        assert len(bot.channels["222222222222222222"].edits) == 1  # Discord channel edits have a cooldown.
         clock[0] += 601
         await monitor.on_event(event(38.0))
         await monitor.run_once()
-        assert len(bot.channels["111"].sent) == 2
-        assert "恢復" in bot.channels["111"].sent[1][0]
+        assert len(bot.channels["111111111111111111"].sent) == 2
+        assert "恢復" in bot.channels["111111111111111111"].sent[1][0]
         manager.connected.clear()
         clock[0] += 601
         await monitor.run_once()
         assert bot.presence == ("dmcc", "Minecraft | 0 人在線", "dnd")
-        assert bot.channels["333"].edits[-1]["name"] == "生存服 · Offline"
+        assert bot.channels["333333333333333333"].edits[-1]["name"] == "生存服 · Offline"
         await monitor.close()
         assert bot.clear_calls == ["dmcc"]
 
@@ -144,7 +144,7 @@ def test_invalid_or_stale_metrics_cannot_raise_alert():
         }))
         clock[0] += 400
         await monitor.run_once()
-        assert not bot.channels["111"].sent
+        assert not bot.channels["111111111111111111"].sent
         await monitor.close()
 
     asyncio.run(check())
