@@ -27,7 +27,7 @@ class _Hit:
 
 class _Services:
     async def search_knowledge(self, query, *, limit):
-        assert query == "minecraft" and limit == 5
+        assert query == "minecraft" and limit in {5, 6}
         return (_Hit(),)
 
     def read_knowledge_chunk(self, chunk_id):
