@@ -2,6 +2,20 @@
 
 本專案以 Git 推送可追蹤檔案到公開 GitHub repository. 不要使用 GitHub 網頁直接拖曳整個工作目錄, 因為那樣不會套用 `.gitignore`.
 
+## v0.3.0 — AI / Agent Core Refactor & Discord UX
+
+- 維持 Discord 原生聊天介面，複雜任務顯示真實執行進度，完成後編輯為答案；純文字不使用 emoji。
+- 回覆小字分別顯示輸入與輸出 Token、Gemini 提供的思考 Token、端到端耗時與平均 Token/s；不虛構缺少的使用量。
+- 僅允許直接 @Bot 或 `/ai` 觸發 AI；避免 `@everyone`、`@here`、Role Mention、句中提及誤判。
+- 將 Agent Tools 與 Skills 拆成套件，強化工具執行上限、參數安全、混合文字／Function Call 處理及模組載入失敗回滾。
+- 第一次啟動建立 `data/agent/skills/使用說明.md`，重啟不覆寫使用者資料；限制 Skill 路徑、大小與符號連結。
+- 以官方 MCP Python SDK 建立無公開連接埠的 Knowledge 唯讀 Tool Server，保留 SQLite FTS5／Gemini Embedding 原有 RAG 機制。
+- Redis 為可選的本機／遠端快取及速率限制；記憶、對話與私人模型回答不跨使用者共用；修復 Redis Await 競態。
+- MarkItDown 文件轉換整合為 Core 共用服務，並新增固定權限 Scope、事件 Trace、錯誤降級與安全測試。
+- 專案版本與雙語 README 同步更新；內部協作紀錄不提交到公開 GitHub，也不進入 Runtime ZIP。
+
+部署提醒：CI 通過不等於真實 Discord Server、Gemini API 與 Redis 服務已完成線上驗收；正式更新前請先備份 `data/` 與 `settings/`，再按 `docs/INSTALL.md` 逐項測試。
+
 ## v0.2.3 — Consistency & Protocol Contracts
 
 - AI Owner data 改用 staging tables 與短 SQLite transaction 原子發布。
@@ -71,7 +85,7 @@ git status
 - `tools/` 會保留在公開原始碼倉庫供 CI 與維護使用，但會由正式使用者 ZIP 排除.
 - 其他內部協作暫存資料.
 
-這些路徑已由 `.gitignore` 排除. `.env.example` 與 `settings/README.md` 會保留, 讓部署者知道必要環境變數與設定位置.
+這些路徑已由 `.gitignore` 排除；正式發布 ZIP 也以白名單排除內部協作目錄。**注意已被 Git 追蹤的檔案不會因新增 `.gitignore` 而自動隱藏，合併前仍需檢查 PR 檔案列表。** `.env.example` 與 `settings/README.md` 會保留, 讓部署者知道必要環境變數與設定位置.
 
 ## 推送前檢查
 
