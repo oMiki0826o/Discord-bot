@@ -74,8 +74,8 @@ Bridge 以 `settings/dmcc.json` 的 `presentation` 區塊控制輸出。沒有�
           "username": "KunlunSMP🌸"
         },
         "templates": {
-          "player_join": "{player} 加入了 {server}",
-          "player_quit": "{player} 離開了 {server}"
+          "player_join": "**{player} 加入了 {server}**",
+          "player_quit": "**{player} 離開了 {server}**"
         },
         "event_routes": {
           "player_death": {"mode": "bot", "channel_id": "123456789012345678"}

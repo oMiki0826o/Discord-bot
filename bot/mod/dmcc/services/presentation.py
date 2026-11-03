@@ -28,13 +28,13 @@ _FIELDS = frozenset({
     "player", "server", "message", "death_message", "game_mode", "title", "label",
 })
 _EVENT_TEMPLATES = {
-    "player_join": "{player} 加入了 {server}",
-    "player_quit": "{player} 離開了 {server}",
-    "player_death": "{death_message}",
-    "player_advancement": "{player} 完成了進度 [{title}]",
-    "player_gamemode": "{player} 切換遊戲模式為 {game_mode}",
-    "server_started": "{server} 已啟動",
-    "server_stopping": "{server} 即將關閉",
+    "player_join": "**{player} 加入了 {server}**",
+    "player_quit": "**{player} 離開了 {server}**",
+    "player_death": "**{death_message}**",
+    "player_advancement": "**{player} 完成了進度 [{title}]**",
+    "player_gamemode": "**{player} 切換遊戲模式為 {game_mode}**",
+    "server_started": "**{server} 已啟動**",
+    "server_stopping": "**{server} 即將關閉**",
 }
 _DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
