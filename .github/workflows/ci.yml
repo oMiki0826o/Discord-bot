@@ -48,8 +48,16 @@ jobs:
             requirements-dev.txt
       - name: Install locked development dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Download current built Fabric bridge
+        uses: actions/download-artifact@v4
+        with:
+          name: minecraft-bridge
+          path: bridge
+      - name: Verify downloaded bridge checksum
+        working-directory: bridge
+        run: sha256sum --check SHA256SUMS
       - name: Build reproducible release archive
-        run: python tools/build_release.py
+        run: python tools/build_release.py --require-bridge
       - name: Verify release archive
         run: python -m zipfile --test "dist/Discord-Bot-v$(cat VERSION).zip"
       - name: Read release version
@@ -79,13 +87,19 @@ jobs:
       - name: Test and build Fabric bridge
         working-directory: bridge/minecraft-bridge
         run: ./gradlew --no-daemon test remapJar
-      - name: Verify published bridge artifact
+      - name: Stage compiled Fabric bridge and checksum
         working-directory: bridge/minecraft-bridge
-        run: cmp build/libs/minecraft-bridge-0.2.3.jar ../java_bridge.jar
+        run: |
+          cp build/libs/minecraft-bridge-0.2.4.jar ../java_bridge.jar
+          cd ..
+          sha256sum java_bridge.jar > SHA256SUMS
+          sha256sum --check SHA256SUMS
       - name: Upload verified Fabric bridge
         uses: actions/upload-artifact@v4
         with:
           name: minecraft-bridge
-          path: bridge/java_bridge.jar
+          path: |
+            bridge/java_bridge.jar
+            bridge/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
