@@ -16,6 +16,7 @@ from types import MappingProxyType
 
 from .domain.models import ManagedServer
 from .services.presentation import PresentationError, PresentationSettings
+from .services.monitoring import MonitoringConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -31,6 +32,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "providers": {"control": [], "backup": []},
     "servers": [],
     "presentation": {"servers": {}},
+    "monitoring": {"enabled": False, "servers": {}},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -49,6 +51,7 @@ def build_settings_schema(rule_type):
         "providers": rule_type(dict),
         "servers": rule_type(list),
         "presentation": rule_type(dict),
+        "monitoring": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -85,6 +88,7 @@ class DmccSettings:
     control_providers: tuple[ControlProviderDefinition, ...] = ()
     backup_providers: tuple[BackupProviderDefinition, ...] = ()
     presentation: PresentationSettings = field(default_factory=PresentationSettings.empty)
+    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -121,6 +125,12 @@ class DmccSettings:
         unknown = set(presentation.servers) - {server.server_id for server in servers}
         if unknown:
             raise SettingsError("presentation references an unknown server_id")
+        try:
+            monitoring = MonitoringConfig.from_mapping(
+                raw.get("monitoring", {}), {server.server_id for server in servers}
+            )
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -135,6 +145,7 @@ class DmccSettings:
             control_providers=controls,
             backup_providers=backups,
             presentation=presentation,
+            monitoring=monitoring,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 
