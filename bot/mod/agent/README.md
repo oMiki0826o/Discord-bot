@@ -47,3 +47,13 @@ Discord Client、任意檔案路徑、Shell、API key、token 或其他 Feature 
 - `tool_timeout_seconds`
 
 AI Provider、Memory、Prompt、Context 與 Attachment 設定仍屬於 `settings/ai.json`。
+
+## v2.3 分支更新
+
+- `tools/` 與 `skills/` 正式套件重構（保留舊 `builtin_tools.py` 匯出）。
+- 首次啟動自動建立 `data/agent/skills/使用說明.md`；不覆寫使用者 Skill。
+- 本地唯讀 MCP 轉接 Knowledge 索引，無外部連接埠，不提供 SQL 或寫入。
+- `settings/agent.json` 可使用 `privileged_users: ["<@12345678987654321>"]` 指定少量使用者檢視唯讀 `$agentstatus`。
+- Agent 多回合用量彙總、真實執行事件由 AI Discord 層顯示。
+
+更多詳見 `docs/AI_AGENT_ARCHITECTURE.md`。
