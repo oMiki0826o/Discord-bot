@@ -35,7 +35,7 @@ Extension 會透過 `settings.register("ai", DEFAULT_SETTINGS, SETTINGS_SCHEMA)`
 
 ## Discord 入口
 
-- `@Bot <message>`：Mention 對話。
+- `<@BotID> <message>`：**起始** Bot Mention 對話；廣播、Role Mention 與句中提及不觸發。
 - `/ai prompt:<message> [attachment]`：Slash 對話。
 - `$ai status`、`$ai models`、`$ai quota`、`$ai cache`、`$ai prompt`、`$ai reload`：Owner 管理。
 - `$ai index [rebuild|status]`：重建或查看 Knowledge index；直接執行 `$ai index` 等同 rebuild。
@@ -45,6 +45,22 @@ Extension 會透過 `settings.register("ai", DEFAULT_SETTINGS, SETTINGS_SCHEMA)`
 
 Mention 與 Slash 共用同一 `AIService`、Guard、Active Runtime、Provider 與
 Memory Pipeline。
+
+## AI 回覆與執行進度（v0.3.0）
+
+Discord 介面維持一般訊息，不使用 Embed 或 emoji。僅接受位於訊息開頭的真實 Bot Mention（`<@BotID>` 或 `<@!BotID>`）及 `/ai`；`@everyone`、`@here`、Role Mention、句中提及與引用內容都不算呼叫。
+
+短問題直接回覆；需要較久時間的請求會先顯示由程式發出的真實 Context／Model／Tool 事件，再將**同一則**訊息編輯成答案。事件不包含模型內部推理、Prompt 原文、私人記憶或 Tool 參數；Discord 更新採限速，避免大量 API 請求。
+
+回覆最後使用 Discord `-#` 小字，分別標示**輸入與輸出 Token**、可用時的 Gemini 思考 Token、耗時，以及「端到端」平均 Token/s。使用量優先採 Gemini API Metadata，多回合 Agent 會累加。缺少 Metadata 時顯示 `—`，不將估算值當成測量結果。
+
+## Redis 與快取
+
+Redis **非必需**。若環境設定 `AI_REDIS_URL=redis://127.0.0.1:6379/0`，使用 Redis 存放短期的匿名化速率限制計數器與公開 Knowledge Chunk ID／排名資訊；命中後仍要重新驗證來源原稿。Redis 斷線則回退原有單進程 Guard 與 SQLite 檢索。私人 History／Memory 與個人化回答不寫入 Redis 共用快取。
+
+Search Cache 取消跨不同查詢的 fuzzy 命中；可快取回覆必須包含使用者、頻道、模型、上下文與系統指令的隔離鍵。時效性搜尋或含網址的請求不重用舊的完整回答。既有 SQLite 資料保留不變。
+
+詳細介面、Agent 依賴及安全限制見 [AI / Agent 架構](../../../docs/AI_AGENT_ARCHITECTURE.md)。
 
 ## 基礎檢索與權限
 
