@@ -98,7 +98,7 @@ def should_include(relative: Path) -> bool:
         ("docs", "collaboration"),
     }:
         return False
-    if relative.parts[:2] == ("bridge", "minecraft-bridge"):
+    if relative.parts[:2] in {("bridge", "minecraft-bridge"), ("bridge", "builds")}:
         return False
     if relative.suffix.casefold() in _EXCLUDED_SUFFIXES:
         return False
@@ -148,6 +148,14 @@ def build_release(output: Path | None = None, *, require_bridge: bool = False) -
         parts = sums.read_text(encoding="utf-8").strip().split()
         if len(parts) != 2 or parts[1] != "java_bridge.jar" or hashlib.sha256(artifact.read_bytes()).hexdigest() != parts[0]:
             raise RuntimeError("Minecraft Bridge artifact checksum is invalid")
+        for version in ("1.21.9",):
+            extra = PROJECT_ROOT / "bridge" / "versions" / version
+            binary, checksums = extra / "java_bridge.jar", extra / "SHA256SUMS"
+            if binary not in files or checksums not in files:
+                raise RuntimeError(f"Missing compiled Minecraft Bridge for {version}")
+            entry = checksums.read_text(encoding="utf-8").strip().split()
+            if len(entry) != 2 or entry[1] != "java_bridge.jar" or hashlib.sha256(binary.read_bytes()).hexdigest() != entry[0]:
+                raise RuntimeError(f"Minecraft Bridge checksum mismatch for {version}")
     if not files:
         raise RuntimeError("找不到可發布檔案")
 
