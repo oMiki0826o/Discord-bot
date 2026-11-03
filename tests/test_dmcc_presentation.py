@@ -83,6 +83,24 @@ def test_event_webhook_has_independent_name_channel_and_template() -> None:
     assert payload.avatar_url is None
 
 
+def test_custom_chat_template_applies_for_bot_and_webhook() -> None:
+    for mode in ("bot", "webhook"):
+        chat = {"mode": mode}
+        if mode == "webhook":
+            chat["webhook_url_env"] = "MC_WEBHOOK"
+        settings = _settings({"servers": {"survival": {
+            "label": "Survival",
+            "chat": chat,
+            "templates": {"player_chat": "{player} 說：{message}"},
+        }}})
+        event = MinecraftEvent("player_chat", "survival", {
+            "player_name": "Steve", "message": "hello",
+        })
+        payload = render_message(event, settings.presentation.servers["survival"], "111")
+        assert payload is not None
+        assert payload.content == "Steve 說：hello"
+
+
 def test_disabled_event_returns_no_payload() -> None:
     settings = _settings({"servers": {"survival": {"disabled_events": ["player_join"]}}})
     event = MinecraftEvent("player_join", "survival", {"player_name": "Steve"})
