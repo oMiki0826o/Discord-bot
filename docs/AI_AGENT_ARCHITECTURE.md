@@ -1,6 +1,6 @@
 # AI / Agent 模組架構
 
-> 本文件描述 Discord Bot 的 AI 與 Agent v2.3 開發分支。功能是否正式可用以 GitHub Actions 測試結果與部署驗收為準。
+> 本文件描述 Discord Bot v0.3.0 的 AI／Agent 模組架構。程式測試使用 GitHub Actions；正式 Discord、Gemini API 和 Redis 服務仍需依部署環境驗收。
 
 ## 核心分工
 
@@ -36,6 +36,10 @@
 ## Redis（可選）
 
 在執行環境設定 `AI_REDIS_URL=redis://host:6379/0` 才啟用 Redis。Redis 保存 SHA-256 雜湊的使用者 ID 與短期速率限制計數器；公開 Knowledge 搜尋只快取雜湊查詢鍵、Chunk ID 與必要排序中繼資料，命中時必須重新讀取並驗證 Knowledge 原稿。不快取個人化模型回答、對話、私人記憶或 API Key。Redis 斷線時回退到本機 Guard，不阻止所有請求；單一進程正常運作不需要安裝 Redis Server。
+
+## 本機資料與公開文件邊界
+
+`data/`、`.env`、`settings/*.json`、`data/superpowers/`、`.superpowers/`、`docs/superpowers/`、`docs/internal/` 與其他 AI 協作工作筆記**僅供本機使用，不得提交到公開 GitHub**。使用者公開文件是根目錄單一雙語 `README.md`、模組的 `README.md` 與 `docs/` 下正式說明，不要將審查過程或內部工作日誌當成公開設計文件。發布 ZIP 同樣排除上述協作路徑。
 
 ## 偵錯與部署
 
