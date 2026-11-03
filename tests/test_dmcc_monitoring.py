@@ -94,7 +94,7 @@ def test_monitor_alert_recovery_presence_and_changed_only_edits():
         monitor = MonitoringService(bot, manager, _config(), clock=lambda: clock[0])
         def event(mspt):
             return MinecraftEvent("server_metrics", "survival", {
-                "mspt": mspt, "tps": 1000 / mspt, "online_players": 3, "max_players": 20,
+                "mspt": mspt, "tps": min(20.0, 1000 / mspt), "online_players": 3, "max_players": 20,
             })
         await monitor.on_event(event(49.0))
         await monitor.run_once()

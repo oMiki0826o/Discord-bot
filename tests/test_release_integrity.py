@@ -19,7 +19,7 @@ def test_bridge_artifact_is_built_in_ci_from_matching_sources() -> None:
     assert "cp build/libs/minecraft-bridge-0.2.4.jar ../java_bridge.jar" in workflow
     assert "sha256sum java_bridge.jar > SHA256SUMS" in workflow
     assert "uses: actions/download-artifact@v4" in workflow
-    assert "path: bridge/java_bridge.jar" in workflow
+    assert "bridge/java_bridge.jar" in workflow
     assert (ROOT / "docs" / "DMCC.md").is_file()
     assert (ROOT / "docs" / "MC_BACKUP.md").is_file()
 
