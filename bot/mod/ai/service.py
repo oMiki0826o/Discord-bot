@@ -27,7 +27,7 @@ from .history.models import EventRole, NewEvent
 from .provider.models import BinaryPart
 from .routing import RouteRequest
 from .runtime.models import RuntimeRequest, RuntimeResult
-from .runtime.events import ProgressSink, notify
+from .runtime.events import ProgressEvent, ProgressSink, notify
 from .runtime.protocol import AiRuntime
 from .prompt.audit import redact_prompt
 
@@ -138,7 +138,7 @@ class AIResponse:
 
 
 class AIService:
-    def __init__(self, *, settings: AiSettings, events: Any, context: Any, context_planner: Any, prompts: Any, composer: Any, router: Any, guard: Any, runtime: AiRuntime, memory_jobs: Any, audit_sink: Callable[[str, str, str], Awaitable[None]] | None = None, user_context_provider: Callable[[str], dict[str, Any]] | None = None, interaction_recorder: Callable[[str], int] | None = None) -> None:
+    def __init__(self, *, settings: AiSettings, events: Any, context: Any, context_planner: Any, prompts: Any, composer: Any, router: Any, guard: Any, runtime: AiRuntime, memory_jobs: Any, audit_sink: Callable[[str, str, str], Awaitable[None]] | None = None, user_context_provider: Callable[[str], dict[str, Any]] | None = None, interaction_recorder: Callable[[str], int] | None = None, telemetry_recorder: Callable[[str, str, str], None] | None = None) -> None:
         self.settings = settings
         self.events = events
         self.context = context
@@ -152,6 +152,7 @@ class AIService:
         self.audit_sink = audit_sink
         self.user_context_provider = user_context_provider
         self.interaction_recorder = interaction_recorder
+        self.telemetry_recorder = telemetry_recorder
 
     async def generate(self, request: AIRequest) -> AIResponse:
         from dataclasses import replace
@@ -168,6 +169,18 @@ class AIService:
                 route = replace(route, model_override=_model)
             request = replace(request, prompt=cleaned_prompt, route=route)
         permit = await self.guard.acquire(request.user_id, prompt=request.prompt)
+        user_progress = request.progress
+
+        async def emit(event: ProgressEvent) -> None:
+            if self.telemetry_recorder is not None:
+                try:
+                    self.telemetry_recorder(request.request_id, request.user_id, event.kind)
+                except Exception:
+                    logger.warning("Unable to persist Agent lifecycle trace", exc_info=True)
+            if user_progress is not None:
+                await user_progress(event)
+
+        progress = emit if self.telemetry_recorder is not None or user_progress is not None else None
         try:
             user_event_id = f"{request.request_id}:user"
             self.events.append(NewEvent(user_event_id, request.user_id, request.channel_id, request.message_id, request.conversation_id, EventRole.USER, request.prompt, request.created_at, {"guild_id": request.guild_id}))
@@ -183,7 +196,7 @@ class AIService:
                 include_memory=False,
                 include_topics=False,
             )
-            await notify(request.progress, "context.start", "正在載入對話與知識背景")
+            await notify(progress, "context.start", "正在載入對話與知識背景")
             context_pack = await self.context_planner.build(
                 context_request,
                 prompt=request.prompt,
@@ -194,7 +207,7 @@ class AIService:
                     + request.attachment_context
                 ),
             )
-            await notify(request.progress, "context.complete", "上下文準備完成")
+            await notify(progress, "context.complete", "上下文準備完成")
             bundle = self.composer.compose(
                 sources=self.prompts.load(),
                 context=context_pack,
@@ -227,7 +240,7 @@ class AIService:
                 binary_parts=request.binary_parts,
                 model_candidates=tuple(candidates),
                 capabilities=frozenset(item.value for item in decision.capabilities),
-                progress=request.progress,
+                progress=progress,
             ))
             text = normalize_reply_text(result.text)
             if not text:
