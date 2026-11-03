@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Awaitable, Callable
 import logging
+import os
 import uuid
 
 from bot.config import OWNER_ID
@@ -38,6 +39,8 @@ from .data import initialize_data_dir
 from .data_sync import OwnerDataService
 from .database import AiDatabase
 from .guard import RequestGuard
+from .cache.redis_limiter import RedisRateLimiter
+from .cache.knowledge import RedisKnowledgeCache
 from .history.repository import EventRepository
 from .history.search import HistorySearchService
 from .knowledge.service import KnowledgeService
@@ -91,6 +94,7 @@ class AiModule:
     owner_data: OwnerDataService
     mirror: MemoryMirrorService
     watcher: MemoryMirrorWatcher | None = None
+    redis_knowledge_cache: Any = None
     _mirror_prepared: bool = False
     _closed: bool = False
     _sync_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
@@ -113,6 +117,8 @@ class AiModule:
             await self.watcher.close()
         await self.worker.close()
         await self.service.close()
+        if self.redis_knowledge_cache is not None:
+            await self.redis_knowledge_cache.aclose()
 
     def memory_mirror_status(self) -> dict[str, int | str | None]:
         status = {} if self.watcher is None else self.watcher.snapshot()
@@ -345,6 +351,8 @@ def build_module(
         retries_per_model=settings.provider_retries_per_model,
         search_cache=search_cache,
     )
+    redis_url = os.environ.get("AI_REDIS_URL", "").strip()
+    knowledge_cache = RedisKnowledgeCache.from_url(redis_url) if redis_url else None
     host = runtime_host or RuntimeHost()
     host.bind(runtime, AiServices(
         _provider=provider,
@@ -354,6 +362,7 @@ def build_module(
         _topics=topics,
         _profiles=profiles,
         _knowledge=knowledge,
+        _knowledge_cache=knowledge_cache,
         _channel_reader=channel_reader,
     ))
     job_settings = settings.memory_jobs
@@ -362,6 +371,11 @@ def build_module(
     extractor = ProviderMemoryExtractor(provider=provider, memory_service=memory, model_candidates=settings.model_pools["background"], mirror=mirror)
     worker = BackgroundMemoryWorker(jobs=jobs, events=events, processor=extractor, batch_size=job_settings["batch_size"])
     watcher = MemoryMirrorWatcher(mirror, data_root / "auto_memory", settings.memory_mirror_poll_seconds)
+    limiter = RedisRateLimiter.from_url(
+        redis_url,
+        max_requests=settings.abuse_max_requests,
+        window_seconds=max(1, round(settings.abuse_window_seconds)),
+    ) if redis_url else None
     service = AIService(
         settings=settings, events=events,
         context=(context := ContextOrchestrator(event_repository=events, history_search=history, memory_service=memory, topic_service=topics, summary_service=summaries)),
@@ -373,11 +387,12 @@ def build_module(
             channel_reader=channel_reader,
         ),
         prompts=prompts, composer=PromptComposer(), router=Router(),
-        guard=RequestGuard(cooldown_seconds=settings.cooldown_seconds, abuse_limit=settings.abuse_max_requests, abuse_window_seconds=settings.abuse_window_seconds, max_prompt_chars=settings.max_prompt_chars, is_blocked=operations.block_reason),
+        guard=RequestGuard(cooldown_seconds=settings.cooldown_seconds, abuse_limit=settings.abuse_max_requests, abuse_window_seconds=settings.abuse_window_seconds, max_prompt_chars=settings.max_prompt_chars, is_blocked=operations.block_reason, distributed_limiter=limiter),
         runtime=host, memory_jobs=worker,
         audit_sink=audit_sink,
         user_context_provider=operations.user_context,
         interaction_recorder=operations.record_interaction,
+        telemetry_recorder=operations.record_runtime_event,
     )
     attachment_settings = settings.attachments
     attachments = AttachmentService(AttachmentSettings(attachment_settings["max_count"], attachment_settings["max_bytes_each"], attachment_settings["max_total_bytes"], attachment_settings["max_text_chars"]), document_extractor=extract_document)
@@ -400,4 +415,5 @@ def build_module(
         owner_data=owner_data,
         mirror=mirror,
         watcher=watcher,
+        redis_knowledge_cache=knowledge_cache,
     )

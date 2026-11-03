@@ -11,25 +11,8 @@ Modification():
 
 from __future__ import annotations
 
-import asyncio
-import os
-import tempfile
-from pathlib import Path
 
 
 async def extract_document(filename: str, media_type: str, data: bytes) -> str:
-    suffix = Path(filename).suffix
-    descriptor, temporary_name = tempfile.mkstemp(suffix=suffix)
-    path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(data)
-        return await asyncio.to_thread(_convert, path)
-    finally:
-        path.unlink(missing_ok=True)
-
-
-def _convert(path: Path) -> str:
-    from markitdown import MarkItDown
-
-    return (MarkItDown().convert(str(path)).text_content or "").strip()
+    from bot.core.documents import DocumentConverter
+    return await DocumentConverter.convert_bytes(filename, data)

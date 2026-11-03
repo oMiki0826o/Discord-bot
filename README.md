@@ -1,6 +1,6 @@
 # Discord Bot
 
-![Version](https://img.shields.io/badge/version-v0.2.3-blue)
+![Version](https://img.shields.io/badge/version-v0.3.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tech](https://img.shields.io/badge/stack-Python%20%2B%20discord.py-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-orange)
@@ -17,6 +17,7 @@
 - [關於](#關於)
 - [功能](#功能)
 - [安裝](#安裝)
+- [AI / Agent 設定](#ai--agent-設定)
 - [Minecraft 與備份](#minecraft-與備份)
 - [使用方式](#使用方式)
 - [授權](#授權)
@@ -25,7 +26,7 @@
 
 這是一個以 `discord.py` 開發的模組化 Discord Bot. Core 負責 Discord Client, 設定, 日誌, SQLite 基礎設施與模組生命週期. 伺服器管理, 音樂, 訊息, 工單與 AI 等功能則各自放在 `bot/mod/`, 可以獨立載入, 卸載與維護.
 
-目前版本為 `v0.2.3`, 專案狀態為開發中. 原始碼公開於 [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
+目前版本為 `v0.3.0`, 專案狀態為開發中. 原始碼公開於 [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
 
 ### 功能
 
@@ -36,8 +37,8 @@
 - **社群工具**：自助身分組、Ticket、Join-to-Create 臨時語音頻道。
 - **訊息工具**：一般訊息、Embed、Webhook 與自動回覆規則。
 - **文件工具**：`/markitdown` 轉換支援的文件格式。
-- **AI**：`/ai`、@Bot 對話、附件處理、受 scope 限制的 History／Memory／Knowledge 檢索，以及 Gemini Web／URL Context。
-- **Agent（可選）**：有限回合的 Function Calling、只讀 Tools 與 Skill 載入；依賴 `ai` 模組。
+- **AI**：`/ai`、直接 @Bot 對話、附件與 MarkItDown、History／Memory／Knowledge 權限隔離、Gemini Web／URL Context、原生訊息進度與輸入／輸出 Token 統計。
+- **Agent（可選）**：有限回合 Function Calling、Skills 自動初始化與漸進載入、官方 MCP SDK 的本機唯讀 Knowledge Tools、Discord ID 管理員診斷；依賴 `ai` 模組。
 - **Minecraft 維運**：Fabric DMCC bridge、Discord ↔ Minecraft 訊息轉送、Owner 本機控制，以及 tmux + tar 的安全備份／回檔。
 
 ### 安裝
@@ -72,6 +73,17 @@ GEMINI_API=
 只有 `DISCORD_TOKEN` 是整個 Bot 的必要環境變數。`OWNER_ID` 留空時會使用 Discord Application Owner／Team Owner；不使用 AI 時可讓 `GEMINI_API` 保持空白。
 
 一般功能設定不需要手動複製範本。第一次載入 Core 或模組時，Bot 會依程式內的預設值建立對應的 `settings/*.json`。這些檔案屬於部署端設定，預設不提交到 Git。
+
+
+### AI / Agent 設定
+
+啟用 AI 時，在本機 `.env` 設定 `GEMINI_API`。第一次啟動會自動建立 `settings/ai.json`、`settings/agent.json`（啟用 Agent 時）與 `data/agent/skills/使用說明.md`；不會覆寫既有 Skills。手動在 `data/agent/skills/<skill-name>/SKILL.md` 新增文字工作指引，Skill 不能自行取得工具權限或執行程式碼。
+
+Discord AI 只接受**訊息開頭直接** `<@BotID>`、`<@!BotID>` 與 `/ai`，不接受 `@everyone`、`@here`、身分組或句中提及。一般問題直接回覆；較長的工作會更新同一則純文字訊息，完成後編輯成正式答案。頁尾 `-#` 分別顯示**輸入與輸出 Token**、可用的思考 Token、耗時，以及標示為「端到端」的平均 Token/s。若 API 沒提供實際用量，會顯示 `—`。
+
+少量高權限使用者可在本機 `settings/agent.json` 的 `privileged_users` 設定為 `["<@12345678987654321>"]` 或純數字 ID，使用 `$agentstatus` 查看**唯讀執行狀態**；這不會開放他人的私人記憶。若需要可選 Redis，於 `.env` 設定 `AI_REDIS_URL=redis://127.0.0.1:6379/0`。沒有 Redis 仍可在本機運行，Redis 不存放完整私人對話與模型回覆。
+
+Knowledge 透過官方 MCP Python SDK 的**本機唯讀**服務搜尋，不提供任意 SQL、修改資料或對外 HTTP Port。詳細安全限制、資料生命週期及測試方式請參考 [AI / Agent 架構](docs/AI_AGENT_ARCHITECTURE.md)、[AI 模組](bot/mod/ai/README.md)、[Agent 模組](bot/mod/agent/README.md)。協作紀錄、測試草稿、`data/`、`.env`、`settings/*.json` 為本機資料，禁止提交至公開倉庫。
 
 ### Minecraft 與備份
 
@@ -127,6 +139,7 @@ $bot stop
 - [About](#about)
 - [Features](#features)
 - [Installation](#installation)
+- [AI / Agent configuration](#ai--agent-configuration)
 - [Minecraft and backups](#minecraft-and-backups)
 - [Usage](#usage)
 - [License](#license)
@@ -135,7 +148,7 @@ $bot stop
 
 A modular Discord Bot built with `discord.py`. Core owns the Discord client, settings, logging, SQLite infrastructure, module lifecycle, and shared interfaces. User-facing features live independently under `bot/mod/` so they can be loaded, unloaded, and maintained without coupling feature logic into startup code.
 
-The current version is `v0.2.3` and the project is under active development. Source code is available at [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
+The current version is `v0.3.0` and the project is under active development. Source code is available at [oMiki0826o/Discord-bot](https://github.com/oMiki0826o/Discord-bot).
 
 ### Features
 
@@ -146,8 +159,8 @@ The current version is `v0.2.3` and the project is under active development. Sou
 - **Community tools**: self-role panels, tickets, and Join-to-Create temporary voice channels.
 - **Messaging**: plain messages, embeds, webhooks, and configurable auto-reply rules.
 - **Documents**: `/markitdown` conversion for supported document formats.
-- **AI**: `/ai`, mention conversations, attachments, scoped History/Memory/Knowledge retrieval, and Gemini Web/URL Context.
-- **Agent (optional)**: bounded Function Calling, read-only tools, and progressive skill loading; depends on the `ai` module.
+- **AI**: `/ai`, direct bot mentions, attachments and MarkItDown, scoped History/Memory/Knowledge retrieval, Gemini Web/URL Context, native message progress and separate input/output token reporting.
+- **Agent (optional)**: bounded Function Calling, auto-initialized Skills, read-only Knowledge tools through the official MCP Python SDK, and Discord-ID status access; requires the `ai` module.
 - **Minecraft operations**: Fabric DMCC bridge, Discord relay, owner-operated local control, and tmux + tar backup/restore.
 
 ### Installation
@@ -182,6 +195,17 @@ GEMINI_API=
 Only `DISCORD_TOKEN` is required for the whole application. When `OWNER_ID` is empty, the bot resolves the Discord Application Owner/Team Owner. Leave `GEMINI_API` empty when AI is not enabled.
 
 Feature settings are generated as `settings/*.json` from module defaults when they are first loaded. These files are deployment-local and are not tracked by default.
+
+
+### AI / Agent configuration
+
+Set `GEMINI_API` in your local `.env` when enabling AI. On first launch, the modules create `settings/ai.json`, `settings/agent.json` (if Agent is enabled), and `data/agent/skills/使用說明.md`. Existing Skills are preserved. Add optional text-only instructions in `data/agent/skills/<skill-name>/SKILL.md`; Skills cannot grant themselves tool privileges or execute programs.
+
+AI responds only to a **direct leading** `<@BotID>` or `<@!BotID>` mention, or the `/ai` command. Broadcasts, role mentions and inline mentions cannot trigger AI. Short answers use a normal message; longer tasks update one plain-text status message and replace it with the answer. The `-#` footer shows **separate input and output tokens**, reported thinking tokens where available, elapsed time and explicitly labeled end-to-end tokens/s. Missing provider usage is shown as `—` rather than fabricated.
+
+For limited read-only status access, populate `privileged_users` in your local `settings/agent.json` with Discord IDs or mentions such as `["<@12345678987654321>"]`, then use `$agentstatus`. This does **not** provide access to another user's private memories. Redis is optional; set `AI_REDIS_URL=redis://127.0.0.1:6379/0` in `.env` only if using it. The bot operates without Redis and does not cache private model answers in Redis.
+
+Knowledge search uses a **local read-only** MCP adapter based on the official MCP Python SDK; there is no raw SQL, data-write tool or public MCP HTTP port. See [AI / Agent architecture](docs/AI_AGENT_ARCHITECTURE.md), [AI module](bot/mod/ai/README.md) and [Agent module](bot/mod/agent/README.md). Private collaboration notes, `data/`, `.env` and `settings/*.json` are local-only and must never be committed.
 
 ### Minecraft and backups
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .provider.models import GenerationRequest, ProviderPolicy, ProviderToolCall
+from .provider.models import GenerationRequest, ProviderPolicy, ProviderToolCall, TokenUsage
 from .provider.errors import ProviderQuotaError
 from .routing import contains_url
 from .runtime.host import RuntimeFactory, RuntimeHost
@@ -42,6 +42,7 @@ class ProviderTurn:
     function_calls: tuple[ProviderToolCall, ...]
     model: str
     model_content: Any = None
+    usage: TokenUsage | None = None
 
 
 @dataclass(slots=True)
@@ -54,6 +55,7 @@ class AiServices:
     _profiles: Any = None
     _knowledge: Any = None
     _channel_reader: Any = None
+    _knowledge_cache: Any = None
 
     async def generate_model_turn(
         self,
@@ -119,7 +121,7 @@ class AiServices:
                 allow_combined_tools=False,
                 max_output_tokens=self._settings.max_output_tokens,
             ))
-        return ProviderTurn(response.text, response.tool_calls, response.model, response.model_content)
+        return ProviderTurn(response.text, response.tool_calls, response.model, response.model_content, response.usage)
 
     async def search_requester_memory(self, request: RuntimeRequest, query: str, *, limit: int = 20):
         if self._retrieval is None:
@@ -161,7 +163,14 @@ class AiServices:
     async def search_knowledge(self, query: str, *, limit: int = 6):
         if self._retrieval is None:
             return ()
+        if self._knowledge_cache is not None:
+            return await self._knowledge_cache.search(query, limit=limit, retrieval=self._retrieval)
         return await self._retrieval.search_knowledge(query, limit=limit)
+
+    def list_knowledge_sources(self, *, limit: int = 50) -> tuple[tuple[str, str], ...]:
+        if self._knowledge is None:
+            return ()
+        return self._knowledge.list_sources(limit=limit)
 
     def read_knowledge_chunk(self, chunk_id: str):
         if self._retrieval is not None:

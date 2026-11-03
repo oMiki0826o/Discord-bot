@@ -19,6 +19,8 @@ from time import perf_counter
 from typing import Any, Protocol
 
 from ..ai.api import RuntimeRequest, RuntimeResult, RuntimeStopReason
+from ..ai.provider.models import TokenUsage
+from ..ai.runtime.events import notify
 
 from .config import AgentSettings
 from .tools import ToolCall, ToolContext, ToolRegistry, ToolResult
@@ -30,6 +32,7 @@ class ModelTurn:
     function_calls: tuple[ToolCall, ...] = ()
     model: str = ""
     provider_content: Any = field(default=None, repr=False, compare=False)
+    usage: TokenUsage | None = None
 
 
 class AgentModel(Protocol):
@@ -63,6 +66,8 @@ class AgentRuntime:
         tool_calls = 0
         used_model = ""
         force_final = False
+        total_usage: TokenUsage | None = None
+        usage_complete = True
         while model_turns < self.settings.max_model_turns:
             reserved_final = (
                 bool(request.capabilities)
@@ -77,11 +82,26 @@ class AgentRuntime:
             )
             declarations = self.registry.declarations(request.capabilities) if allow_tools else ()
             model_turns += 1
+            await notify(request.progress, "model.start", "正在向 Gemini 產生回覆")
             turn = await self.model.generate_turn(request, transcript, declarations, allow_tools=allow_tools)
             used_model = turn.model or used_model
-            if turn.final_text.strip():
+            if turn.usage is None:
+                usage_complete = False
+            elif total_usage is None:
+                total_usage = turn.usage
+            else:
+                total_usage = TokenUsage(
+                    total_usage.input_tokens + turn.usage.input_tokens,
+                    total_usage.output_tokens + turn.usage.output_tokens,
+                    total_usage.total_tokens + turn.usage.total_tokens,
+                    total_usage.thinking_tokens + turn.usage.thinking_tokens,
+                    total_usage.estimated or turn.usage.estimated,
+                )
+            # Gemini may emit explanatory text and FunctionCalls in one turn.
+            # Execute declared calls before accepting that text as a final answer.
+            if turn.final_text.strip() and (not allow_tools or not turn.function_calls):
                 reason = RuntimeStopReason.FORCED_FINALIZE if force_final else RuntimeStopReason.COMPLETED
-                return self._result(turn.final_text.strip(), reason, model_turns, tool_calls, started, used_model, tuple(observations))
+                return self._result(turn.final_text.strip(), reason, model_turns, tool_calls, started, used_model, tuple(observations), total_usage if usage_complete else None)
             if not allow_tools or not turn.function_calls:
                 break
             transcript.append(
@@ -101,7 +121,15 @@ class AgentRuntime:
                     continue
                 seen.add(call.fingerprint)
                 tool_calls += 1
+                display = {
+                    "list_skills": "取得可用 Skills",
+                    "read_skill": "讀取 Skill",
+                    "search_knowledge": "搜尋知識庫",
+                    "read_knowledge_chunk": "讀取知識文件段落",
+                }.get(call.name, "查詢必要資料")
+                await notify(request.progress, "tool.start", "正在" + display)
                 result = await self.registry.execute(call, context)
+                await notify(request.progress, "tool.complete", display + ("完成" if result.ok else "未成功"))
                 results.append((call, result))
                 if result.observation_id not in observations:
                     observations.append(result.observation_id)
@@ -122,6 +150,7 @@ class AgentRuntime:
             started,
             used_model,
             tuple(observations),
+            total_usage if usage_complete else None,
         )
 
     @staticmethod
@@ -131,5 +160,5 @@ class AgentRuntime:
         return value is None or value == "" or value == () or value == [] or value == {}
 
     @staticmethod
-    def _result(text: str, reason: RuntimeStopReason, model_turns: int, tool_calls: int, started: float, model: str = "", observation_ids: tuple[str, ...] = ()) -> RuntimeResult:
-        return RuntimeResult(text, reason, model_turns, tool_calls, max(0, round((perf_counter() - started) * 1000)), model, observation_ids, True)
+    def _result(text: str, reason: RuntimeStopReason, model_turns: int, tool_calls: int, started: float, model: str = "", observation_ids: tuple[str, ...] = (), usage: TokenUsage | None = None) -> RuntimeResult:
+        return RuntimeResult(text, reason, model_turns, tool_calls, max(0, round((perf_counter() - started) * 1000)), model, observation_ids, True, usage)

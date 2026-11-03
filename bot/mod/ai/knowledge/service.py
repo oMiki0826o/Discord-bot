@@ -201,6 +201,17 @@ class KnowledgeService:
                 connection.execute("DELETE FROM knowledge_sources WHERE source_id = ?", (source_id,))
         return len(obsolete_ids)
 
+    def list_sources(self, *, limit: int = 50) -> tuple[tuple[str, str], ...]:
+        """List only owner-indexed Knowledge source identifiers and titles."""
+        if not 1 <= limit <= 100:
+            raise ValueError("Knowledge source limit must be between 1 and 100")
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT source_id, title FROM knowledge_sources ORDER BY source_id LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return tuple((str(row["source_id"]), str(row["title"])) for row in rows)
+
     def search(self, query: str, *, limit: int) -> tuple[KnowledgeHit, ...]:
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")

@@ -171,3 +171,12 @@ def test_technical_how_to_question_prefetches_indexed_knowledge() -> None:
     route = Router().infer("怎麼做更新抑制器")
 
     assert route.wants_knowledge is True
+
+
+def test_simple_greeting_does_not_load_unnecessary_agent_tools() -> None:
+    from bot.mod.ai.routing import Capability
+    router = Router()
+    simple = router.route(router.infer("你好"))
+    knowledge = router.route(router.infer("Minecraft 活塞原理是什麼"))
+    assert not simple.capabilities
+    assert Capability.KNOWLEDGE in knowledge.capabilities

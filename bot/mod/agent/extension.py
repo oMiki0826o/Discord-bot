@@ -9,7 +9,10 @@ Modification():
 
 from __future__ import annotations
 
+import logging
 import weakref
+
+logger = logging.getLogger(__name__)
 
 MODULE_VERSION = "0.1.0"
 MODULE_DISPLAY_NAME = "Agent"
@@ -24,9 +27,16 @@ async def setup(bot) -> None:
     from bot.core.settings.manager import settings
     from bot.core.settings.schema import SettingRule
 
-    from ..ai.api import register_runtime_extension
+    from ..ai.api import register_runtime_extension, unregister_runtime_extension
     from .assembly import build_runtime_factory
+    from .skills import initialize_skill_home
+
+    try:
+        initialize_skill_home()
+    except OSError:
+        logger.warning("Could not initialize editable Skill directory", exc_info=True)
     from .config import DEFAULT_SETTINGS, SETTINGS_NAME, build_settings_schema, AgentSettings
+    from .status_cog import AgentStatusCog
 
     raw = settings.register(
         SETTINGS_NAME,
@@ -39,6 +49,15 @@ async def setup(bot) -> None:
         factory=build_runtime_factory(AgentSettings.from_mapping(raw)),
         read_only=True,
     )
+    try:
+        await bot.add_cog(AgentStatusCog(bot, AgentSettings.from_mapping(raw)))
+    except BaseException:
+        # A failed Cog registration must not leave AI pointing to an orphan Agent.
+        try:
+            unregister_runtime_extension(bot, owner="agent")
+        finally:
+            await runtime.close()
+        raise
     _loaded_runtimes[bot] = runtime
 
 
@@ -50,5 +69,12 @@ async def teardown(bot) -> None:
         return
     from ..ai.api import unregister_runtime_extension
 
-    removed = unregister_runtime_extension(bot, owner="agent")
-    await removed.close()
+    try:
+        await bot.remove_cog("AgentStatusCog")
+    finally:
+        try:
+            removed = unregister_runtime_extension(bot, owner="agent")
+        except Exception:
+            await runtime.close()
+            raise
+        await removed.close()

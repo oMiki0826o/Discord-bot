@@ -28,6 +28,9 @@ from ..provider.models import BinaryPart
 from ..provider.errors import ProviderQuotaError, ProviderTimeoutError, ProviderUnavailableError, ProviderVerificationError
 from ..prompt.audit import render_prompt_audit
 from ..service import AIRequest
+from .mention_gate import parse_direct_mention
+from .message_render import render_footer
+from .progress import ProgressReporter
 
 logger = logging.getLogger("bot.mod.ai.commands")
 
@@ -293,6 +296,11 @@ def create_ai_cog(
             attachment: discord.Attachment | None = None,
         ) -> None:
             await interaction.response.defer(thinking=True)
+            reporter = ProgressReporter(
+                lambda content: interaction.edit_original_response(content=content, allowed_mentions=discord.AllowedMentions.none()),
+                lambda response, content: response.edit(content=content, allowed_mentions=discord.AllowedMentions.none()),
+            )
+            reporter.start()
             try:
                 selected_prompt = apply_model_selection(prompt, model)
                 attachment_context, binary = await prepare_discord_attachments(
@@ -311,22 +319,34 @@ def create_ai_cog(
                         bot_user_id=str(getattr(self.bot.user, "id", "")),
                     ),
                     attachment_context,
+                    reporter.publish,
                 ))
-                for chunk in split_discord_message(response.text):
+                chunks = split_discord_message(response.text + "\n\n" + render_footer(response.runtime))
+                if not await reporter.finish(chunks[0]):
+                    await interaction.edit_original_response(content=chunks[0], allowed_mentions=discord.AllowedMentions.none())
+                for chunk in chunks[1:]:
                     await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none())
             except Exception as exc:
                 logger.exception("AI slash request failed")
-                await interaction.followup.send(user_error_message(exc), ephemeral=True)
+                if not await reporter.finish(user_error_message(exc)):
+                    await interaction.edit_original_response(content=user_error_message(exc), allowed_mentions=discord.AllowedMentions.none())
 
         @commands.Cog.listener()
         async def on_message(self, message: discord.Message) -> None:
             if message.author.bot or self.bot.user is None or self.bot.user not in message.mentions:
                 return
-            prompt = message.content.replace(self.bot.user.mention, "").strip()
+            prompt = parse_direct_mention(message.content, self.bot.user.id)
+            if prompt is None:
+                return
             if not prompt and not message.attachments:
                 return
             if prompt and should_skip_mention(prompt, should_skip_prompt):
                 return
+            reporter = ProgressReporter(
+                lambda content: message.reply(content, mention_author=False, allowed_mentions=discord.AllowedMentions.none()),
+                lambda response, content: response.edit(content=content, allowed_mentions=discord.AllowedMentions.none()),
+            )
+            reporter.start()
             async with message.channel.typing():
                 try:
                     attachment_context, binary = await prepare_discord_attachments(self.module, tuple(message.attachments))
@@ -353,14 +373,17 @@ def create_ai_cog(
                             },
                         ),
                         attachment_context,
+                        reporter.publish,
                     ))
-                    chunks = split_discord_message(response.text)
-                    await message.reply(chunks[0], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                    chunks = split_discord_message(response.text + "\n\n" + render_footer(response.runtime))
+                    if not await reporter.finish(chunks[0]):
+                        await message.reply(chunks[0], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
                     for chunk in chunks[1:]:
                         await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
                 except Exception as exc:
                     logger.exception("AI mention request failed")
-                    await message.reply(user_error_message(exc), mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                    if not await reporter.finish(user_error_message(exc)):
+                        await message.reply(user_error_message(exc), mention_author=False, allowed_mentions=discord.AllowedMentions.none())
 
         @commands.group(name="ai", invoke_without_command=True)
         @commands.is_owner()
@@ -763,6 +786,7 @@ def create_ai_cog(
             binary: tuple[BinaryPart, ...],
             initial_context: tuple[str, ...],
             attachment_context: tuple[str, ...],
+            progress: Any = None,
         ) -> AIRequest:
             channel = str(channel_id or 0)
             return AIRequest(
@@ -772,6 +796,7 @@ def create_ai_cog(
                 initial_context=initial_context,
                 attachment_context=attachment_context,
                 binary_parts=binary,
+                progress=progress,
             )
 
     return AICog()

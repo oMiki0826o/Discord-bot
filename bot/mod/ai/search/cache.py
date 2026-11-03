@@ -9,7 +9,6 @@ Modification():
 from __future__ import annotations
 
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from typing import Any
 
 
@@ -52,6 +51,7 @@ class SearchCache:
         return " ".join(query.casefold().split())
 
     def get(self, query: str, *, now: int) -> SearchObservation | None:
+        """Only exact normalized keys are eligible; fuzzy reuse is unsafe."""
         key = self.normalize(query)
         entry = self._entries.get(key)
         if entry is not None and entry.expires_at > now:
@@ -62,20 +62,15 @@ class SearchCache:
         if self.database is not None:
             with self.database.transaction() as connection:
                 connection.execute("DELETE FROM search_cache WHERE expires_at <= ?", (now,))
-                rows = connection.execute(
-                    "SELECT query, text, stable, expires_at FROM search_cache WHERE expires_at > ?", (now,),
-                ).fetchall()
-            for row in rows:
+                row = connection.execute(
+                    "SELECT text, stable, expires_at FROM search_cache WHERE query = ? AND expires_at > ?",
+                    (key, now),
+                ).fetchone()
+            if row is not None:
                 observation = SearchObservation(str(row["text"]), True, bool(row["stable"]))
-                cached = _CacheEntry(observation, int(row["expires_at"]))
-                self._entries[str(row["query"])] = cached
-                if str(row["query"]) == key or self._similar(key, str(row["query"])):
-                    self._hits += 1
-                    return observation
-        for candidate, cached in self._entries.items():
-            if cached.expires_at > now and self._similar(key, candidate):
+                self._entries[key] = _CacheEntry(observation, int(row["expires_at"]))
                 self._hits += 1
-                return cached.observation
+                return observation
         self._misses += 1
         return None
 
@@ -122,4 +117,4 @@ class SearchCache:
         }
 
     def _similar(self, query: str, candidate: str) -> bool:
-        return SequenceMatcher(None, query, candidate).ratio() >= self.fuzzy_threshold
+        return query == candidate

@@ -11,6 +11,8 @@ Modification():
 
 from __future__ import annotations
 
+import hashlib
+import json
 from time import perf_counter, time
 from collections.abc import Callable
 from typing import Any
@@ -20,6 +22,7 @@ from ..provider.errors import ProviderVerificationError
 from ..search.cache import SearchCache, SearchObservation
 from ..routing import contains_url
 from .models import RuntimeRequest, RuntimeResult, RuntimeStopReason
+from .events import notify
 
 
 class BasicRuntime:
@@ -42,8 +45,13 @@ class BasicRuntime:
     async def run(self, request: RuntimeRequest) -> RuntimeResult:
         started = perf_counter()
         is_web_request = "web" in request.capabilities
-        if is_web_request and self.search_cache is not None:
-            cached = self.search_cache.get(request.prompt, now=self._now())
+        volatile = any(term in request.prompt.casefold() for term in (
+            "天氣", "今天", "現在", "最新", "即時", "新聞", "匯率", "股價", "weather", "today", "latest", "breaking",
+        ))
+        cacheable = is_web_request and not volatile and not contains_url(request.prompt) and not request.binary_parts
+        cache_key = self._cache_key(request) if cacheable else ""
+        if cacheable and self.search_cache is not None:
+            cached = self.search_cache.get(cache_key, now=self._now())
             if cached is not None:
                 return RuntimeResult(
                     text=cached.text,
@@ -60,6 +68,7 @@ class BasicRuntime:
                 + "\n\n".join(request.context_blocks)
             )
         prompt_parts.append("Current request:\n" + request.prompt)
+        await notify(request.progress, "model.start", "正在產生回覆")
         response = await self.provider.generate(GenerationRequest(
             request_id=request.request_id,
             user_id=request.user_id,
@@ -72,6 +81,7 @@ class BasicRuntime:
             use_url_context="web" in request.capabilities and contains_url(request.prompt),
             max_output_tokens=self.max_output_tokens,
         ))
+        await notify(request.progress, "model.complete", "模型回覆已產生")
         text = response.text.strip()
         if not text:
             raise RuntimeError("Basic runtime returned an empty response")
@@ -79,10 +89,10 @@ class BasicRuntime:
             raise ProviderVerificationError("Web search did not return verified grounding metadata")
         if contains_url(request.prompt) and "web" in request.capabilities and not response.observation.url_context_succeeded:
             raise ProviderVerificationError("URL Context did not report a successful retrieval")
-        if is_web_request and self.search_cache is not None:
+        if cacheable and self.search_cache is not None:
             self.search_cache.put(
-                request.prompt,
-                SearchObservation(text=text, success=True, stable=not contains_url(request.prompt)),
+                cache_key,
+                SearchObservation(text=text, success=True, stable=False),
                 now=self._now(),
             )
         return RuntimeResult(
@@ -92,7 +102,18 @@ class BasicRuntime:
             tool_calls=0,
             elapsed_ms=max(0, round((perf_counter() - started) * 1000)),
             model=response.model,
+            usage=response.usage,
         )
+
+    @staticmethod
+    def _cache_key(request: RuntimeRequest) -> str:
+        scoped = (
+            request.user_id, request.channel_id, request.guild_id, request.prompt,
+            request.system_instruction, request.context_blocks, request.model_candidates,
+            tuple(sorted(request.capabilities)),
+        )
+        payload = json.dumps(scoped, ensure_ascii=False, separators=(",", ":"))
+        return "v2:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     async def close(self) -> None:
         await self.provider.close()

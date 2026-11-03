@@ -90,7 +90,12 @@ def should_include(relative: Path) -> bool:
         return False
     if relative.name.startswith(".env.") and relative.name != ".env.example":
         return False
-    if relative.parts[:2] == ("docs", "superpowers"):
+    if relative.parts[:2] in {
+        ("docs", "superpowers"),
+        ("docs", "internal"),
+        ("docs", "worklogs"),
+        ("docs", "collaboration"),
+    }:
         return False
     if relative.parts[:2] == ("bridge", "minecraft-bridge"):
         return False

@@ -64,10 +64,9 @@ class MarkItDownService:
     ) -> str:
         """同步將指定文件轉換為 Markdown 文字。"""
 
-        from markitdown import MarkItDown
+        from bot.core.documents import DocumentConverter
 
-        result = MarkItDown().convert(str(path))
-        return (result.text_content or "").strip()
+        return DocumentConverter.convert_path(path)
 
 
 # ── Command ──────────────────────
