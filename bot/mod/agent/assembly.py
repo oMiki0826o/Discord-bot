@@ -17,6 +17,7 @@ from .provider_adapter import AiModelAdapter
 from .runtime import AgentRuntime
 from .skills import SkillService
 from .skills.bootstrap import DEFAULT_SKILL_ROOT
+from .mcp.client import MCPKnowledgeClient
 
 
 def build_runtime_factory(
@@ -32,7 +33,7 @@ def build_runtime_factory(
         skills = SkillService(root)
         return AgentRuntime(
             AiModelAdapter(services),
-            build_readonly_registry(services, skills=skills),
+            build_readonly_registry(services, skills=skills, mcp_client=MCPKnowledgeClient(services)),
             settings,
         )
 

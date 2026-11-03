@@ -164,6 +164,11 @@ class AiServices:
             return ()
         return await self._retrieval.search_knowledge(query, limit=limit)
 
+    def list_knowledge_sources(self, *, limit: int = 50) -> tuple[tuple[str, str], ...]:
+        if self._knowledge is None:
+            return ()
+        return self._knowledge.list_sources(limit=limit)
+
     def read_knowledge_chunk(self, chunk_id: str):
         if self._retrieval is not None:
             return self._retrieval.read_knowledge_chunk(chunk_id)

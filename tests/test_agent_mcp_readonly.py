@@ -62,3 +62,27 @@ def test_mcp_adapter_round_trip() -> None:
         sources = await adapter.list_sources()
         assert sources == ({"source_id": "test.md", "title": "Test"},)
     asyncio.run(run())
+
+
+def test_registered_agent_knowledge_tools_really_use_mcp() -> None:
+    from bot.mod.agent.tools import ToolCall, ToolContext
+    from bot.mod.agent.tools.builtin import build_readonly_registry
+    from bot.mod.ai.runtime.models import RuntimeRequest
+
+    services = _Services()
+    client = MCPKnowledgeClient(services)
+    registry = build_readonly_registry(services, mcp_client=client)
+    request = RuntimeRequest(
+        request_id="r", user_id="u", channel_id="c", prompt="Minecraft",
+        model_candidates=("gemini",), capabilities=frozenset({"knowledge"}),
+    )
+    context = ToolContext(request, request.capabilities, 12)
+
+    async def run():
+        hits = await registry.execute(ToolCall("search_knowledge", {"query": "minecraft"}), context)
+        listed = await registry.execute(ToolCall("list_knowledge_sources", {}), context)
+        return hits, listed
+
+    hits, listed = asyncio.run(run())
+    assert hits.ok and hits.data[0]["source_file"] == "test.md"
+    assert listed.ok and listed.data[0]["source_id"] == "test.md"

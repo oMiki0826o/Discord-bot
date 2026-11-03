@@ -17,7 +17,7 @@ from typing import Any
 from . import Tool, ToolContext, ToolRegistry
 
 
-def build_readonly_registry(services: Any, *, skills: Any = None) -> ToolRegistry:
+def build_readonly_registry(services: Any, *, skills: Any = None, mcp_client: Any = None) -> ToolRegistry:
     registry = ToolRegistry()
 
     async def search_memory(arguments, context: ToolContext):
@@ -39,6 +39,8 @@ def build_readonly_registry(services: Any, *, skills: Any = None) -> ToolRegistr
         return tuple({"name": item.name, "status": item.status.value, "current_goal": item.current_goal, "state": item.state} for item in topics)
 
     async def search_knowledge(arguments, context: ToolContext):
+        if mcp_client is not None:
+            return await mcp_client.search(str(arguments["query"]), limit=6)
         hits = await services.search_knowledge(str(arguments["query"]), limit=6)
         return tuple({
             "chunk_id": hit.chunk.chunk_id,
@@ -47,6 +49,8 @@ def build_readonly_registry(services: Any, *, skills: Any = None) -> ToolRegistr
         } for hit in hits)
 
     async def read_chunk(arguments, context: ToolContext):
+        if mcp_client is not None:
+            return await mcp_client.read_chunk(str(arguments["chunk_id"]))
         chunk = services.read_knowledge_chunk(str(arguments["chunk_id"]))
         return None if chunk is None else {
             "chunk_id": chunk.chunk_id,
@@ -80,6 +84,10 @@ def build_readonly_registry(services: Any, *, skills: Any = None) -> ToolRegistr
         retry_on_empty=True,
     ))
     registry.register(Tool("read_knowledge_chunk", "Read one known knowledge chunk", "knowledge", required("chunk_id"), read_chunk, required("chunk_id")))
+    if mcp_client is not None:
+        async def list_knowledge_sources(arguments, context: ToolContext):
+            return await mcp_client.list_sources(limit=50)
+        registry.register(Tool("list_knowledge_sources", "List owner-approved public Knowledge sources", "knowledge", frozenset(), list_knowledge_sources))
     registry.register(Tool("read_channel_context", "Read visible context from the current channel", "channel_context", required("query"), read_channel, required("query")))
     registry.register(Tool("current_time", "Read the current time in Asia/Taipei", "time", frozenset(), current_time))
 
