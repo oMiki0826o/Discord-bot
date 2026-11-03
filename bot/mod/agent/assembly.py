@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .builtin_tools import build_readonly_registry
+from .tools.builtin import build_readonly_registry
 from .config import AgentSettings
 from .provider_adapter import AiModelAdapter
 from .runtime import AgentRuntime

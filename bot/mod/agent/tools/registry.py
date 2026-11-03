@@ -1,90 +1,14 @@
 """
-bot/mod/agent/tools.py
-
-Modification():
-
-- 建立 Agent-owned 只讀 Tool 契約、schema validation、capability policy 與 timeout。
-- 使用 AI RuntimeRequest 作為 trusted scope，不接受模型指定身分。
-- 保存 Provider function call ID，讓 Gemini 3 tool-context circulation 可回傳結果。
+bot/mod/agent/tools/registry.py
+Capability-scoped registry, validation, timeouts and structured truncation.
 """
-
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
-from ..ai.api import RuntimeRequest
-
-ToolHandler = Callable[[dict[str, Any], "ToolContext"], Awaitable[Any]]
-
-
-@dataclass(frozen=True, slots=True)
-class ToolCall:
-    name: str
-    arguments: dict[str, Any]
-    thought_signature: Any = field(default=None, repr=False, compare=False)
-    call_id: str = ""
-
-    @property
-    def fingerprint(self) -> str:
-        payload = json.dumps([self.name, self.arguments], ensure_ascii=False, sort_keys=True, default=str)
-        return hashlib.sha256(payload.encode()).hexdigest()
-
-
-@dataclass(frozen=True, slots=True)
-class ToolContext:
-    request: RuntimeRequest
-    capabilities: frozenset[str]
-    timeout_seconds: float
-
-
-@dataclass(frozen=True, slots=True)
-class ToolResult:
-    ok: bool
-    data: Any = None
-    error: str = ""
-    observation_id: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class Tool:
-    name: str
-    description: str
-    capability: str
-    argument_names: frozenset[str]
-    handler: ToolHandler = field(repr=False, compare=False)
-    required_argument_names: frozenset[str] = frozenset()
-    argument_types: Mapping[str, str] = field(default_factory=dict)
-    max_output_chars: int = 12_000
-    retry_on_empty: bool = False
-
-    def __post_init__(self) -> None:
-        if not self.required_argument_names.issubset(self.argument_names):
-            raise ValueError("Required tool arguments must be declared")
-        if not set(self.argument_types).issubset(self.argument_names):
-            raise ValueError("Typed tool arguments must be declared")
-        if any(value not in {"string", "integer", "number", "boolean"} for value in self.argument_types.values()):
-            raise ValueError("Unsupported tool argument type")
-        if self.max_output_chars < 1:
-            raise ValueError("Tool output limit must be positive")
-
-    def declaration(self) -> dict[str, object]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    name: {"type": self.argument_types.get(name, "string")}
-                    for name in sorted(self.argument_names)
-                },
-                "required": sorted(self.required_argument_names),
-            },
-        }
+from .models import Tool, ToolCall, ToolContext, ToolResult
 
 
 class ToolRegistry:
@@ -136,7 +60,7 @@ class ToolRegistry:
         except TimeoutError:
             return ToolResult(False, error="tool_timeout", observation_id=observation_id)
         except (ValueError, LookupError) as exc:
-            return ToolResult(False, error=str(exc), observation_id=observation_id)
+            return ToolResult(False, error=type(exc).__name__.lower(), observation_id=observation_id)
         return ToolResult(True, data=self._truncate(data, tool.max_output_chars), observation_id=observation_id)
 
     @staticmethod
@@ -154,4 +78,13 @@ class ToolRegistry:
         if isinstance(data, str):
             return data[:limit]
         rendered = json.dumps(data, ensure_ascii=False, default=str)
-        return data if len(rendered) <= limit else rendered[:limit]
+        if len(rendered) <= limit:
+            return data
+        if limit < 38:
+            return ""
+        preview = rendered[:max(0, limit - 50)]
+        result = {"truncated": True, "preview": preview}
+        while len(json.dumps(result, ensure_ascii=False)) > limit and preview:
+            preview = preview[:-1]
+            result["preview"] = preview
+        return result

@@ -121,3 +121,24 @@ def test_skill_disallows_symlink_escape(tmp_path) -> None:
     assert service.list_skills() == ()
     with pytest.raises(ValueError):
         service.read_skill("escape")
+
+
+def test_tool_registry_preserves_structured_truncation() -> None:
+    from bot.mod.agent.tools import Tool, ToolCall, ToolContext, ToolRegistry
+    import json
+    from bot.mod.ai.runtime.models import RuntimeRequest
+
+    async def handler(arguments, context):
+        del arguments, context
+        return {"items": [{"value": "x" * 300}]}
+
+    registry = ToolRegistry()
+    registry.register(Tool("read", "read", "knowledge", frozenset(), handler, max_output_chars=100))
+    request = RuntimeRequest(request_id="r", user_id="u", channel_id="c", prompt="read",
+                             model_candidates=("test",), capabilities=frozenset({"knowledge"}))
+    result = asyncio.run(registry.execute(ToolCall("read", {}),
+                                         ToolContext(request, request.capabilities, 2)))
+    assert result.ok
+    assert isinstance(result.data, dict)
+    assert result.data["truncated"] is True
+    assert len(json.dumps(result.data, ensure_ascii=False)) <= 100
