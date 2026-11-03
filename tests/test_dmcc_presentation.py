@@ -1,4 +1,10 @@
-"""Presentation regression tests: route, security, and backward-compatible relay."""
+"""tests/test_dmcc_presentation.py
+
+Modification():
+
+- Implement and verify Minecraft Bridge presentation and safe Discord routing.
+
+Presentation regression tests: route, security, and backward-compatible relay."""
 from __future__ import annotations
 
 import asyncio

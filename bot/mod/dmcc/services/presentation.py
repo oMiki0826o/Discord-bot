@@ -1,4 +1,10 @@
-"""Validated Discord presentation rules for Minecraft Bridge events.
+"""bot/mod/dmcc/services/presentation.py
+
+Modification():
+
+- Implement and verify Minecraft Bridge presentation and safe Discord routing.
+
+Validated Discord presentation rules for Minecraft Bridge events.
 
 This module has no discord.py dependency and never persists Webhook secrets.
 """

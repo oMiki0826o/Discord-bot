@@ -1,4 +1,10 @@
-"""Discord delivery adapter prevents pings and isolates Webhook failures."""
+"""tests/test_dmcc_delivery.py
+
+Modification():
+
+- Implement and verify Minecraft Bridge presentation and safe Discord routing.
+
+Discord delivery adapter prevents pings and isolates Webhook failures."""
 from __future__ import annotations
 
 import asyncio

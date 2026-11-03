@@ -1,4 +1,10 @@
-"""Discord API boundary for DMCC event delivery.
+"""bot/mod/dmcc/services/discord_delivery.py
+
+Modification():
+
+- Implement and verify Minecraft Bridge presentation and safe Discord routing.
+
+Discord API boundary for DMCC event delivery.
 
 Secrets never appear in messages or log entries. Webhook failure can
 fall back to the ordinary Bot channel without interrupting the event router.
