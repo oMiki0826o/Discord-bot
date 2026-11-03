@@ -30,7 +30,7 @@ class FakeChannel:
 
 class FakeBot:
     def __init__(self):
-        self.channels = {str(i): FakeChannel() for i in (111, 222, 333)}
+        self.channels = {str(i): FakeChannel() for i in (111111111111111111, 222222222222222222, 333333333333333333)}
         self.presence = None
         self.refresh_calls = 0
         self.clear_calls = []
