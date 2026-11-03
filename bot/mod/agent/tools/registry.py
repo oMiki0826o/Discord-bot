@@ -64,6 +64,9 @@ class ToolRegistry:
             return ToolResult(False, error="tool_timeout", observation_id=observation_id)
         except (ValueError, LookupError) as exc:
             return ToolResult(False, error=type(exc).__name__.lower(), observation_id=observation_id)
+        except Exception:
+            # Never expose provider/MCP exception details or arguments to the model.
+            return ToolResult(False, error="tool_unavailable", observation_id=observation_id)
         return ToolResult(True, data=self._truncate(data, tool.max_output_chars), observation_id=observation_id)
 
     @staticmethod
