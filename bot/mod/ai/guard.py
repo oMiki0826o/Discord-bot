@@ -58,6 +58,7 @@ class RequestGuard:
         self._is_blocked = is_blocked
         self._distributed_limiter = distributed_limiter
         self._active: set[str] = set()
+        self._pending: set[str] = set()
         self._last_success: dict[str, float] = {}
         self._requests: dict[str, deque[float]] = defaultdict(deque)
 
@@ -69,7 +70,7 @@ class RequestGuard:
         blocked = None if self._is_blocked is None else self._is_blocked(user_id)
         if blocked is not None:
             raise GuardRejectedError(f"user is {blocked}")
-        if user_id in self._active:
+        if user_id in self._active or user_id in self._pending:
             raise GuardBusyError("another request is active")
         now = self._clock()
         if now - self._last_success.get(user_id, float("-inf")) < self.cooldown_seconds:
@@ -80,13 +81,19 @@ class RequestGuard:
             records.popleft()
         if len(records) >= self.abuse_limit:
             raise GuardRejectedError("too many requests")
-        if self._distributed_limiter is not None:
-            permitted = await self._distributed_limiter.allow(user_id)
-            if permitted is False:
-                raise GuardRejectedError("distributed request limit reached")
-        records.append(now)
-        self._active.add(user_id)
-        return GuardPermit(self, user_id)
+        # Reserve locally before the first await to prevent concurrent requests
+        # from the same requester bypassing a slow distributed rate limiter.
+        self._pending.add(user_id)
+        try:
+            if self._distributed_limiter is not None:
+                permitted = await self._distributed_limiter.allow(user_id)
+                if permitted is False:
+                    raise GuardRejectedError("distributed request limit reached")
+            records.append(now)
+            self._active.add(user_id)
+            return GuardPermit(self, user_id)
+        finally:
+            self._pending.discard(user_id)
 
     def _release(self, user_id: str, *, success: bool) -> None:
         self._active.discard(user_id)
@@ -95,6 +102,7 @@ class RequestGuard:
 
     def clear(self) -> None:
         self._active.clear()
+        self._pending.clear()
         self._last_success.clear()
         self._requests.clear()
 
