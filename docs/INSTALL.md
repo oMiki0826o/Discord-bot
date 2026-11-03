@@ -63,7 +63,7 @@ Redis 是**可選**項目。只有要共用速率限制與公開 Knowledge 快�
 
 Bot 與 Minecraft Server 在同一台主機時最簡單。DMCC 只接受 `127.0.0.1` 連線；不同主機不能直接把 Gateway 暴露到網路，必須自行建立 SSH tunnel 或 VPN。
 
-把 `bridge/java_bridge.jar` 放進 Minecraft Server 的 `mods/`。建立：
+從 GitHub Actions 的 **release ZIP** 取得對應 Minecraft 版本的 Fabric Bridge：1.21.8 位於 `bridge/java_bridge.jar`，1.21.9 位於 `bridge/versions/1.21.9/java_bridge.jar`。把**相符版本**的 JAR 放進 Minecraft Server 的 `mods/`。原始碼 Git 分支不再提交舊版 JAR，以免下載到與新程式不一致的二進位檔。建立：
 
 ```text
 <Minecraft資料夾>/config/minecraft-bridge.properties
