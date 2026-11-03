@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from ..provider.models import BinaryPart
+from ..provider.models import BinaryPart, TokenUsage
 
 
 class RuntimeStopReason(StrEnum):
@@ -52,6 +52,7 @@ class RuntimeResult:
     model: str = ""
     observation_ids: tuple[str, ...] = ()
     read_only: bool = True
+    usage: TokenUsage | None = None
 
     def __post_init__(self) -> None:
         if not self.text.strip():

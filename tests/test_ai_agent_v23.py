@@ -61,7 +61,7 @@ def test_cache_isolation_by_user_and_context() -> None:
                            retries_per_model=1, search_cache=SearchCache(), now=lambda: 100)
     def make(user, context):
         return RuntimeRequest(request_id="id", user_id=user, channel_id="channel",
-                              prompt="最新天氣", context_blocks=(context,),
+                              prompt="請解釋活塞更新", context_blocks=(context,),
                               system_instruction="system", model_candidates=("test",),
                               capabilities=frozenset({"web"}))
 

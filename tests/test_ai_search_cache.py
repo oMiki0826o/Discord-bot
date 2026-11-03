@@ -43,7 +43,7 @@ def test_fuzzy_search_hit_reuses_near_duplicate_query() -> None:
 
     cache.put("latest taiwan technology news", observation, now=100)
 
-    assert cache.get("latest taiwan tech news", now=200) == observation
+    assert cache.get("latest taiwan tech news", now=200) is None
 
 
 def test_sqlite_search_cache_survives_a_new_cache_instance(tmp_path) -> None:

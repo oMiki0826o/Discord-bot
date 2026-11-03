@@ -28,6 +28,8 @@ from ..provider.models import BinaryPart
 from ..provider.errors import ProviderQuotaError, ProviderTimeoutError, ProviderUnavailableError, ProviderVerificationError
 from ..prompt.audit import render_prompt_audit
 from ..service import AIRequest
+from .mention_gate import parse_direct_mention
+from .message_render import render_footer
 
 logger = logging.getLogger("bot.mod.ai.commands")
 
@@ -312,7 +314,7 @@ def create_ai_cog(
                     ),
                     attachment_context,
                 ))
-                for chunk in split_discord_message(response.text):
+                for chunk in split_discord_message(response.text + "\n\n" + render_footer(response.runtime)):
                     await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none())
             except Exception as exc:
                 logger.exception("AI slash request failed")
@@ -322,7 +324,9 @@ def create_ai_cog(
         async def on_message(self, message: discord.Message) -> None:
             if message.author.bot or self.bot.user is None or self.bot.user not in message.mentions:
                 return
-            prompt = message.content.replace(self.bot.user.mention, "").strip()
+            prompt = parse_direct_mention(message.content, self.bot.user.id)
+            if prompt is None:
+                return
             if not prompt and not message.attachments:
                 return
             if prompt and should_skip_mention(prompt, should_skip_prompt):
@@ -354,7 +358,7 @@ def create_ai_cog(
                         ),
                         attachment_context,
                     ))
-                    chunks = split_discord_message(response.text)
+                    chunks = split_discord_message(response.text + "\n\n" + render_footer(response.runtime))
                     await message.reply(chunks[0], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
                     for chunk in chunks[1:]:
                         await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
