@@ -35,3 +35,17 @@ htmlcov/
 **/.gradle/
 **/build/
 **/logs/
+
+# --- Local AI collaboration, governance, and scratch work (never publish) ---
+# Keep agent cooperation notes under data/ whenever possible.
+.worktrees/
+worktrees/
+.claude/
+.codex/
+.cursor/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+docs/internal/
+docs/worklogs/
+docs/collaboration/
