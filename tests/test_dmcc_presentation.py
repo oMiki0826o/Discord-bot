@@ -55,6 +55,7 @@ def test_webhook_chat_has_player_identity_and_custom_server_label() -> None:
     assert payload.mode == "webhook"
     assert payload.channel_id == "111"
     assert payload.content == "yap"
+    assert payload.fallback_content == "[生存服] <tinglove711> yap"
     assert payload.username == "[生存服] tinglove711"
     assert "123e4567-e89b-12d3-a456-426614174000/64" in payload.avatar_url
     assert payload.webhook_url == _WEBHOOK
