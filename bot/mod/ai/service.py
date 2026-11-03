@@ -26,7 +26,7 @@ from .context.models import ContextRequest
 from .history.models import EventRole, NewEvent
 from .provider.models import BinaryPart
 from .routing import RouteRequest
-from .runtime.models import RuntimeRequest, RuntimeResult
+from .runtime.models import RuntimeRequest, RuntimeResult, RuntimeStopReason
 from .runtime.events import ProgressEvent, ProgressSink, notify
 from .runtime.protocol import AiRuntime
 from .prompt.audit import redact_prompt
@@ -242,6 +242,8 @@ class AIService:
                 capabilities=frozenset(item.value for item in decision.capabilities),
                 progress=progress,
             ))
+            if result.stop_reason is RuntimeStopReason.FAILED:
+                raise RuntimeError("Agent runtime did not complete successfully")
             text = normalize_reply_text(result.text)
             if not text:
                 raise RuntimeError("Agent returned an empty response")
