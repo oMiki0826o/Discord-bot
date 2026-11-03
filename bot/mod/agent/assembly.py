@@ -16,6 +16,7 @@ from .config import AgentSettings
 from .provider_adapter import AiModelAdapter
 from .runtime import AgentRuntime
 from .skills import SkillService
+from .skills.bootstrap import DEFAULT_SKILL_ROOT
 
 
 def build_runtime_factory(
@@ -25,7 +26,7 @@ def build_runtime_factory(
 ):
     """建立可由 AI RuntimeHost 在首次載入或 reload 時重建的 factory。"""
 
-    root = Path(skills_dir) if skills_dir is not None else Path(__file__).parent / "resources" / "skills"
+    root = Path(skills_dir) if skills_dir is not None else DEFAULT_SKILL_ROOT
 
     def create(services) -> AgentRuntime:
         skills = SkillService(root)

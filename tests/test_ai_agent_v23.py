@@ -85,3 +85,39 @@ def test_near_duplicate_queries_are_not_equivalent() -> None:
     cache = SearchCache()
     cache.put("台北今天的天氣", SearchObservation("晴", True), now=100)
     assert cache.get("台中今天的天氣", now=101) is None
+
+
+def test_skill_home_initializes_once_without_overwriting(tmp_path) -> None:
+    from bot.mod.agent.skills import initialize_skill_home, SkillService
+    root = tmp_path / "skills"
+    initialize_skill_home(root)
+    guide = root / "使用說明.md"
+    assert guide.is_file()
+    guide.write_text("custom", encoding="utf-8")
+    initialize_skill_home(root)
+    assert guide.read_text(encoding="utf-8") == "custom"
+    skill = root / "minecraft"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("""---
+name: minecraft
+summary: knowledge
+---
+search sources""", encoding="utf-8")
+    service = SkillService(root)
+    assert service.list_skills()[0].name == "minecraft"
+    assert "search sources" in service.read_skill("minecraft").content
+
+
+def test_skill_disallows_symlink_escape(tmp_path) -> None:
+    from bot.mod.agent.skills import SkillService
+    import pytest
+    root = tmp_path / "skills"
+    root.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "SKILL.md").write_text("do not read", encoding="utf-8")
+    (root / "escape").symlink_to(external, target_is_directory=True)
+    service = SkillService(root)
+    assert service.list_skills() == ()
+    with pytest.raises(ValueError):
+        service.read_skill("escape")

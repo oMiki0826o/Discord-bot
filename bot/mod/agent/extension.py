@@ -9,7 +9,10 @@ Modification():
 
 from __future__ import annotations
 
+import logging
 import weakref
+
+logger = logging.getLogger(__name__)
 
 MODULE_VERSION = "0.1.0"
 MODULE_DISPLAY_NAME = "Agent"
@@ -26,6 +29,12 @@ async def setup(bot) -> None:
 
     from ..ai.api import register_runtime_extension
     from .assembly import build_runtime_factory
+    from .skills import initialize_skill_home
+
+    try:
+        initialize_skill_home()
+    except OSError:
+        logger.warning("Could not initialize editable Skill directory", exc_info=True)
     from .config import DEFAULT_SETTINGS, SETTINGS_NAME, build_settings_schema, AgentSettings
 
     raw = settings.register(
