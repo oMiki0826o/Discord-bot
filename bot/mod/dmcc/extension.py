@@ -31,6 +31,7 @@ from .domain.registry import ServerRegistry
 from .services.autocomplete import AutocompleteService
 from .services.command_catalog import CommandCatalog, DmccMode
 from .services.cross_server_relay import CrossServerRelayService
+from .services.discord_delivery import DiscordDeliveryAdapter
 from .services.discord_relay import DiscordRelayService
 from .services.info import InfoService
 from .services.link_requests import LinkRequestHandler
@@ -122,7 +123,9 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 settings,
                 controls,
             )
-            gateway.relay.subscribe(MinecraftDiscordRelayService(state, user_cog).forward)
+            gateway.relay.subscribe(
+                MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation).forward
+            )
             for cog in (user_cog, owner_cog):
                 await bot.add_cog(cog)
                 added_cogs.append(cog.qualified_name)
