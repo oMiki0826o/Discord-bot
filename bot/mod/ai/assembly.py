@@ -386,6 +386,7 @@ def build_module(
         audit_sink=audit_sink,
         user_context_provider=operations.user_context,
         interaction_recorder=operations.record_interaction,
+        telemetry_recorder=operations.record_runtime_event,
     )
     attachment_settings = settings.attachments
     attachments = AttachmentService(AttachmentSettings(attachment_settings["max_count"], attachment_settings["max_bytes_each"], attachment_settings["max_total_bytes"], attachment_settings["max_text_chars"]), document_extractor=extract_document)
