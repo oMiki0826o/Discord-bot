@@ -8,7 +8,7 @@ import pytest
 from bot.mod.dmcc.config import DEFAULT_SETTINGS, DmccSettings, SettingsError
 from bot.mod.dmcc.events import MinecraftEvent
 from bot.mod.dmcc.services.minecraft_discord_relay import MinecraftDiscordRelayService
-from bot.mod.dmcc.services.presentation import PresentationSettings, render_message
+from bot.mod.dmcc.services.presentation import render_message
 
 _WEBHOOK = "https://discord.com/api/webhooks/123456789012345678/test_secret"
 
