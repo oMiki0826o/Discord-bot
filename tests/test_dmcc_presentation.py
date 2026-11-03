@@ -58,12 +58,12 @@ def test_event_webhook_has_independent_name_channel_and_template() -> None:
     settings = _settings({"servers": {
         "survival": {
             "label": "生存服",
-            "events": {
+            "event_routes": {"player_quit": {
                 "mode": "webhook",
                 "webhook_url_env": "MC_EVENTS_WEBHOOK",
+                "channel_id": "222",
                 "username": "KunlunSMP🌸",
-            },
-            "event_channels": {"player_quit": "222"},
+            }},
             "templates": {"player_quit": "{player} 離開了 {server}"},
         },
     }})
@@ -88,6 +88,11 @@ def test_disabled_event_returns_no_payload() -> None:
     {"servers": {"unknown": {"label": "unknown"}}},
     {"servers": {"survival": {"templates": {"player_quit": "{player.__class__}"}}}},
     {"servers": {"survival": {"event_channels": {"not_a_real_event": "222"}}}},
+    {"servers": {"survival": {
+        "events": {"mode": "webhook", "webhook_url_env": "MC_EVENTS_WEBHOOK"},
+        "event_channels": {"player_quit": "222"},
+    }}},
+    {"servers": {"survival": {"templates": {"player_quit": "{player:10000}"}}}},
 ])
 def test_rejects_invalid_presentation(presentation: dict) -> None:
     with pytest.raises(SettingsError):
