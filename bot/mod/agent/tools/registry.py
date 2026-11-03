@@ -1,6 +1,9 @@
 """
 bot/mod/agent/tools/registry.py
 Capability-scoped registry, validation, timeouts and structured truncation.
+
+Modification():
+- Provide safe and testable Agent module components.
 """
 from __future__ import annotations
 

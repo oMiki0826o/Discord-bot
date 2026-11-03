@@ -1,6 +1,9 @@
 """
 bot/mod/agent/skills/bootstrap.py
 Initialise editable Skill directory without overwriting existing files.
+
+Modification():
+- Provide safe and testable Agent module components.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -38,5 +41,5 @@ def initialize_skill_home(root: Path = DEFAULT_SKILL_ROOT) -> Path:
         with guide.open("x", encoding="utf-8") as handle:
             handle.write(GUIDE)
     except FileExistsError:
-        pass
+        return folder
     return folder
