@@ -15,6 +15,9 @@ from pathlib import Path
 from types import MappingProxyType
 
 from .domain.models import ManagedServer
+from .services.presentation import PresentationError, PresentationSettings
+from .services.monitoring import MonitoringConfig
+from .services.mod_updates import ModUpdateConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -29,6 +32,9 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "cross_server_relay": False,
     "providers": {"control": [], "backup": []},
     "servers": [],
+    "presentation": {"servers": {}},
+    "monitoring": {"enabled": False, "servers": {}},
+    "mod_updates": {"enabled": False, "servers": {}},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -46,6 +52,9 @@ def build_settings_schema(rule_type):
         "cross_server_relay": rule_type(bool),
         "providers": rule_type(dict),
         "servers": rule_type(list),
+        "presentation": rule_type(dict),
+        "monitoring": rule_type(dict),
+        "mod_updates": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -81,6 +90,9 @@ class DmccSettings:
     servers: tuple[ManagedServer, ...]
     control_providers: tuple[ControlProviderDefinition, ...] = ()
     backup_providers: tuple[BackupProviderDefinition, ...] = ()
+    presentation: PresentationSettings = field(default_factory=PresentationSettings.empty)
+    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
+    mod_updates: ModUpdateConfig = field(default_factory=ModUpdateConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -110,6 +122,25 @@ class DmccSettings:
         controls = _control_providers(providers.get("control", []), environment)
         backups = _backup_providers(providers.get("backup", []))
         servers, bridge_secrets = _servers(raw.get("servers"), controls, backups, environment)
+        try:
+            presentation = PresentationSettings.from_mapping(raw.get("presentation", {}), environment)
+        except PresentationError as exc:
+            raise SettingsError(str(exc)) from exc
+        unknown = set(presentation.servers) - {server.server_id for server in servers}
+        if unknown:
+            raise SettingsError("presentation references an unknown server_id")
+        try:
+            monitoring = MonitoringConfig.from_mapping(
+                raw.get("monitoring", {}), {server.server_id for server in servers}
+            )
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        try:
+            mod_updates = ModUpdateConfig.from_mapping(
+                raw.get("mod_updates", {}), {server.server_id for server in servers}
+            )
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -123,6 +154,9 @@ class DmccSettings:
             servers=servers,
             control_providers=controls,
             backup_providers=backups,
+            presentation=presentation,
+            monitoring=monitoring,
+            mod_updates=mod_updates,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 

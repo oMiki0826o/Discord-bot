@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -55,6 +56,7 @@ public final class BridgeMod implements ModInitializer {
     private static volatile BridgeMod activeInstance;
     private BridgeRuntime runtime;
     private String serverId;
+    private long metricTickCounter;
     private final Map<String, PendingPlayer> pendingLinkPlayers = new ConcurrentHashMap<>();
     private final Map<String, PendingPlayer> pendingUnlinkPlayers = new ConcurrentHashMap<>();
     private volatile long pendingRequestTtlMillis = 120_000;
@@ -70,6 +72,7 @@ public final class BridgeMod implements ModInitializer {
         activeInstance = this;
         ServerLifecycleEvents.SERVER_STARTED.register(this::startRuntime);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stopRuntime());
+        ServerTickEvents.END_SERVER_TICK.register(this::publishMetricsOnTick);
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             relayPlayerChat(sender, message.signedContent())
         );
@@ -161,6 +164,21 @@ public final class BridgeMod implements ModInitializer {
         Object rawMessage = envelope.data().get("message");
         if (!(rawMessage instanceof String message) || message.isBlank()) return;
         server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(message), false));
+    }
+
+    /** Sample cached game-server timing only once per 300 ticks, never perform network I/O here. */
+    private void publishMetricsOnTick(MinecraftServer server) {
+        BridgeRuntime active = runtime;
+        if (active == null || serverId == null || ++metricTickCounter < 300) return;
+        metricTickCounter = 0L;
+        try {
+            active.publishEvent(new ProtocolEnvelope(
+                1, "server_metrics", serverId, null,
+                MetricSnapshot.from(server.getAverageTickTimeNanos() / 1_000_000.0, server.getPlayerCount(), server.getMaxPlayers())
+            ));
+        } catch (IllegalArgumentException invalid) {
+            LOGGER.debug("Unable to capture Minecraft server timing: {}", invalid.getMessage());
+        }
     }
 
     private void relayPlayerChat(ServerPlayer player, String content) {
@@ -497,9 +515,17 @@ public final class BridgeMod implements ModInitializer {
             }
             runtime = null;
         }
+        metricTickCounter = 0L;
         pendingLinkPlayers.clear();
         pendingUnlinkPlayers.clear();
         statsWorker.shutdownNow();
+    }
+
+    private List<Map<String, String>> fabricModInventory() {
+        return FabricLoader.getInstance().getAllMods().stream().limit(512).map(container -> Map.of(
+            "mod_id", container.getMetadata().getId(),
+            "version", container.getMetadata().getVersion().getFriendlyString()
+        )).toList();
     }
 
     private void sendServerStarted(MinecraftServer server) {
@@ -507,7 +533,8 @@ public final class BridgeMod implements ModInitializer {
         if (active == null || serverId == null) return;
         active.sendRequired(new ProtocolEnvelope(1, "server_started", serverId, null, Map.of(
                 "motd", server.getMotd(),
-                "minecraft_version", server.getServerVersion()
+                "minecraft_version", server.getServerVersion(),
+                "mods", fabricModInventory()
             ))).whenComplete((ignored, failure) -> {
                 if (failure != null) LOGGER.debug("DMCC server_started skipped because the Bridge is offline", failure);
             });

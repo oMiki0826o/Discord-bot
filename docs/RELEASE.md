@@ -107,7 +107,7 @@ python -m zipfile --test "dist/Discord-Bot-v$(cat VERSION).zip"
 
 ## Fabric Bridge
 
-Bridge 原始碼位於 `bridge/minecraft-bridge/`。CI 使用 Java 21 執行 Gradle tests 與 `remapJar`，並確認建出的 JAR 與 `bridge/java_bridge.jar` 完全相同。
+Bridge 原始碼位於 `bridge/minecraft-bridge/`。CI 使用 Java 21 執行 Gradle tests 與 `remapJar`，並將重新編譯的 JAR 與 SHA-256 清單打包進 release ZIP；本版本不再把預先編譯的 JAR 提交至 Git。
 
 ## 原始碼可見性
 

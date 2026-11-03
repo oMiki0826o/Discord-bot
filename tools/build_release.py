@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 import argparse
+import hashlib
 import zipfile
 
 
@@ -97,7 +98,7 @@ def should_include(relative: Path) -> bool:
         ("docs", "collaboration"),
     }:
         return False
-    if relative.parts[:2] == ("bridge", "minecraft-bridge"):
+    if relative.parts[:2] in {("bridge", "minecraft-bridge"), ("bridge", "builds")}:
         return False
     if relative.suffix.casefold() in _EXCLUDED_SUFFIXES:
         return False
@@ -129,7 +130,7 @@ def _zip_info(archive_name: str, mode: int) -> zipfile.ZipInfo:
     return info
 
 
-def build_release(output: Path | None = None) -> Path:
+def build_release(output: Path | None = None, *, require_bridge: bool = False) -> Path:
     """建立發布 ZIP 並回傳輸出路徑。"""
 
     version = read_version()
@@ -139,6 +140,22 @@ def build_release(output: Path | None = None) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
 
     files = release_files()
+    if require_bridge:
+        artifact = PROJECT_ROOT / "bridge" / "java_bridge.jar"
+        sums = PROJECT_ROOT / "bridge" / "SHA256SUMS"
+        if artifact not in files or sums not in files:
+            raise RuntimeError("Release must include freshly built and checksummed Minecraft Bridge JAR")
+        parts = sums.read_text(encoding="utf-8").strip().split()
+        if len(parts) != 2 or parts[1] != "java_bridge.jar" or hashlib.sha256(artifact.read_bytes()).hexdigest() != parts[0]:
+            raise RuntimeError("Minecraft Bridge artifact checksum is invalid")
+        for version in ("1.21.9",):
+            extra = PROJECT_ROOT / "bridge" / "versions" / version
+            binary, checksums = extra / "java_bridge.jar", extra / "SHA256SUMS"
+            if binary not in files or checksums not in files:
+                raise RuntimeError(f"Missing compiled Minecraft Bridge for {version}")
+            entry = checksums.read_text(encoding="utf-8").strip().split()
+            if len(entry) != 2 or entry[1] != "java_bridge.jar" or hashlib.sha256(binary.read_bytes()).hexdigest() != entry[0]:
+                raise RuntimeError(f"Minecraft Bridge checksum mismatch for {version}")
     if not files:
         raise RuntimeError("找不到可發布檔案")
 
@@ -161,8 +178,11 @@ def main() -> None:
         type=Path,
         help="自訂輸出 ZIP 路徑；未指定時使用 dist/Discord-Bot-v<version>.zip",
     )
+    parser.add_argument(
+        "--require-bridge", action="store_true", help="拒絕缺少正確 Bridge JAR 或 SHA256 的發布包"
+    )
     args = parser.parse_args()
-    output = build_release(args.output)
+    output = build_release(args.output, require_bridge=args.require_bridge)
     print(output)
 
 

@@ -48,8 +48,23 @@ jobs:
             requirements-dev.txt
       - name: Install locked development dependencies
         run: python -m pip install -r requirements-dev.txt
+      - name: Download current built Fabric bridges
+        uses: actions/download-artifact@v4
+        with:
+          pattern: minecraft-bridge-*
+          path: bridge/builds
+          merge-multiple: false
+      - name: Stage and verify version-specific Fabric jars
+        run: |
+          cp bridge/builds/minecraft-bridge-1.21.8/java_bridge.jar bridge/java_bridge.jar
+          cp bridge/builds/minecraft-bridge-1.21.8/SHA256SUMS bridge/SHA256SUMS
+          (cd bridge && sha256sum --check SHA256SUMS)
+          mkdir -p bridge/versions/1.21.9
+          cp bridge/builds/minecraft-bridge-1.21.9/java_bridge.jar bridge/versions/1.21.9/java_bridge.jar
+          cp bridge/builds/minecraft-bridge-1.21.9/SHA256SUMS bridge/versions/1.21.9/SHA256SUMS
+          (cd bridge/versions/1.21.9 && sha256sum --check SHA256SUMS)
       - name: Build reproducible release archive
-        run: python tools/build_release.py
+        run: python tools/build_release.py --require-bridge
       - name: Verify release archive
         run: python -m zipfile --test "dist/Discord-Bot-v$(cat VERSION).zip"
       - name: Read release version
@@ -65,6 +80,14 @@ jobs:
 
   bridge:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - minecraft: '1.21.8'
+            fabric_api: '0.136.1+1.21.8'
+          - minecraft: '1.21.9'
+            fabric_api: '0.134.0+1.21.9'
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v6
@@ -78,14 +101,20 @@ jobs:
             bridge/minecraft-bridge/gradle/wrapper/gradle-wrapper.properties
       - name: Test and build Fabric bridge
         working-directory: bridge/minecraft-bridge
-        run: ./gradlew --no-daemon test remapJar
-      - name: Verify published bridge artifact
+        run: ./gradlew --no-daemon -Pminecraft_version=${{ matrix.minecraft }} -Pfabric_api_version=${{ matrix.fabric_api }} test remapJar
+      - name: Stage compiled Fabric bridge and checksum
         working-directory: bridge/minecraft-bridge
-        run: cmp build/libs/minecraft-bridge-0.2.3.jar ../java_bridge.jar
+        run: |
+          cp build/libs/minecraft-bridge-0.2.4.jar ../java_bridge.jar
+          cd ..
+          sha256sum java_bridge.jar > SHA256SUMS
+          sha256sum --check SHA256SUMS
       - name: Upload verified Fabric bridge
         uses: actions/upload-artifact@v4
         with:
-          name: minecraft-bridge
-          path: bridge/java_bridge.jar
+          name: minecraft-bridge-${{ matrix.minecraft }}
+          path: |
+            bridge/java_bridge.jar
+            bridge/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
