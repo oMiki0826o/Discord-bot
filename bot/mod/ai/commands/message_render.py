@@ -1,4 +1,7 @@
-"""Discord-native, neutral usage footer. Never invent token counts."""
+"""
+bot/mod/ai/commands/message_render.py
+
+Discord-native, neutral usage footer. Never invent token counts."""
 from __future__ import annotations
 from ..runtime.models import RuntimeResult
 

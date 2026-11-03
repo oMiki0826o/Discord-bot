@@ -81,7 +81,7 @@ def test_search_cache_status_exposes_hits_and_misses() -> None:
     }
 
 
-def test_verified_web_response_is_reused_from_cache() -> None:
+def test_volatile_web_response_is_not_reused_from_cache() -> None:
     class Provider:
         def __init__(self) -> None:
             self.calls = 0
@@ -110,4 +110,4 @@ def test_verified_web_response_is_reused_from_cache() -> None:
     first, second = asyncio.run(run())
 
     assert first.text == second.text == "verified result"
-    assert provider.calls == 1
+    assert provider.calls == 2

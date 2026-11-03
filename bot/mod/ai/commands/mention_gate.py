@@ -1,4 +1,7 @@
-"""Only a direct leading mention of the real bot may trigger conversational AI."""
+"""
+bot/mod/ai/commands/mention_gate.py
+
+Only a direct leading mention of the real bot may trigger conversational AI."""
 from __future__ import annotations
 import re
 
