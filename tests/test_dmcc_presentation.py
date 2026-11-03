@@ -101,6 +101,17 @@ def test_custom_chat_template_applies_for_bot_and_webhook() -> None:
         assert payload.content == "Steve 說：hello"
 
 
+def test_default_event_uses_bold_discord_style() -> None:
+    settings = _settings({"servers": {"survival": {
+        "label": "生存服",
+        "events": {"mode": "webhook", "webhook_url_env": "MC_EVENTS_WEBHOOK"},
+    }}})
+    event = MinecraftEvent("player_quit", "survival", {"player_name": "Steve"})
+    payload = render_message(event, settings.presentation.servers["survival"], "111")
+    assert payload is not None
+    assert payload.content == "**Steve 離開了 生存服**"
+
+
 def test_disabled_event_returns_no_payload() -> None:
     settings = _settings({"servers": {"survival": {"disabled_events": ["player_join"]}}})
     event = MinecraftEvent("player_join", "survival", {"player_name": "Steve"})
