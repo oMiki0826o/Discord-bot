@@ -35,7 +35,7 @@
 
 ## Redis（可選）
 
-在執行環境設定 `AI_REDIS_URL=redis://host:6379/0` 才啟用 Redis。Redis 目前只保存以 SHA-256 雜湊的使用者 ID 與具有到期時間的速率限制計數器，不儲存個人化模型回答、對話、私人記憶或 API Key。Redis 斷線時回退到本機 Guard，不阻止所有請求；單一進程正常運作不需要安裝 Redis Server。
+在執行環境設定 `AI_REDIS_URL=redis://host:6379/0` 才啟用 Redis。Redis 保存 SHA-256 雜湊的使用者 ID 與短期速率限制計數器；公開 Knowledge 搜尋只快取雜湊查詢鍵、Chunk ID 與必要排序中繼資料，命中時必須重新讀取並驗證 Knowledge 原稿。不快取個人化模型回答、對話、私人記憶或 API Key。Redis 斷線時回退到本機 Guard，不阻止所有請求；單一進程正常運作不需要安裝 Redis Server。
 
 ## 偵錯與部署
 
