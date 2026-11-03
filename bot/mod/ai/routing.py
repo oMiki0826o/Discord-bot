@@ -91,7 +91,7 @@ class Router:
         self.search_model = search_model
 
     def route(self, request: RouteRequest) -> RouteDecision:
-        capabilities = {Capability.KNOWLEDGE, Capability.SKILLS}
+        capabilities: set[Capability] = set()
         capabilities.update({
             capability
             for enabled, capability in (
