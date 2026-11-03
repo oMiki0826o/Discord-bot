@@ -262,3 +262,6 @@ class AIService:
         if close is not None:
             await close()
         self.guard.clear()
+        close_guard = getattr(self.guard, "aclose", None)
+        if close_guard is not None:
+            await close_guard()

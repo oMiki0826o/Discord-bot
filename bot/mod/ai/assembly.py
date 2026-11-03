@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Awaitable, Callable
 import logging
+import os
 import uuid
 
 from bot.config import OWNER_ID
@@ -38,6 +39,7 @@ from .data import initialize_data_dir
 from .data_sync import OwnerDataService
 from .database import AiDatabase
 from .guard import RequestGuard
+from .cache.redis_limiter import RedisRateLimiter
 from .history.repository import EventRepository
 from .history.search import HistorySearchService
 from .knowledge.service import KnowledgeService
@@ -362,6 +364,12 @@ def build_module(
     extractor = ProviderMemoryExtractor(provider=provider, memory_service=memory, model_candidates=settings.model_pools["background"], mirror=mirror)
     worker = BackgroundMemoryWorker(jobs=jobs, events=events, processor=extractor, batch_size=job_settings["batch_size"])
     watcher = MemoryMirrorWatcher(mirror, data_root / "auto_memory", settings.memory_mirror_poll_seconds)
+    redis_url = os.environ.get("AI_REDIS_URL", "").strip()
+    limiter = RedisRateLimiter.from_url(
+        redis_url,
+        max_requests=settings.abuse_max_requests,
+        window_seconds=max(1, round(settings.abuse_window_seconds)),
+    ) if redis_url else None
     service = AIService(
         settings=settings, events=events,
         context=(context := ContextOrchestrator(event_repository=events, history_search=history, memory_service=memory, topic_service=topics, summary_service=summaries)),
@@ -373,7 +381,7 @@ def build_module(
             channel_reader=channel_reader,
         ),
         prompts=prompts, composer=PromptComposer(), router=Router(),
-        guard=RequestGuard(cooldown_seconds=settings.cooldown_seconds, abuse_limit=settings.abuse_max_requests, abuse_window_seconds=settings.abuse_window_seconds, max_prompt_chars=settings.max_prompt_chars, is_blocked=operations.block_reason),
+        guard=RequestGuard(cooldown_seconds=settings.cooldown_seconds, abuse_limit=settings.abuse_max_requests, abuse_window_seconds=settings.abuse_window_seconds, max_prompt_chars=settings.max_prompt_chars, is_blocked=operations.block_reason, distributed_limiter=limiter),
         runtime=host, memory_jobs=worker,
         audit_sink=audit_sink,
         user_context_provider=operations.user_context,

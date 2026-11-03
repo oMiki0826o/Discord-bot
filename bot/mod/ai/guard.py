@@ -47,7 +47,7 @@ class GuardPermit:
 
 
 class RequestGuard:
-    def __init__(self, *, cooldown_seconds: float, abuse_limit: int, abuse_window_seconds: float, max_prompt_chars: int = 20_000, clock: Callable[[], float] = time.monotonic, is_blocked: Callable[[str], str | None] | None = None) -> None:
+    def __init__(self, *, cooldown_seconds: float, abuse_limit: int, abuse_window_seconds: float, max_prompt_chars: int = 20_000, clock: Callable[[], float] = time.monotonic, is_blocked: Callable[[str], str | None] | None = None, distributed_limiter: object | None = None) -> None:
         if cooldown_seconds < 0 or abuse_limit < 1 or abuse_window_seconds <= 0 or max_prompt_chars < 1:
             raise ValueError("Guard settings are invalid")
         self.cooldown_seconds = cooldown_seconds
@@ -56,6 +56,7 @@ class RequestGuard:
         self.max_prompt_chars = max_prompt_chars
         self._clock = clock
         self._is_blocked = is_blocked
+        self._distributed_limiter = distributed_limiter
         self._active: set[str] = set()
         self._last_success: dict[str, float] = {}
         self._requests: dict[str, deque[float]] = defaultdict(deque)
@@ -79,6 +80,10 @@ class RequestGuard:
             records.popleft()
         if len(records) >= self.abuse_limit:
             raise GuardRejectedError("too many requests")
+        if self._distributed_limiter is not None:
+            permitted = await self._distributed_limiter.allow(user_id)
+            if permitted is False:
+                raise GuardRejectedError("distributed request limit reached")
         records.append(now)
         self._active.add(user_id)
         return GuardPermit(self, user_id)
@@ -92,3 +97,7 @@ class RequestGuard:
         self._active.clear()
         self._last_success.clear()
         self._requests.clear()
+
+    async def aclose(self) -> None:
+        if self._distributed_limiter is not None:
+            await self._distributed_limiter.aclose()

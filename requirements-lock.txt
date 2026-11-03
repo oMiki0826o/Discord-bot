@@ -12,3 +12,5 @@ opencc-python-reimplemented==0.1.7
 regex==2026.1.15
 # Official MCP Python SDK v2
 mcp==2.3.0
+
+redis==8.1.0
