@@ -126,7 +126,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
             gateway.relay.subscribe(monitor.on_event)
             monitor.start()
         if settings.mod_updates.enabled:
-            updates = ModUpdateService(settings.mod_updates, DiscordDeliveryAdapter(bot))
+            updates = ModUpdateService(settings.mod_updates, DiscordDeliveryAdapter(bot), connection_manager=gateway.manager)
             gateway.relay.subscribe(updates.on_event)
             updates.start()
         if hasattr(bot, "add_cog"):

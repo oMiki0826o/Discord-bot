@@ -79,9 +79,11 @@ class ModUpdateService:
         sender: object,
         *,
         fetch_versions: Callable[[str, str], Awaitable[list[dict]]] | None = None,
+        connection_manager: object | None = None,
     ) -> None:
         self.config = config
         self._sender = sender
+        self._connection_manager = connection_manager
         self._fetch_versions = fetch_versions or _fetch_modrinth
         self._inventory: dict[str, tuple[str, dict[str, str]]] = {}
         self._seen: set[tuple[str, str, str]] = set()
@@ -119,6 +121,11 @@ class ModUpdateService:
         if not self.config.enabled:
             return
         for server_id, target in self.config.servers.items():
+            if (
+                self._connection_manager is not None
+                and self._connection_manager.get(server_id) is None
+            ):
+                continue
             snapshot = self._inventory.get(server_id)
             if snapshot is None or snapshot[0] != target.minecraft_version:
                 continue
