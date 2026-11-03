@@ -1,0 +1,272 @@
+"""Validated Discord presentation rules for Minecraft Bridge events.
+
+This module has no discord.py dependency and never persists Webhook secrets.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import os
+import re
+from string import Formatter
+from types import MappingProxyType
+from typing import Mapping
+from urllib.parse import urlsplit
+
+from ..events import MinecraftEvent
+
+EVENT_TYPES = frozenset({
+    "player_chat", "player_join", "player_quit", "player_death",
+    "player_advancement", "player_gamemode", "server_started", "server_stopping",
+})
+_FIELDS = frozenset({
+    "player", "server", "message", "death_message", "game_mode", "title", "label",
+})
+_EVENT_TEMPLATES = {
+    "player_join": "{player} 加入了 {server}",
+    "player_quit": "{player} 離開了 {server}",
+    "player_death": "{death_message}",
+    "player_advancement": "{player} 完成了進度 [{title}]",
+    "player_gamemode": "{player} 切換遊戲模式為 {game_mode}",
+    "server_started": "{server} 已啟動",
+    "server_stopping": "{server} 即將關閉",
+}
+_DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
+_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+class PresentationError(ValueError):
+    """Malformed presentation setting or unsupported template."""
+
+
+@dataclass(frozen=True, slots=True)
+class RouteConfig:
+    mode: str = "bot"
+    channel_id: str | None = None
+    webhook_url: str | None = field(default=None, repr=False, compare=False)
+    username: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ServerPresentation:
+    label: str
+    chat: RouteConfig
+    events: RouteConfig
+    event_channels: Mapping[str, str]
+    templates: Mapping[str, str]
+    disabled_events: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class PresentationSettings:
+    servers: Mapping[str, ServerPresentation]
+
+    @classmethod
+    def empty(cls) -> "PresentationSettings":
+        return cls(MappingProxyType({}))
+
+    @classmethod
+    def from_mapping(
+        cls,
+        raw: object,
+        environ: Mapping[str, str] | None = None,
+    ) -> "PresentationSettings":
+        env = os.environ if environ is None else environ
+        if not isinstance(raw, Mapping):
+            raise PresentationError("presentation must be an object")
+        if set(raw) - {"servers"}:
+            raise PresentationError("unknown presentation configuration keys")
+        servers = raw.get("servers", {})
+        if not isinstance(servers, Mapping):
+            raise PresentationError("presentation.servers must be an object")
+        result: dict[str, ServerPresentation] = {}
+        for server_id, item in servers.items():
+            if not isinstance(server_id, str) or not server_id.strip():
+                raise PresentationError("presentation server_id must be text")
+            if not isinstance(item, Mapping):
+                raise PresentationError("presentation server entry must be an object")
+            if set(item) - {"label", "chat", "events", "event_channels", "templates", "disabled_events"}:
+                raise PresentationError("unknown presentation server option")
+            label = item.get("label", server_id)
+            if not isinstance(label, str) or not label.strip() or len(label) > 80:
+                raise PresentationError("presentation.label must be non-empty and at most 80 characters")
+            chat = _route(item.get("chat", {}), env, f"{server_id}.chat")
+            events = _route(item.get("events", {}), env, f"{server_id}.events")
+            raw_channels = item.get("event_channels", {})
+            raw_templates = item.get("templates", {})
+            raw_disabled = item.get("disabled_events", [])
+            if not isinstance(raw_channels, Mapping):
+                raise PresentationError("event_channels must be an object")
+            if not isinstance(raw_templates, Mapping):
+                raise PresentationError("templates must be an object")
+            if not isinstance(raw_disabled, list):
+                raise PresentationError("disabled_events must be a list")
+            channels: dict[str, str] = {}
+            templates: dict[str, str] = {}
+            for kind, value in raw_channels.items():
+                _event_name(kind)
+                channels[kind] = _channel(value)
+            for kind, value in raw_templates.items():
+                _event_name(kind)
+                templates[kind] = _template(value, f"templates.{kind}")
+            for kind in raw_disabled:
+                _event_name(kind)
+            result[server_id] = ServerPresentation(
+                label.strip(), chat, events,
+                MappingProxyType(channels), MappingProxyType(templates),
+                frozenset(raw_disabled),
+            )
+        return cls(MappingProxyType(result))
+
+
+@dataclass(frozen=True, slots=True)
+class OutboundDiscordMessage:
+    channel_id: str
+    content: str
+    mode: str
+    username: str | None = None
+    avatar_url: str | None = None
+    webhook_url: str | None = field(default=None, repr=False, compare=False)
+
+
+def _event_name(value: object) -> None:
+    if not isinstance(value, str) or value not in EVENT_TYPES:
+        raise PresentationError("unsupported presentation event type")
+
+
+def _channel(value: object) -> str:
+    if not isinstance(value, str) or not value.isascii() or not value.isdecimal() or not 1 <= len(value) <= 20:
+        raise PresentationError("channel_id must be a decimal Discord ID string")
+    return value
+
+
+def _template(raw: object, name: str) -> str:
+    if not isinstance(raw, str) or not raw.strip() or len(raw) > 2000:
+        raise PresentationError(f"{name} must be non-empty text of at most 2000 characters")
+    try:
+        fields = [field for _, field, _, _ in Formatter().parse(raw) if field is not None]
+    except ValueError as exc:
+        raise PresentationError(f"{name} has malformed braces") from exc
+    if any(field not in _FIELDS for field in fields):
+        raise PresentationError(f"{name} contains an unsupported placeholder")
+    return raw
+
+
+def _validate_webhook_url(url: str) -> None:
+    # A Webhook URL is a credential. Never include the URL in exceptions or logs.
+    try:
+        parsed = urlsplit(url)
+        valid = (
+            parsed.scheme == "https"
+            and parsed.hostname in {"discord.com", "discordapp.com", "canary.discord.com", "ptb.discord.com"}
+            and parsed.port is None
+            and parsed.username is None and parsed.password is None
+            and not parsed.query and not parsed.fragment
+            and bool(_DISCORD_WEBHOOK_PATH.fullmatch(parsed.path))
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise PresentationError("webhook_url_env must resolve to a Discord HTTPS webhook URL")
+
+
+def _route(raw: object, environ: Mapping[str, str], label: str) -> RouteConfig:
+    if not isinstance(raw, Mapping):
+        raise PresentationError(f"{label} must be an object")
+    if set(raw) - {"mode", "channel_id", "webhook_url_env", "username"}:
+        raise PresentationError(f"{label} has unknown options")
+    mode = raw.get("mode", "bot")
+    if mode not in {"bot", "webhook"}:
+        raise PresentationError(f"{label}.mode must be bot or webhook")
+    channel_id = raw.get("channel_id")
+    if channel_id is not None:
+        channel_id = _channel(channel_id)
+    username = raw.get("username")
+    if username is not None:
+        username = _template(username, f"{label}.username")
+        if len(username) > 80:
+            raise PresentationError(f"{label}.username must be at most 80 characters")
+    secret_env = raw.get("webhook_url_env")
+    url = None
+    if mode == "webhook":
+        if not isinstance(secret_env, str) or not secret_env.strip():
+            raise PresentationError(f"{label}.webhook_url_env is required in webhook mode")
+        url = environ.get(secret_env)
+        if not url:
+            raise PresentationError(f"{label}.webhook_url_env environment variable is missing")
+        _validate_webhook_url(url)
+    elif secret_env is not None:
+        raise PresentationError(f"{label}.webhook_url_env requires webhook mode")
+    return RouteConfig(mode, channel_id, url, username)
+
+
+def render_message(
+    event: MinecraftEvent,
+    profile: ServerPresentation,
+    default_channel: str | None,
+) -> OutboundDiscordMessage | None:
+    """Build one safe, bounded message without contacting Discord or Minecraft."""
+    if event.type not in EVENT_TYPES or event.type in profile.disabled_events:
+        return None
+    route = profile.chat if event.type == "player_chat" else profile.events
+    channel_id = profile.event_channels.get(event.type) or route.channel_id or default_channel
+    if channel_id is None:
+        return None
+    data = event.data
+    player = data.get("player_name")
+    needs_player = event.type in {
+        "player_chat", "player_join", "player_quit", "player_gamemode", "player_advancement",
+    }
+    if needs_player and (not isinstance(player, str) or not player.strip()):
+        return None
+    if event.type == "player_chat":
+        message = data.get("message")
+        if not isinstance(message, str) or not message.strip():
+            return None
+    elif event.type == "player_death":
+        death_message = data.get("death_message")
+        if not isinstance(death_message, str) or not death_message.strip():
+            return None
+    elif event.type == "player_advancement":
+        title = data.get("title")
+        if not isinstance(title, str) or not title.strip():
+            return None
+    elif event.type == "player_gamemode":
+        game_mode = data.get("game_mode")
+        if not isinstance(game_mode, str) or not game_mode.strip():
+            return None
+
+    values = {
+        "server": profile.label, "player": player.strip() if isinstance(player, str) else "",
+        "message": str(data.get("message", "")).strip(),
+        "death_message": str(data.get("death_message", "")).strip(),
+        "title": str(data.get("title", "")).strip(),
+        "game_mode": str(data.get("game_mode", "")).strip(),
+        "label": str(data.get("advancement_type", "")).strip(),
+    }
+    if event.type == "player_chat":
+        content = values["message"] if route.mode == "webhook" else (
+            f"[{profile.label}] <{values['player']}> {values['message']}"
+        )
+    else:
+        content = profile.templates.get(event.type, _EVENT_TEMPLATES[event.type]).format_map(values)
+    content = content.strip()[:1950]
+    if not content:
+        return None
+    username = None
+    avatar_url = None
+    if route.mode == "webhook":
+        name_pattern = route.username or (
+            "[{server}] {player}" if event.type == "player_chat" else "{server}"
+        )
+        username = name_pattern.format_map(values)[:80]
+        uuid = data.get("minecraft_uuid")
+        if event.type == "player_chat" and isinstance(uuid, str) and _UUID.fullmatch(uuid):
+            avatar_url = f"https://mc-heads.net/avatar/{uuid}/64"
+    return OutboundDiscordMessage(
+        channel_id=channel_id,
+        content=content,
+        mode=route.mode,
+        username=username,
+        avatar_url=avatar_url,
+        webhook_url=route.webhook_url,
+    )
