@@ -55,6 +55,7 @@ class AiServices:
     _profiles: Any = None
     _knowledge: Any = None
     _channel_reader: Any = None
+    _knowledge_cache: Any = None
 
     async def generate_model_turn(
         self,
@@ -162,6 +163,8 @@ class AiServices:
     async def search_knowledge(self, query: str, *, limit: int = 6):
         if self._retrieval is None:
             return ()
+        if self._knowledge_cache is not None:
+            return await self._knowledge_cache.search(query, limit=limit, retrieval=self._retrieval)
         return await self._retrieval.search_knowledge(query, limit=limit)
 
     def list_knowledge_sources(self, *, limit: int = 50) -> tuple[tuple[str, str], ...]:
