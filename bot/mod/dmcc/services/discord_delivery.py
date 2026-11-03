@@ -51,4 +51,6 @@ class DiscordDeliveryAdapter:
                 payload.channel_id,
                 type(exc).__name__,
             )
-            await self.send_discord_message(payload.channel_id, payload.content)
+            await self.send_discord_message(
+                payload.channel_id, payload.fallback_content or payload.content
+            )
