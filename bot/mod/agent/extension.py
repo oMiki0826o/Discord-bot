@@ -27,7 +27,7 @@ async def setup(bot) -> None:
     from bot.core.settings.manager import settings
     from bot.core.settings.schema import SettingRule
 
-    from ..ai.api import register_runtime_extension
+    from ..ai.api import register_runtime_extension, unregister_runtime_extension
     from .assembly import build_runtime_factory
     from .skills import initialize_skill_home
 
@@ -49,8 +49,16 @@ async def setup(bot) -> None:
         factory=build_runtime_factory(AgentSettings.from_mapping(raw)),
         read_only=True,
     )
+    try:
+        await bot.add_cog(AgentStatusCog(bot, AgentSettings.from_mapping(raw)))
+    except BaseException:
+        # A failed Cog registration must not leave AI pointing to an orphan Agent.
+        try:
+            unregister_runtime_extension(bot, owner="agent")
+        finally:
+            await runtime.close()
+        raise
     _loaded_runtimes[bot] = runtime
-    await bot.add_cog(AgentStatusCog(bot, AgentSettings.from_mapping(raw)))
 
 
 async def teardown(bot) -> None:
@@ -59,8 +67,14 @@ async def teardown(bot) -> None:
     runtime = _loaded_runtimes.pop(bot, None)
     if runtime is None:
         return
-    await bot.remove_cog("AgentStatusCog")
     from ..ai.api import unregister_runtime_extension
 
-    removed = unregister_runtime_extension(bot, owner="agent")
-    await removed.close()
+    try:
+        await bot.remove_cog("AgentStatusCog")
+    finally:
+        try:
+            removed = unregister_runtime_extension(bot, owner="agent")
+        except Exception:
+            await runtime.close()
+            raise
+        await removed.close()
