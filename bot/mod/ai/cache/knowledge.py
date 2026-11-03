@@ -45,16 +45,24 @@ class RedisKnowledgeCache:
             if raw:
                 chunk_ids = json.loads(raw)
                 if isinstance(chunk_ids, list) and all(
-                    isinstance(chunk_id, str) and 0 < len(chunk_id) <= 128
-                    for chunk_id in chunk_ids
+                    isinstance(entry, dict)
+                    and isinstance(entry.get("id"), str)
+                    and 0 < len(entry["id"]) <= 128
+                    and isinstance(entry.get("score"), (int, float))
+                    and isinstance(entry.get("title"), str)
+                    and isinstance(entry.get("title_match"), int)
+                    for entry in chunk_ids
                 ):
                     verified = []
-                    for chunk_id in chunk_ids:
-                        # Checks the current source; index IDs alone are not sufficient evidence.
-                        chunk = retrieval.read_knowledge_chunk(chunk_id)
+                    for entry in chunk_ids:
+                        # Re-read the authoritative source before using cached metadata.
+                        chunk = retrieval.read_knowledge_chunk(entry["id"])
                         if chunk is None:
                             break
-                        verified.append(KnowledgeHit(chunk, 0.0))
+                        verified.append(KnowledgeHit(
+                            chunk, float(entry["score"]),
+                            entry["title"][:256], entry["title_match"],
+                        ))
                     if verified and len(verified) == len(chunk_ids):
                         return tuple(verified)
         except Exception:
@@ -64,7 +72,11 @@ class RedisKnowledgeCache:
         if hits:
             try:
                 await self.client.set(
-                    key, json.dumps([hit.chunk.chunk_id for hit in hits]),
+                    key, json.dumps([
+                        {"id": hit.chunk.chunk_id, "score": hit.score,
+                         "title": hit.title, "title_match": hit.title_match}
+                        for hit in hits
+                    ]),
                     ex=self.ttl_seconds,
                 )
             except Exception:
