@@ -80,9 +80,9 @@ def test_webhook_failure_falls_back_to_bot_without_leaking_secret(monkeypatch, c
         monkeypatch.setattr(discord.Webhook, "from_url", lambda url, *, client: Webhook())
         url = "https://discord.com/api/webhooks/123456789012345678/test_secret"
         await DiscordDeliveryAdapter(bot).send_discord_payload(
-            OutboundDiscordMessage("111", "test", "webhook", webhook_url=url)
+            OutboundDiscordMessage("111", "test", "webhook", webhook_url=url, fallback_content="[生存服] <Steve> test")
         )
-        assert bot.channel.calls[0][0] == "test"
+        assert bot.channel.calls[0][0] == "[生存服] <Steve> test"
         assert url not in caplog.text
 
     asyncio.run(scenario())
