@@ -8,8 +8,6 @@ Modification():
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
-
 import pytest
 
 from bot.mod.dmcc.events import MinecraftEvent
@@ -94,9 +92,10 @@ def test_monitor_alert_recovery_presence_and_changed_only_edits():
         clock = [1000.0]
         bot, manager = FakeBot(), FakeManager()
         monitor = MonitoringService(bot, manager, _config(), clock=lambda: clock[0])
-        event = lambda mspt: MinecraftEvent("server_metrics", "survival", {
-            "mspt": mspt, "tps": 1000 / mspt, "online_players": 3, "max_players": 20,
-        })
+        def event(mspt):
+            return MinecraftEvent("server_metrics", "survival", {
+                "mspt": mspt, "tps": 1000 / mspt, "online_players": 3, "max_players": 20,
+            })
         await monitor.on_event(event(49.0))
         await monitor.run_once()
         assert bot.channels["111111111111111111"].sent == []
