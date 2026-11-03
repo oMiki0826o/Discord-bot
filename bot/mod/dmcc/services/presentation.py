@@ -147,6 +147,7 @@ class OutboundDiscordMessage:
     username: str | None = None
     avatar_url: str | None = None
     webhook_url: str | None = field(default=None, repr=False, compare=False)
+    fallback_content: str | None = None
 
 
 def _event_name(value: object) -> None:
@@ -295,4 +296,8 @@ def render_message(
         username=username,
         avatar_url=avatar_url,
         webhook_url=route.webhook_url,
+        fallback_content=(
+            f"[{profile.label}] <{values['player']}> {values['message']}"[:1950]
+            if event.type == "player_chat" else content
+        ),
     )
