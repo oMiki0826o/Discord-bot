@@ -97,7 +97,9 @@ class AgentRuntime:
                     total_usage.thinking_tokens + turn.usage.thinking_tokens,
                     total_usage.estimated or turn.usage.estimated,
                 )
-            if turn.final_text.strip():
+            # Gemini may emit explanatory text and FunctionCalls in one turn.
+            # Execute declared calls before accepting that text as a final answer.
+            if turn.final_text.strip() and (not allow_tools or not turn.function_calls):
                 reason = RuntimeStopReason.FORCED_FINALIZE if force_final else RuntimeStopReason.COMPLETED
                 return self._result(turn.final_text.strip(), reason, model_turns, tool_calls, started, used_model, tuple(observations), total_usage if usage_complete else None)
             if not allow_tools or not turn.function_calls:
