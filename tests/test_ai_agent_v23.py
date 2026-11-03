@@ -1,4 +1,9 @@
-"""Regression specifications for Discord AI safety and real token accounting."""
+"""
+tests/test_ai_agent_v23.py
+Regression specifications for Discord AI safety and real token accounting.
+Modification():
+- Add regression checks and maintain the Agent refactor.
+"""
 from __future__ import annotations
 
 import asyncio
