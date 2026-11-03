@@ -32,6 +32,7 @@ from .services.autocomplete import AutocompleteService
 from .services.command_catalog import CommandCatalog, DmccMode
 from .services.cross_server_relay import CrossServerRelayService
 from .services.discord_delivery import DiscordDeliveryAdapter
+from .services.event_queue import DiscordEventQueue
 from .services.discord_relay import DiscordRelayService
 from .services.info import InfoService
 from .services.link_requests import LinkRequestHandler
@@ -50,6 +51,7 @@ class _Runtime:
     gateway: Gateway
     cog_names: tuple[str, ...]
     panel_clients: tuple[PanelHttpClient, ...]
+    discord_queue: DiscordEventQueue | None = None
 
 
 _loaded_modules: weakref.WeakKeyDictionary[object, _Runtime] = weakref.WeakKeyDictionary()
@@ -97,6 +99,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     gateway = Gateway(settings)
     controls, panel_clients = build_control_providers(settings)
     added_cogs: list[str] = []
+    discord_queue: DiscordEventQueue | None = None
     try:
         await gateway.start()
         linking = LinkingService(link_store=links)
@@ -123,19 +126,23 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 settings,
                 controls,
             )
-            gateway.relay.subscribe(
-                MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation).forward
+            discord_queue = DiscordEventQueue(
+                MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation)
             )
+            discord_queue.start()
+            gateway.relay.subscribe(discord_queue.publish)
             for cog in (user_cog, owner_cog):
                 await bot.add_cog(cog)
                 added_cogs.append(cog.qualified_name)
     except BaseException:
+        if discord_queue is not None:
+            await discord_queue.close()
         await _remove_cogs(bot, tuple(reversed(added_cogs)))
         await gateway.close()
         for client in panel_clients:
             await client.close()
         raise
-    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients)
+    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue)
     setattr(bot, "dmcc_gateway", gateway)
 
 
@@ -148,6 +155,8 @@ async def teardown(bot) -> None:
     try:
         await _remove_cogs(bot, tuple(reversed(runtime.cog_names)))
     finally:
+        if runtime.discord_queue is not None:
+            await runtime.discord_queue.close()
         await runtime.gateway.close()
         for client in runtime.panel_clients:
             await client.close()
