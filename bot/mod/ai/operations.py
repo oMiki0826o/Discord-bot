@@ -68,6 +68,13 @@ class AiOperations:
         with self._database.transaction() as connection:
             connection.execute("INSERT INTO ai_provider_traces (request_id, user_id, model, outcome, created_at) VALUES (?, ?, ?, ?, ?)", (request_id, user_id, model, outcome[:80], self._now()))
 
+    def record_runtime_event(self, request_id: str, user_id: str, kind: str) -> None:
+        """Persist safe Agent event kinds without any prompt or tool arguments."""
+        allowed = "abcdefghijklmnopqrstuvwxyz0123456789._-"
+        if not kind or any(char not in allowed for char in kind):
+            raise ValueError("Invalid runtime event kind")
+        self.record_provider_trace(request_id, user_id, "agent-runtime", kind)
+
     def provider_trace(self, request_id: str, *, limit: int = 50) -> tuple[dict[str, Any], ...]:
         with self._database.connect() as connection:
             rows = connection.execute("SELECT model, outcome, created_at FROM ai_provider_traces WHERE request_id = ? ORDER BY trace_id LIMIT ?", (request_id, limit)).fetchall()
