@@ -521,12 +521,20 @@ public final class BridgeMod implements ModInitializer {
         statsWorker.shutdownNow();
     }
 
+    private List<Map<String, String>> fabricModInventory() {
+        return FabricLoader.getInstance().getAllMods().stream().limit(512).map(container -> Map.of(
+            "mod_id", container.getMetadata().getId(),
+            "version", container.getMetadata().getVersion().getFriendlyString()
+        )).toList();
+    }
+
     private void sendServerStarted(MinecraftServer server) {
         BridgeRuntime active = runtime;
         if (active == null || serverId == null) return;
         active.sendRequired(new ProtocolEnvelope(1, "server_started", serverId, null, Map.of(
                 "motd", server.getMotd(),
-                "minecraft_version", server.getServerVersion()
+                "minecraft_version", server.getServerVersion(),
+                "mods", fabricModInventory()
             ))).whenComplete((ignored, failure) -> {
                 if (failure != null) LOGGER.debug("DMCC server_started skipped because the Bridge is offline", failure);
             });

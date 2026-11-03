@@ -39,6 +39,7 @@ from .services.link_requests import LinkRequestHandler
 from .services.linking import LinkingService
 from .services.minecraft_discord_relay import MinecraftDiscordRelayService
 from .services.monitoring import MonitoringService
+from .services.mod_updates import ModUpdateService
 from .services.op_levels import OpLevelResolver
 
 
@@ -54,6 +55,7 @@ class _Runtime:
     panel_clients: tuple[PanelHttpClient, ...]
     discord_queue: DiscordEventQueue | None = None
     monitor: MonitoringService | None = None
+    updates: ModUpdateService | None = None
 
 
 _loaded_modules: weakref.WeakKeyDictionary[object, _Runtime] = weakref.WeakKeyDictionary()
@@ -103,6 +105,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     added_cogs: list[str] = []
     discord_queue: DiscordEventQueue | None = None
     monitor: MonitoringService | None = None
+    updates: ModUpdateService | None = None
     try:
         await gateway.start()
         linking = LinkingService(link_store=links)
@@ -122,6 +125,10 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
             monitor = MonitoringService(bot, gateway.manager, settings.monitoring)
             gateway.relay.subscribe(monitor.on_event)
             monitor.start()
+        if settings.mod_updates.enabled:
+            updates = ModUpdateService(settings.mod_updates, DiscordDeliveryAdapter(bot))
+            gateway.relay.subscribe(updates.on_event)
+            updates.start()
         if hasattr(bot, "add_cog"):
             user_cog, owner_cog = _build_cogs(
                 bot,
@@ -142,6 +149,8 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 await bot.add_cog(cog)
                 added_cogs.append(cog.qualified_name)
     except BaseException:
+        if updates is not None:
+            await updates.close()
         if monitor is not None:
             await monitor.close()
         if discord_queue is not None:
@@ -151,7 +160,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
         for client in panel_clients:
             await client.close()
         raise
-    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue, monitor)
+    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue, monitor, updates)
     setattr(bot, "dmcc_gateway", gateway)
 
 
@@ -164,6 +173,8 @@ async def teardown(bot) -> None:
     try:
         await _remove_cogs(bot, tuple(reversed(runtime.cog_names)))
     finally:
+        if runtime.updates is not None:
+            await runtime.updates.close()
         if runtime.monitor is not None:
             await runtime.monitor.close()
         if runtime.discord_queue is not None:
