@@ -22,6 +22,7 @@ from ..provider.errors import ProviderVerificationError
 from ..search.cache import SearchCache, SearchObservation
 from ..routing import contains_url
 from .models import RuntimeRequest, RuntimeResult, RuntimeStopReason
+from .events import notify
 
 
 class BasicRuntime:
@@ -67,6 +68,7 @@ class BasicRuntime:
                 + "\n\n".join(request.context_blocks)
             )
         prompt_parts.append("Current request:\n" + request.prompt)
+        await notify(request.progress, "model.start", "正在產生回覆")
         response = await self.provider.generate(GenerationRequest(
             request_id=request.request_id,
             user_id=request.user_id,
@@ -79,6 +81,7 @@ class BasicRuntime:
             use_url_context="web" in request.capabilities and contains_url(request.prompt),
             max_output_tokens=self.max_output_tokens,
         ))
+        await notify(request.progress, "model.complete", "模型回覆已產生")
         text = response.text.strip()
         if not text:
             raise RuntimeError("Basic runtime returned an empty response")

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from ..provider.models import BinaryPart, TokenUsage
+from .events import ProgressSink
 
 
 class RuntimeStopReason(StrEnum):
@@ -34,6 +35,7 @@ class RuntimeRequest:
     binary_parts: tuple[BinaryPart, ...] = ()
     model_candidates: tuple[str, ...] = ()
     capabilities: frozenset[str] = field(default_factory=frozenset)
+    progress: ProgressSink | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not all(value.strip() for value in (self.request_id, self.user_id, self.channel_id, self.prompt)):

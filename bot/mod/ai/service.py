@@ -27,6 +27,7 @@ from .history.models import EventRole, NewEvent
 from .provider.models import BinaryPart
 from .routing import RouteRequest
 from .runtime.models import RuntimeRequest, RuntimeResult
+from .runtime.events import ProgressSink, notify
 from .runtime.protocol import AiRuntime
 from .prompt.audit import redact_prompt
 
@@ -118,6 +119,7 @@ class AIRequest:
     initial_context: tuple[str, ...] = ()
     attachment_context: tuple[str, ...] = ()
     binary_parts: tuple[BinaryPart, ...] = ()
+    progress: ProgressSink | None = None
 
     def __post_init__(self) -> None:
         if not all(value.strip() for value in (self.request_id, self.user_id, self.channel_id, self.conversation_id, self.prompt)):
@@ -181,6 +183,7 @@ class AIService:
                 include_memory=False,
                 include_topics=False,
             )
+            await notify(request.progress, "context.start", "正在載入對話與知識背景")
             context_pack = await self.context_planner.build(
                 context_request,
                 prompt=request.prompt,
@@ -191,6 +194,7 @@ class AIService:
                     + request.attachment_context
                 ),
             )
+            await notify(request.progress, "context.complete", "上下文準備完成")
             bundle = self.composer.compose(
                 sources=self.prompts.load(),
                 context=context_pack,
@@ -223,6 +227,7 @@ class AIService:
                 binary_parts=request.binary_parts,
                 model_candidates=tuple(candidates),
                 capabilities=frozenset(item.value for item in decision.capabilities),
+                progress=request.progress,
             ))
             text = normalize_reply_text(result.text)
             if not text:

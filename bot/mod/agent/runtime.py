@@ -20,6 +20,7 @@ from typing import Any, Protocol
 
 from ..ai.api import RuntimeRequest, RuntimeResult, RuntimeStopReason
 from ..ai.provider.models import TokenUsage
+from ..ai.runtime.events import notify
 
 from .config import AgentSettings
 from .tools import ToolCall, ToolContext, ToolRegistry, ToolResult
@@ -81,6 +82,7 @@ class AgentRuntime:
             )
             declarations = self.registry.declarations(request.capabilities) if allow_tools else ()
             model_turns += 1
+            await notify(request.progress, "model.start", "正在向 Gemini 產生回覆")
             turn = await self.model.generate_turn(request, transcript, declarations, allow_tools=allow_tools)
             used_model = turn.model or used_model
             if turn.usage is None:
@@ -117,7 +119,15 @@ class AgentRuntime:
                     continue
                 seen.add(call.fingerprint)
                 tool_calls += 1
+                display = {
+                    "list_skills": "取得可用 Skills",
+                    "read_skill": "讀取 Skill",
+                    "search_knowledge": "搜尋知識庫",
+                    "read_knowledge_chunk": "讀取知識文件段落",
+                }.get(call.name, "查詢必要資料")
+                await notify(request.progress, "tool.start", "正在" + display)
                 result = await self.registry.execute(call, context)
+                await notify(request.progress, "tool.complete", display + ("完成" if result.ok else "未成功"))
                 results.append((call, result))
                 if result.observation_id not in observations:
                     observations.append(result.observation_id)
