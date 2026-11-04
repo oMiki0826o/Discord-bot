@@ -102,3 +102,8 @@ def test_manual_check_works_without_enabling_periodic_announcements():
         await service.close()
 
     asyncio.run(scenario())
+
+
+def test_manual_update_command_is_registered_in_dmcc_group():
+    from bot.mod.dmcc.commands.user import DmccUserCog
+    assert DmccUserCog.dmcc_slash.get_command("update") is not None
