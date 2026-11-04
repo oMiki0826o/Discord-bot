@@ -92,7 +92,7 @@ def test_invalid_stream_config_rejected(settings):
 
 def test_console_stream_rotation_and_disconnect_do_not_replay_history() -> None:
     class Bridge:
-        text = "old startup\\n"
+        text = "old startup\n"
         async def log(self, server_id):
             return {"content": self.text}
 
@@ -111,20 +111,20 @@ def test_console_stream_rotation_and_disconnect_do_not_replay_history() -> None:
         bridge, manager, sender = Bridge(), Manager(), Sender()
         stream = ConsoleStreamService(_settings(), bridge, manager, sender)
         await stream.run_once()
-        bridge.text += "first real line\\n"
+        bridge.text += "first real line\n"
         await stream.run_once()
         assert len(sender.messages) == 1
-        bridge.text = "new file startup after rotate\\n"
+        bridge.text = "new file startup after rotate\n"
         await stream.run_once()
         assert len(sender.messages) == 1
-        bridge.text += "new live entry\\n"
+        bridge.text += "new live entry\n"
         await stream.run_once()
         assert len(sender.messages) == 2
         assert "new live entry" in sender.messages[1]
         manager.connected = False
         await stream.run_once()
         manager.connected = True
-        bridge.text += "another startup\\n"
+        bridge.text += "another startup\n"
         await stream.run_once()
         assert len(sender.messages) == 2
         await stream.close()
