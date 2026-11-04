@@ -127,6 +127,18 @@ class Gateway:
             )
         )
 
+    async def send_minecraft_segments(
+        self, server_id: str, segments: list[dict[str, object]],
+    ) -> None:
+        """Send bounded, validated style-only segments to one authenticated Bridge."""
+        if not isinstance(segments, list) or not 1 <= len(segments) <= 128:
+            raise ValueError("segments must be a non-empty list of at most 128 items")
+        if any(not isinstance(part, dict) for part in segments):
+            raise ValueError("each text segment must be an object")
+        await self._send_packet(Envelope(1, "minecraft_components", server_id, None, {
+            "segments": segments,
+        }))
+
     async def send_packet(
         self,
         server_id: str,

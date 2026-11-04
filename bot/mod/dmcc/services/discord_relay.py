@@ -17,6 +17,7 @@ from typing import Protocol, Mapping, Sequence
 
 from ..repositories.state import JsonStateRepository
 from .message_format import format_discord_content, render_extras
+from .rich_text import parse_discord_markdown
 
 
 # ── Gateway Contract ──────────────────────
@@ -50,12 +51,14 @@ class DiscordRelayService:
         gateway: MinecraftMessageSender,
         *,
         history_limit: int = 1_000,
+        rich_chat: bool = False,
     ) -> None:
         if history_limit < 1:
             raise ValueError("history_limit must be positive")
         self._repository = repository
         self._gateway = gateway
         self._history_limit = history_limit
+        self._rich_chat = rich_chat
         self._messages: OrderedDict[str, _RelayedMessage] = OrderedDict()
 
     async def forward_discord_message(
@@ -165,7 +168,12 @@ class DiscordRelayService:
         if not server_id:
             return False
         try:
-            await self._gateway.send_minecraft_message(server_id, message)
+            if self._rich_chat and hasattr(self._gateway, "send_minecraft_segments"):
+                await self._gateway.send_minecraft_segments(
+                    server_id, parse_discord_markdown(message)
+                )
+            else:
+                await self._gateway.send_minecraft_message(server_id, message)
         except LookupError:
             return False
         return True
