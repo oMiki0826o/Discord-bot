@@ -23,6 +23,7 @@ from ..events import MinecraftEvent
 EVENT_TYPES = frozenset({
     "player_chat", "player_join", "player_quit", "player_death",
     "player_advancement", "player_gamemode", "server_started", "server_stopping",
+    "server_broadcast",
 })
 _FIELDS = frozenset({
     "player", "server", "message", "death_message", "game_mode", "title", "label",
@@ -35,6 +36,7 @@ _EVENT_TEMPLATES = {
     "player_gamemode": "**{player} 切換遊戲模式為 {game_mode}**",
     "server_started": "**{server} 已啟動**",
     "server_stopping": "**{server} 即將關閉**",
+    "server_broadcast": "**[{server}] {player}: {message}**",
 }
 _DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
@@ -274,7 +276,7 @@ def render_message(
     }
     if needs_player and (not isinstance(player, str) or not player.strip()):
         return None
-    if event.type == "player_chat":
+    if event.type in {"player_chat", "server_broadcast"}:
         message = data.get("message")
         if not isinstance(message, str) or not message.strip():
             return None
@@ -292,7 +294,7 @@ def render_message(
             return None
 
     values = {
-        "server": profile.label, "player": player.strip() if isinstance(player, str) else "",
+        "server": profile.label, "player": player.strip() if isinstance(player, str) else "Server",
         "message": str(data.get("message", "")).strip(),
         "death_message": str(data.get("death_message", "")).strip(),
         "title": str(data.get("title", "")).strip(),

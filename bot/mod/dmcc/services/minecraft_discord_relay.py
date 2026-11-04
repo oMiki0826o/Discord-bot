@@ -65,6 +65,13 @@ class MinecraftDiscordRelayService:
 
 def _legacy_content(event: MinecraftEvent) -> str | None:
     player_name = event.data.get("player_name")
+    if event.type == "server_broadcast":
+        raw = event.data.get("message")
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        source = event.data.get("player_name")
+        source = source.strip()[:64] if isinstance(source, str) and source.strip() else "Server"
+        return f"**[{event.server_id}] {source}: {raw.strip()[:1500]}**"
     if event.type == "player_chat":
         message = event.data.get("message")
         if not isinstance(player_name, str) or not player_name.strip() or not isinstance(message, str) or not message.strip():

@@ -128,6 +128,7 @@ class DmccSettings:
         allowed_events = {
             "player_chat", "player_join", "player_quit", "player_death",
             "player_gamemode", "player_advancement", "server_started", "server_stopping",
+            "server_broadcast",
         }
         if (
             not isinstance(cross_events, list)

@@ -57,7 +57,12 @@ class CrossServerRelayService:
                 "server_started": "server started",
                 "server_stopping": "server stopping",
             }.get(event.type)
-            if event.type == "player_death":
+            if event.type == "server_broadcast":
+                message = event.data.get("message")
+                if not isinstance(message, str) or not message.strip():
+                    return False
+                payload = f"[{event.server_id}] {message.strip()[:1200]}"
+            elif event.type == "player_death":
                 message = event.data.get("death_message")
                 if not isinstance(message, str) or not message.strip():
                     return False
