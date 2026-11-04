@@ -37,7 +37,7 @@ final class RichTextComponents {
                 Object item = entry.get(flag);
                 if (item != null && !(item instanceof Boolean)) return Optional.empty();
             }
-            Object colorRaw = entry.getOrDefault("color", "white");
+            Object colorRaw = entry.containsKey("color") ? entry.get("color") : "white";
             if (!(colorRaw instanceof String color) || !(color.equals("white") || color.equals("gray"))) {
                 return Optional.empty();
             }
