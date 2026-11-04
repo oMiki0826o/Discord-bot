@@ -73,6 +73,7 @@ class NicknameSyncService:
         self._bot, self._links, self.config = bot, links, config
         self._task: asyncio.Task[None] | None = None
         self._closed = False
+        self._sweep_cursor = 0
 
     def _guild(self):
         if not self.config.enabled or self.config.guild_id is None:
@@ -136,8 +137,15 @@ class NicknameSyncService:
         guild = self._guild()
         if guild is None or self._closed:
             return 0
-        count = 0
-        for member in list(getattr(guild, "members", ()))[:self.config.max_sweep_per_cycle]:
+        members = list(getattr(guild, "members", ()))
+        if not members:
+            self._sweep_cursor = 0
+            return 0
+        start = self._sweep_cursor % len(members)
+        count, batch_size = 0, min(len(members), self.config.max_sweep_per_cycle)
+        self._sweep_cursor = (start + batch_size) % len(members)
+        for offset in range(batch_size):
+            member = members[(start + offset) % len(members)]
             if await self.sync_user(str(getattr(member, "id", "")), member=member):
                 count += 1
         return count
