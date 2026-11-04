@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 
 from bot.mod.dmcc.services.message_format import format_discord_content, render_extras
 from bot.mod.dmcc.services.discord_relay import DiscordRelayService
