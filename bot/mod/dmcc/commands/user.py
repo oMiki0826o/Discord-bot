@@ -21,6 +21,7 @@ from ..services.info import InfoService
 from ..services.linking import LinkingService
 from ..services.nickname_sync import NicknameSyncService
 from ..services.mentions import MinecraftMentionService
+from ..services.release_updates import ReleaseUpdateService
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -71,6 +72,7 @@ class DmccUserCog(commands.Cog):
         autocomplete: AutocompleteService,
         nicknames: NicknameSyncService | None = None,
         mentions: MinecraftMentionService | None = None,
+        release_updates: ReleaseUpdateService | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -82,6 +84,7 @@ class DmccUserCog(commands.Cog):
         self._autocomplete = autocomplete
         self._nicknames = nicknames
         self._mentions = mentions
+        self._release_updates = release_updates
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -90,6 +93,27 @@ class DmccUserCog(commands.Cog):
         names = self._info.help_for(self._op_level(interaction))
         await interaction.response.send_message(
             "DMCC commands: " + ", ".join(f"`{name}`" for name in names),
+            ephemeral=True,
+        )
+
+    @dmcc_slash.command(name="update", description="Check for a newer Discord Minecraft Bridge release")
+    async def slash_update(self, interaction) -> None:
+        if self._release_updates is None:
+            await interaction.response.send_message(
+                "DMCC release check is unavailable.", ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await self._release_updates.check_now()
+        if result is None:
+            await interaction.followup.send(
+                "No verified newer stable DMCC release was found, or GitHub is unavailable.",
+                ephemeral=True,
+            )
+            return
+        tag, url = result
+        await interaction.followup.send(
+            f"New DMCC release: {tag}\\n{url}\\nCheck Fabric compatibility before updating.",
             ephemeral=True,
         )
 
