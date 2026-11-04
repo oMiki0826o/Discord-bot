@@ -252,6 +252,7 @@ def _build_cogs(
         autocomplete=AutocompleteService(gateway.requests),
         nicknames=nicknames,
         mentions=MinecraftMentionService(settings.mentions, state, links, gateway),
+    )
     owner = DmccOwnerCog(
         bot,
         info=info,
