@@ -122,6 +122,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                         for connection in gateway.manager.all()
                         if connection.server_id is not None
                     ),
+                    event_types=settings.cross_server_events,
                 ).forward
             )
         if settings.monitoring.enabled:

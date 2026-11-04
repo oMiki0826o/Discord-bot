@@ -31,6 +31,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "request_timeout_seconds": 15.0,
     "mode": "standalone",
     "cross_server_relay": False,
+    "cross_server_events": ["player_chat"],
     "providers": {"control": [], "backup": []},
     "servers": [],
     "presentation": {"servers": {}},
@@ -52,6 +53,7 @@ def build_settings_schema(rule_type):
         "request_timeout_seconds": rule_type((int, float), minimum=0.01, maximum=600),
         "mode": rule_type(str),
         "cross_server_relay": rule_type(bool),
+        "cross_server_events": rule_type(list),
         "providers": rule_type(dict),
         "servers": rule_type(list),
         "presentation": rule_type(dict),
@@ -90,6 +92,7 @@ class DmccSettings:
     request_timeout_seconds: float
     mode: str
     cross_server_relay: bool
+    cross_server_events: frozenset[str]
     servers: tuple[ManagedServer, ...]
     control_providers: tuple[ControlProviderDefinition, ...] = ()
     backup_providers: tuple[BackupProviderDefinition, ...] = ()
@@ -121,6 +124,16 @@ class DmccSettings:
         cross_server_relay = raw.get("cross_server_relay", False)
         if type(cross_server_relay) is not bool:
             raise SettingsError("cross_server_relay must be a boolean")
+        cross_events = raw.get("cross_server_events", ["player_chat"])
+        allowed_events = {
+            "player_chat", "player_join", "player_quit", "player_death",
+            "player_gamemode", "player_advancement", "server_started", "server_stopping",
+        }
+        if (
+            not isinstance(cross_events, list)
+            or not all(isinstance(name, str) and name in allowed_events for name in cross_events)
+        ):
+            raise SettingsError("cross_server_events contains invalid or private event types")
 
         providers = _mapping(raw.get("providers", {"control": [], "backup": []}), "providers")
         controls = _control_providers(providers.get("control", []), environment)
@@ -161,6 +174,7 @@ class DmccSettings:
             request_timeout_seconds=request_timeout,
             mode=str(mode),
             cross_server_relay=cross_server_relay,
+            cross_server_events=frozenset(cross_events),
             servers=servers,
             control_providers=controls,
             backup_providers=backups,
