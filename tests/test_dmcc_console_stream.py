@@ -35,6 +35,13 @@ def test_log_redaction_blocks_secrets_ips_and_mass_mentions() -> None:
     assert "[REDACTED]" in redacted
 
 
+def test_bearer_authorization_and_ipv6_are_redacted() -> None:
+    rendered = redact_console_line("Authorization: Bearer hiddenToken123 player [2001:db8::1]")
+    assert "hiddenToken123" not in rendered
+    assert "2001:db8" not in rendered
+    assert "[REDACTED]" in rendered
+
+
 def test_stream_only_sends_new_lines_and_bounds_length() -> None:
     class Bridge:
         log_text = "boot\nready\n"
