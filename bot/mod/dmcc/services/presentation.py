@@ -38,6 +38,8 @@ _EVENT_TEMPLATES = {
 }
 _DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_PLAYER_NAME = re.compile(r"^[A-Za-z0-9_]{3,16}$")
+_AVATAR_HOSTS = frozenset({"mc-heads.net", "crafatar.com", "cdn.discordapp.com", "media.discordapp.net"})
 
 
 class PresentationError(ValueError):
@@ -50,6 +52,7 @@ class RouteConfig:
     channel_id: str | None = None
     webhook_url: str | None = field(default=None, repr=False, compare=False)
     username: str | None = None
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,10 +199,31 @@ def _validate_webhook_url(url: str) -> None:
         raise PresentationError("webhook_url_env must resolve to a Discord HTTPS webhook URL")
 
 
+def _avatar_template(raw: object) -> str:
+    if not isinstance(raw, str) or not 1 <= len(raw) <= 400:
+        raise PresentationError("avatar_url must be a short HTTPS URL")
+    try:
+        parsed = urlsplit(raw)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in _AVATAR_HOSTS
+            or parsed.username is not None or parsed.password is not None
+            or parsed.port is not None or parsed.query or parsed.fragment
+            or not parsed.path.startswith("/")
+        ):
+            raise PresentationError("avatar_url must point to an approved HTTPS avatar host")
+        for _, field, spec, conversion in Formatter().parse(parsed.path):
+            if field is not None and (field not in {"player", "minecraft_uuid"} or spec or conversion):
+                raise PresentationError("avatar_url contains an unsupported placeholder")
+    except ValueError as exc:
+        raise PresentationError("invalid avatar_url format") from exc
+    return raw
+
+
 def _route(raw: object, environ: Mapping[str, str], label: str) -> RouteConfig:
     if not isinstance(raw, Mapping):
         raise PresentationError(f"{label} must be an object")
-    if set(raw) - {"mode", "channel_id", "webhook_url_env", "username"}:
+    if set(raw) - {"mode", "channel_id", "webhook_url_env", "username", "avatar_url"}:
         raise PresentationError(f"{label} has unknown options")
     mode = raw.get("mode", "bot")
     if mode not in {"bot", "webhook"}:
@@ -223,7 +247,12 @@ def _route(raw: object, environ: Mapping[str, str], label: str) -> RouteConfig:
         _validate_webhook_url(url)
     elif secret_env is not None:
         raise PresentationError(f"{label}.webhook_url_env requires webhook mode")
-    return RouteConfig(mode, channel_id, url, username)
+    avatar_url = raw.get("avatar_url")
+    if avatar_url is not None:
+        if mode != "webhook":
+            raise PresentationError(f"{label}.avatar_url requires Webhook mode")
+        avatar_url = _avatar_template(avatar_url)
+    return RouteConfig(mode, channel_id, url, username, avatar_url)
 
 
 def render_message(
@@ -289,8 +318,20 @@ def render_message(
         )
         username = name_pattern.format_map(values)[:80]
         uuid = data.get("minecraft_uuid")
-        if event.type == "player_chat" and isinstance(uuid, str) and _UUID.fullmatch(uuid):
-            avatar_url = f"https://mc-heads.net/avatar/{uuid}/64"
+        valid_uuid = uuid if isinstance(uuid, str) and _UUID.fullmatch(uuid) else None
+        valid_player = values["player"] if _PLAYER_NAME.fullmatch(values["player"]) else None
+        if route.avatar_url is not None:
+            if "{minecraft_uuid}" not in route.avatar_url or valid_uuid is not None:
+                if "{player}" not in route.avatar_url or valid_player is not None:
+                    avatar_url = route.avatar_url.format_map({
+                        "minecraft_uuid": valid_uuid or "",
+                        "player": valid_player or "",
+                    })
+        elif event.type == "player_chat":
+            if valid_uuid is not None:
+                avatar_url = f"https://mc-heads.net/avatar/{valid_uuid}/64"
+            elif valid_player is not None:
+                avatar_url = f"https://mc-heads.net/avatar/{valid_player}/64"
     return OutboundDiscordMessage(
         channel_id=channel_id,
         content=content,
