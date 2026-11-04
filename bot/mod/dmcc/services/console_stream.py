@@ -136,8 +136,9 @@ class ConsoleStreamService:
         offset = current.rfind(anchor)
         if offset != -1:
             return current[offset + len(anchor):]
-        # Log rotation or a large overwrite: avoid replaying old content.
-        return current[-_MAX_CHARS:]
+        # A rotation or tail-window gap has no unambiguous resume position.
+        # Establish the new baseline without replaying prior log content.
+        return ""
 
     async def close(self) -> None:
         task, self._task = self._task, None
