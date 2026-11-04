@@ -111,7 +111,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     console: ConsoleStreamService | None = None
     try:
         await gateway.start()
-        linking = LinkingService(link_store=links)
+        linking = LinkingService(link_store=links, max_accounts=settings.max_linked_accounts)
         gateway.relay.subscribe(LinkRequestHandler(linking, gateway).handle)
         if settings.cross_server_relay:
             gateway.relay.subscribe(
