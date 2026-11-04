@@ -166,6 +166,20 @@ public final class BridgeMod implements ModInitializer {
             handleStatsRequest(server, client, envelope);
             return;
         }
+        if (envelope.type().equals("player_mention")) {
+            var request = PlayerMentionRequest.parse(envelope.data());
+            if (request.isEmpty()) return;
+            server.execute(() -> {
+                for (UUID uuid : request.get().players()) {
+                    ServerPlayer target = server.getPlayerList().getPlayer(uuid);
+                    if (target != null) {
+                        target.displayClientMessage(Component.literal(request.get().message()),
+                            request.get().actionBar());
+                    }
+                }
+            });
+            return;
+        }
         if (!envelope.type().equals("minecraft_message")) return;
         Object rawMessage = envelope.data().get("message");
         if (!(rawMessage instanceof String message) || message.isBlank()) return;
