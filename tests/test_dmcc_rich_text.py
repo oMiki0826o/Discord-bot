@@ -1,4 +1,9 @@
-"""DMCC safe rich-text presentation preserves common Discord Markdown in Minecraft."""
+"""tests/test_dmcc_rich_text.py
+
+Modification():
+
+- DMCC safe rich-text presentation preserves common Discord Markdown in Minecraft.
+"""
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,9 @@
-"""DMCC nickname sync: opt-in, bounded and permission-aware."""
+"""tests/test_dmcc_nickname_sync.py
+
+Modification():
+
+- DMCC nickname sync: opt-in, bounded and permission-aware.
+"""
 from __future__ import annotations
 
 import asyncio

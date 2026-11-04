@@ -1,4 +1,9 @@
-"""Tests for opt-in targeted Minecraft notifications of Discord user mentions."""
+"""tests/test_dmcc_mentions.py
+
+Modification():
+
+- Tests for opt-in targeted Minecraft notifications of Discord user mentions.
+"""
 from __future__ import annotations
 
 import asyncio

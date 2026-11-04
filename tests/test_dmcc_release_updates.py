@@ -1,4 +1,9 @@
-"""Tests for opt-in GitHub release announcements (never auto-install)."""
+"""tests/test_dmcc_release_updates.py
+
+Modification():
+
+- Tests for opt-in GitHub release announcements (never auto-install).
+"""
 from __future__ import annotations
 
 import asyncio
