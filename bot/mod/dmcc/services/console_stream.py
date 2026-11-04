@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 _IPV4 = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
 _IPV6 = re.compile(r"(?<![A-Za-z0-9])(?:[0-9A-Fa-f]{0,4}:){2,8}[0-9A-Fa-f]{0,4}(?![A-Za-z0-9])")
 _SECRET = re.compile(r"(?i)\b(password|token|api[_-]?key|secret|authorization|session)\s*[:=]\s*\S+")
+_BEARER = re.compile(r"(?i)\\bauthorization\\s*:\\s*bearer\\s+\\S+")
 _MASS = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 _MAX_LINES = 80
 _MAX_CHARS = 1850
@@ -28,6 +29,7 @@ def redact_console_line(line: str) -> str:
         return ""
     value = _IPV4.sub("[REDACTED]", line)
     value = _IPV6.sub("[REDACTED]", value)
+    value = _BEARER.sub("Authorization=[REDACTED]", value)
     value = _SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
     value = _MASS.sub(lambda m: f"[{m.group(1).lower()}]", value)
     return value.replace("`", "'").replace("\r", " ").replace("\x00", "")[:_MAX_CHARS]
