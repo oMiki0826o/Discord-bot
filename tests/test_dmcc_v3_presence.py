@@ -28,9 +28,9 @@ def test_presence_online_idle_dnd_and_player_count_voice() -> None:
             self.presence = (owner, text, status)
             return True
         async def refresh_presence(self):
-            pass
+            return None
         async def clear_presence_override(self, owner):
-            pass
+            return None
 
     class Manager:
         connected = True
