@@ -123,10 +123,10 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
         if settings.nickname_sync.enabled:
             nicknames = NicknameSyncService(bot, links, settings.nickname_sync)
             nicknames.start()
+        release_updates = ReleaseUpdateService(
+            settings.release_check, DiscordDeliveryAdapter(bot), MODULE_VERSION
+        )
         if settings.release_check.enabled:
-            release_updates = ReleaseUpdateService(
-                settings.release_check, DiscordDeliveryAdapter(bot), MODULE_VERSION
-            )
             release_updates.start()
         if settings.cross_server_relay:
             gateway.relay.subscribe(
@@ -167,6 +167,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 settings,
                 controls,
                 nicknames,
+                release_updates,
             )
             discord_queue = DiscordEventQueue(
                 MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation)
@@ -236,6 +237,7 @@ def _build_cogs(
     settings: DmccSettings,
     controls,
     nicknames: NicknameSyncService | None = None,
+    release_updates: ReleaseUpdateService | None = None,
 ) -> tuple[DmccUserCog, DmccOwnerCog]:
     catalog = CommandCatalog(DmccMode(settings.mode))
     servers = ServerRegistry(settings.servers)
@@ -252,6 +254,7 @@ def _build_cogs(
         autocomplete=AutocompleteService(gateway.requests),
         nicknames=nicknames,
         mentions=MinecraftMentionService(settings.mentions, state, links, gateway),
+        release_updates=release_updates,
     )
     owner = DmccOwnerCog(
         bot,
