@@ -39,7 +39,7 @@
 - **文件工具**：`/markitdown` 轉換支援的文件格式。
 - **AI**：`/ai`、直接 @Bot 對話、附件與 MarkItDown、History／Memory／Knowledge 權限隔離、Gemini Web／URL Context、原生訊息進度與輸入／輸出 Token 統計。
 - **Agent（可選）**：有限回合 Function Calling、Skills 自動初始化與漸進載入、官方 MCP SDK 的本機唯讀 Knowledge Tools、Discord ID 管理員診斷；依賴 `ai` 模組。
-- **Minecraft 維運**：Fabric DMCC bridge、Discord ↔ Minecraft 訊息轉送、可自訂的 Bot/Webhook 玩家聊天與伺服器事件顯示、選用 MSPT 警告／頻道狀態／Presence／模組更新通知、Owner 本機控制，以及 tmux + tar 的安全備份／回檔。
+- **Minecraft 維運**：Fabric DMCC bridge、Discord ↔ Minecraft 訊息轉送、可自訂的 Bot/Webhook 玩家聊天與伺服器事件顯示、Discord 表情／貼圖／附件／投票摘要與反應轉送、選用 MSPT 警告／頻道狀態／Presence／模組更新通知、Owner 本機控制，以及 tmux + tar 的安全備份／回檔。
 
 ### 安裝
 
@@ -161,7 +161,7 @@ The current version is `v0.3.0` and the project is under active development. Sou
 - **Documents**: `/markitdown` conversion for supported document formats.
 - **AI**: `/ai`, direct bot mentions, attachments and MarkItDown, scoped History/Memory/Knowledge retrieval, Gemini Web/URL Context, native message progress and separate input/output token reporting.
 - **Agent (optional)**: bounded Function Calling, auto-initialized Skills, read-only Knowledge tools through the official MCP Python SDK, and Discord-ID status access; requires the `ai` module.
-- **Minecraft operations**: Fabric DMCC bridge, two-way Discord relay, configurable Bot/Webhook player chat and event presentation, optional MSPT alerts, channel/Presence status, Modrinth update checks, owner-operated local control, and tmux + tar backup/restore.
+- **Minecraft operations**: Fabric DMCC bridge, two-way Discord relay, configurable Bot/Webhook chat and event presentation, readable Discord emoji/sticker/attachment/poll summaries and reactions, optional MSPT alerts, channel/Presence status, Modrinth update checks, owner-operated local control, and tmux + tar backup/restore.
 
 ### Installation
 

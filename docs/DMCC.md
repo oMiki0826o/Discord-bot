@@ -98,7 +98,7 @@ Bridge 以 `settings/dmcc.json` 的 `presentation` 區塊控制輸出。沒有�
 
 ### Deployment notes (English)
 
-Presentation is opt-in under `settings/dmcc.json → presentation.servers.<server_id>`. The existing Bot channel mapping remains unchanged if no profile is configured. Each of `chat`, `events`, and optional `event_routes` supports independent Bot or Webhook delivery. Provide Webhook URLs only through the environment variables named by `webhook_url_env`, never through committed JSON. A Webhook URL controls its destination channel; changing `channel_id` alone cannot redirect it. Failed Webhook sends fall back to the Bot with player attribution preserved, and all automatic mentions are disabled. Only Fabric Minecraft 1.21.8 is currently listed as a tested build target.
+Presentation is opt-in under `settings/dmcc.json → presentation.servers.<server_id>`. The existing Bot channel mapping remains unchanged if no profile is configured. Each of `chat`, `events`, and optional `event_routes` supports independent Bot or Webhook delivery. Provide Webhook URLs only through the environment variables named by `webhook_url_env`, never through committed JSON. A Webhook URL controls its destination channel; changing `channel_id` alone cannot redirect it. Failed Webhook sends fall back to the Bot with player attribution preserved, and all automatic mentions are disabled. CI builds separately for Fabric Minecraft 1.21.8 and 1.21.9; neither build implies NeoForge compatibility.
 
 ## 監控與模組更新（選用）
 
@@ -150,3 +150,59 @@ Presentation is opt-in under `settings/dmcc.json → presentation.servers.<serve
 ## Monitoring and mod updates (English)
 
 Monitoring is **disabled by default** and receives authenticated Bridge telemetry. Optional settings update a text-channel topic and a voice-channel name, alert only on sustained MSPT degradation, and (when explicitly enabled) set a reversible Minecraft Presence override. Permissions to manage channels are required. Monitoring edits are rate-limited to one change per 600 seconds per field, with stale metrics treated as unknown. `mod_updates` is also opt-in; it consults Modrinth only for explicitly mapped Fabric mods and announces *known compatible* updates, without downloading or installing anything. Match the server's exact Minecraft version to its CI-built JAR (1.21.8 or 1.21.9). Full end-to-end verification on your deployed Discord and Minecraft servers must be performed before production rollout.
+
+## DMCC v3 額外訊息功能（開發分支）
+
+在原有 Discord → Minecraft 文字轉送外，新增以下安全的**純文字摘要**能力：Discord 自訂表情 `<:name:id>` 轉成 `:name:`，用事件內的名稱解析 Discord 使用者／身分組／頻道提及，將 Discord 時間戳轉為 UTC 日期，將 `@everyone`、`@here` 轉成不會觸發提醒的字樣。附件最多五個、貼圖最多三個、嵌入資訊最多三項，投票會轉成題目及選項摘要。已成功轉送的訊息才會在收到 Discord Reaction 時轉送對應表情；編輯與刪除仍沿用原本的受限追蹤表。此功能目前以 Minecraft **純文字**呈現，並未聲稱有原版 DMCC 的完整 Markdown / ClickEvent / HoverEvent / Title 渲染能力。
+
+新版 Fabric Bridge 使用 Fabric API 的公開 `COMMAND_MESSAGE` 事件接收指令造成的**公開廣播**（如 `/say`、`/me`），不監聽發送給私人收件者的 `/msg`；同時抑制事件系統產生的重複聊天回顯。在 Discord 呈現中可用 `server_broadcast` 自訂模板，或將該事件加入 `cross_server_events`，避免將未授權的私聊傳至其它伺服器。對 `/tellraw @a` 的完整結構化解析尚未保證。
+
+### 跨服事件
+
+根據你的需求，在 `settings/dmcc.json` 最外層加入（示例）：
+
+```json
+{
+  "cross_server_relay": true,
+  "cross_server_events": [
+    "player_chat",
+    "player_join",
+    "player_quit",
+    "player_death",
+    "server_broadcast"
+  ]
+}
+```
+
+此欄位為嚴格允許清單，只能選玩家聊天、加入、離開、死亡、進度、遊戲模式、伺服器啟停及公開廣播。帳號綁定、私有資訊、指令請求、伺服器指標不會跨服廣播。未設定時維持只跨服轉送聊天的舊行為。
+
+### 私密控制台日誌（選用）
+
+若管理員確實需要連續觀看 `latest.log`，可在最外層加入：
+
+```json
+{
+  "console_stream": {
+    "enabled": true,
+    "poll_seconds": 5,
+    "servers": {
+      "survival": {"channel_id": "123456789012345678"}
+    }
+  },
+  "account_linking": {"max_accounts": 1}
+}
+```
+
+- `console_stream` **預設關閉**。啟用後由 Python 透過原有 HMAC 認證的 Bridge `log_request` 輪詢有限大小的日誌尾部；不會在第一次啟用時倒灌舊有歷史。每次最多轉送八十行，截斷過長訊息，並預設遮蔽 IP、IPv6、常見 Secret／Token／Bearer 憑證、`@everyone` 等。
+- 請將日誌頻道設為**只有可信任管理員可見**。正則遮蔽不能保證識別所有敏感資訊，因此不要把控制台日誌轉至公開頻道。**此功能只顯示日誌，不開放頻道內任意使用者執行控制台指令。** 需要操作請使用既有受權限控制的 `/dmcc console` 指令。
+- `account_linking.max_accounts` 以 Discord ID 設定一個使用者可連結幾個 Minecraft 帳號。數值 `0` 表示沿用既有無上限行為；設定為 `1` 可比照 DMCC 的單一綁定策略，不會自動刪除舊綁定。仍使用 Minecraft 端啟動、一次性驗證碼完成綁定。
+
+### 頭像及看板擴充
+
+若使用 Webhook，`presentation.servers.<id>.chat.avatar_url` 及 `.events.avatar_url` 可指定 HTTPS 頭像來源或 `{player}`、`{minecraft_uuid}` 模板。為避免任意外站資料要求，只允許 `mc-heads.net`、`crafatar.com` 與 Discord CDN。Minecraft UUID 不存在時，正常 Minecraft 使用者名稱可作為預設玩家頭像的查詢值。
+
+`monitoring.servers.<id>.player_count_voice_channel_id` 可指定另一個語音頻道呈現 `Players: X/Y`；原來的 `status_voice_channel_id` 繼續只顯示 Online / Offline。Bot Presence 支援三態：有在線玩家顯示 Online；有伺服器連線但無玩家時 Idle；全部離線 DND。
+
+### Scope statement (English)
+
+The added Discord rich-message bridge produces **readable bounded text**, not fully styled Minecraft chat components. Public-command broadcasts are subscribed through Fabric's broadcast event rather than a raw command interceptor; private DMCC link packets and server statistics remain outside cross-server relays. Optional console log polling masks common secrets but must only be sent to administrator-only Discord channels. `account_linking.max_accounts=0` retains the prior unlimited-link behavior; set it explicitly to `1` to enforce a single link. The monitoring extension adds a separate player-count voice channel and an online/idle/DND Presence policy. Upstream DMCC v3 features not explicitly implemented and verified here — notably NeoForge, styled Minecraft chat, full mention alerts, command filter controls, forced account linking, nickname/OP synchronization and dynamic internationalization — are **not** claimed as reproduced.
