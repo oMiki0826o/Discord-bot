@@ -62,6 +62,20 @@ def parse_discord_markdown(message: str) -> list[dict[str, object]]:
             buf.append(clean[pos + 1])
             pos += 2
             continue
+        if (
+            clean.startswith("**", pos) and not state["bold"]
+            and clean.find("**", pos + 2) < 0
+        ):
+            buf.append("**")
+            pos += 2
+            continue
+        if (
+            clean.startswith("__", pos) and not state["underlined"]
+            and clean.find("__", pos + 2) < 0
+        ):
+            buf.append("__")
+            pos += 2
+            continue
         matched = False
         for symbol, property_name in _MARKS:
             if not clean.startswith(symbol, pos):
