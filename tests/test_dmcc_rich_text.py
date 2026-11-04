@@ -54,3 +54,10 @@ def test_opt_in_gateway_sends_minecraft_components_only_when_enabled(tmp_path: P
         assert len(gateway.text) == 1
 
     asyncio.run(run())
+
+
+def test_non_bmp_unicode_is_bounded_by_java_utf16_limit():
+    formatted = parse_discord_markdown("😀" * 1200)
+    joined = "".join(part["text"] for part in formatted)
+    assert joined
+    assert len(joined.encode("utf-16-le")) // 2 <= 1800
