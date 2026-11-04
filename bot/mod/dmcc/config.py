@@ -18,6 +18,7 @@ from .domain.models import ManagedServer
 from .services.presentation import PresentationError, PresentationSettings
 from .services.monitoring import MonitoringConfig
 from .services.mod_updates import ModUpdateConfig
+from .services.console_stream import ConsoleStreamConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -35,6 +36,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "presentation": {"servers": {}},
     "monitoring": {"enabled": False, "servers": {}},
     "mod_updates": {"enabled": False, "servers": {}},
+    "console_stream": {"enabled": False, "servers": {}},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -55,6 +57,7 @@ def build_settings_schema(rule_type):
         "presentation": rule_type(dict),
         "monitoring": rule_type(dict),
         "mod_updates": rule_type(dict),
+        "console_stream": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -93,6 +96,7 @@ class DmccSettings:
     presentation: PresentationSettings = field(default_factory=PresentationSettings.empty)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     mod_updates: ModUpdateConfig = field(default_factory=ModUpdateConfig)
+    console_stream: ConsoleStreamConfig = field(default_factory=ConsoleStreamConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -141,6 +145,12 @@ class DmccSettings:
             )
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
+        try:
+            console_stream = ConsoleStreamConfig.from_mapping(
+                raw.get("console_stream", {}), {server.server_id for server in servers}
+            )
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -157,6 +167,7 @@ class DmccSettings:
             presentation=presentation,
             monitoring=monitoring,
             mod_updates=mod_updates,
+            console_stream=console_stream,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 
