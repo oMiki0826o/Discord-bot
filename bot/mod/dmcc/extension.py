@@ -42,6 +42,7 @@ from .services.monitoring import MonitoringService
 from .services.mod_updates import ModUpdateService
 from .services.console_stream import ConsoleStreamService
 from .services.op_levels import OpLevelResolver
+from .services.nickname_sync import NicknameSyncService
 
 
 MODULE_VERSION = "0.3.0"
@@ -58,6 +59,7 @@ class _Runtime:
     monitor: MonitoringService | None = None
     updates: ModUpdateService | None = None
     console: ConsoleStreamService | None = None
+    nicknames: NicknameSyncService | None = None
 
 
 _loaded_modules: weakref.WeakKeyDictionary[object, _Runtime] = weakref.WeakKeyDictionary()
@@ -109,10 +111,14 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     monitor: MonitoringService | None = None
     updates: ModUpdateService | None = None
     console: ConsoleStreamService | None = None
+    nicknames: NicknameSyncService | None = None
     try:
         await gateway.start()
         linking = LinkingService(link_store=links, max_accounts=settings.max_linked_accounts)
         gateway.relay.subscribe(LinkRequestHandler(linking, gateway).handle)
+        if settings.nickname_sync.enabled:
+            nicknames = NicknameSyncService(bot, links, settings.nickname_sync)
+            nicknames.start()
         if settings.cross_server_relay:
             gateway.relay.subscribe(
                 CrossServerRelayService(
@@ -151,6 +157,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 raw_settings,
                 settings,
                 controls,
+                nicknames,
             )
             discord_queue = DiscordEventQueue(
                 MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation)
@@ -161,6 +168,8 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 await bot.add_cog(cog)
                 added_cogs.append(cog.qualified_name)
     except BaseException:
+        if nicknames is not None:
+            await nicknames.close()
         if console is not None:
             await console.close()
         if updates is not None:
@@ -174,7 +183,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
         for client in panel_clients:
             await client.close()
         raise
-    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue, monitor, updates, console)
+    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue, monitor, updates, console, nicknames)
     setattr(bot, "dmcc_gateway", gateway)
 
 
@@ -187,6 +196,8 @@ async def teardown(bot) -> None:
     try:
         await _remove_cogs(bot, tuple(reversed(runtime.cog_names)))
     finally:
+        if runtime.nicknames is not None:
+            await runtime.nicknames.close()
         if runtime.console is not None:
             await runtime.console.close()
         if runtime.updates is not None:
@@ -211,6 +222,7 @@ def _build_cogs(
     raw_settings: dict[str, object],
     settings: DmccSettings,
     controls,
+    nicknames: NicknameSyncService | None = None,
 ) -> tuple[DmccUserCog, DmccOwnerCog]:
     catalog = CommandCatalog(DmccMode(settings.mode))
     servers = ServerRegistry(settings.servers)
@@ -225,6 +237,7 @@ def _build_cogs(
         op_levels=OpLevelResolver.from_mapping(raw_settings.get("permissions", {}), links),
         bridge=bridge,
         autocomplete=AutocompleteService(gateway.requests),
+        nicknames=nicknames,
     )
     owner = DmccOwnerCog(
         bot,

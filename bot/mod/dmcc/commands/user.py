@@ -19,6 +19,7 @@ from ..services.command_catalog import CommandCatalog
 from ..services.discord_relay import DiscordRelayService
 from ..services.info import InfoService
 from ..services.linking import LinkingService
+from ..services.nickname_sync import NicknameSyncService
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -67,6 +68,7 @@ class DmccUserCog(commands.Cog):
         op_levels: OpLevelResolver,
         bridge: BridgeRequestService,
         autocomplete: AutocompleteService,
+        nicknames: NicknameSyncService | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -76,6 +78,7 @@ class DmccUserCog(commands.Cog):
         self._op_levels = op_levels
         self._bridge = bridge
         self._autocomplete = autocomplete
+        self._nicknames = nicknames
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -233,6 +236,8 @@ class DmccUserCog(commands.Cog):
         await interaction.response.send_message(
             f"Linked Minecraft account `{account.minecraft_name}`.", ephemeral=True
         )
+        if self._nicknames is not None:
+            await self._nicknames.sync_user(str(interaction.user.id))
 
     @dmcc_slash.command(name="unlink", description="Unlink all of your Minecraft accounts")
     async def slash_unlink(self, interaction) -> None:
@@ -241,6 +246,8 @@ class DmccUserCog(commands.Cog):
         if removed:
             message = f"Unlinked {removed} Minecraft account(s)."
         await interaction.response.send_message(message, ephemeral=True)
+        if removed and self._nicknames is not None:
+            await self._nicknames.sync_user(str(interaction.user.id))
 
     @dmcc_slash.command(name="links", description="List linked Minecraft accounts for a Discord user")
     async def slash_links(self, interaction, discord_user_id: str) -> None:
@@ -262,6 +269,16 @@ class DmccUserCog(commands.Cog):
         await interaction.response.send_message(
             f"Linked accounts for `{discord_user_id}`:\n{lines}", ephemeral=True
         )
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: Any) -> None:
+        if self._nicknames is not None:
+            await self._nicknames.sync_user(str(member.id), member=member)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: Any, after: Any) -> None:
+        if self._nicknames is not None and before.nick != after.nick:
+            await self._nicknames.sync_user(str(after.id), member=after)
 
     @commands.Cog.listener()
     async def on_message(self, message: Any) -> None:

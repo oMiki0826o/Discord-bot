@@ -19,6 +19,7 @@ from .services.presentation import PresentationError, PresentationSettings
 from .services.monitoring import MonitoringConfig
 from .services.mod_updates import ModUpdateConfig
 from .services.console_stream import ConsoleStreamConfig
+from .services.nickname_sync import NicknameSyncConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -39,6 +40,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "mod_updates": {"enabled": False, "servers": {}},
     "console_stream": {"enabled": False, "servers": {}},
     "account_linking": {"max_accounts": 0},
+    "nickname_sync": {"enabled": False},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -62,6 +64,7 @@ def build_settings_schema(rule_type):
         "mod_updates": rule_type(dict),
         "console_stream": rule_type(dict),
         "account_linking": rule_type(dict),
+        "nickname_sync": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -103,6 +106,7 @@ class DmccSettings:
     mod_updates: ModUpdateConfig = field(default_factory=ModUpdateConfig)
     console_stream: ConsoleStreamConfig = field(default_factory=ConsoleStreamConfig)
     max_linked_accounts: int = 0
+    nickname_sync: NicknameSyncConfig = field(default_factory=NicknameSyncConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -174,6 +178,10 @@ class DmccSettings:
         max_links = link_options.get("max_accounts", 0)
         if type(max_links) is not int or not 0 <= max_links <= 100:
             raise SettingsError("account_linking.max_accounts must be an integer between 0 and 100")
+        try:
+            nickname_sync = NicknameSyncConfig.from_mapping(raw.get("nickname_sync", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -193,6 +201,7 @@ class DmccSettings:
             mod_updates=mod_updates,
             console_stream=console_stream,
             max_linked_accounts=max_links,
+            nickname_sync=nickname_sync,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 
