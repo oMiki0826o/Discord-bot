@@ -73,20 +73,19 @@ class ReleaseUpdateService:
         self._announced: set[str] = set()
         self._task: asyncio.Task[None] | None = None
 
-    async def run_once(self) -> bool:
-        if not self.config.enabled or self.config.channel_id is None:
-            return False
+    async def check_now(self) -> tuple[str, str] | None:
+        """Read a newer stable release without notifying or auto-updating."""
         try:
             record = await self._fetch_latest()
             if not isinstance(record, Mapping) or record.get("draft") or record.get("prerelease"):
-                return False
+                return None
             tag = record.get("tag_name")
             newest = _version(tag)
             url = record.get("html_url")
             if newest is None or self._current is None or newest <= self._current:
-                return False
-            if not isinstance(tag, str) or not isinstance(url, str) or tag in self._announced:
-                return False
+                return None
+            if not isinstance(tag, str) or not isinstance(url, str):
+                return None
             parsed = urlsplit(url)
             if (
                 parsed.scheme != "https" or parsed.netloc != "github.com"
@@ -94,16 +93,29 @@ class ReleaseUpdateService:
                 or not parsed.path.startswith("/" + _REPO + "/releases/tag/")
                 or url != _URL_PREFIX + tag
             ):
-                return False
+                return None
+            return tag, url
+        except Exception:
+            LOGGER.warning("DMCC GitHub release check unavailable")
+            return None
+
+    async def run_once(self) -> bool:
+        if not self.config.enabled or self.config.channel_id is None:
+            return False
+        found = await self.check_now()
+        if found is None or found[0] in self._announced:
+            return False
+        tag, url = found
+        try:
             await self._sender.send_discord_message(
                 self.config.channel_id,
                 f"DMCC 模組有新版發布：{tag}（目前 {'.'.join(map(str, self._current))}）\n{url}\n請先確認 Minecraft 版本相容，再手動更新。",
             )
-            self._announced.add(tag)
-            return True
         except Exception:
-            LOGGER.warning("DMCC release metadata unavailable; skipping this cycle")
+            LOGGER.warning("DMCC release notification send failed")
             return False
+        self._announced.add(tag)
+        return True
 
     def start(self) -> None:
         if self.config.enabled and self._task is None:
