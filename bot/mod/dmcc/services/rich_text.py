@@ -17,11 +17,24 @@ _LIMIT = 1800
 _MAX_SEGMENTS = 128
 
 
+def _truncate_utf16(text: str, limit: int) -> str:
+    """Minecraft Java text length counts UTF-16 code units, not code points."""
+    length = 0
+    result: list[str] = []
+    for char in text:
+        size = 2 if ord(char) > 0xFFFF else 1
+        if length + size > limit:
+            break
+        result.append(char)
+        length += size
+    return "".join(result)
+
+
 def parse_discord_markdown(message: str) -> list[dict[str, object]]:
     """Decode a fixed safe subset of Markdown into validated Component style data."""
     if not isinstance(message, str) or not message:
         return []
-    clean = _CONTROL.sub("", _ANSI.sub("", message.replace("\r", " ")))[:_LIMIT]
+    clean = _truncate_utf16(_CONTROL.sub("", _ANSI.sub("", message.replace("\r", " "))), _LIMIT)
     state = {"bold": False, "italic": False, "underlined": False, "strikethrough": False, "code": False}
     pieces: list[dict[str, object]] = []
     buf: list[str] = []
