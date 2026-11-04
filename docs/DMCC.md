@@ -253,3 +253,14 @@ All three settings default to disabled. Nickname sync is scoped to one Discord g
 ### Rich text (English)
 
 The opt-in `rich_chat: true` setting sends validated, bounded style-only segments (bold, italic, underline, strike-through and code gray) over the authenticated Gateway to the Fabric Bridge. It does not serialize executable Minecraft JSON, ClickEvent, arbitrary URL actions or commands. Deploy a Bridge JAR built from the same source revision before enabling it. Other upstream DMCC rendering features remain unverified or unsupported.
+
+
+## 本分支的語言設定、手動更新與日誌重連
+
+- Discord 事件訊息的語言可在 `presentation.servers.<server_id>.locale` 設為 `zh_TW`（預設）或 `en_US`。此為本地固定模板，不會下載外部語言包；各事件的 `templates` 設定仍優先於語言預設。遊戲伺服器自行產生的死亡原文或進度標題**不會自動翻譯**，也尚未達到 DMCC v3 的動態 i18n 下載能力。
+- `/dmcc update` 可**手動**查詢官方 GitHub Releases 的穩定新版本，私密回覆給使用者；不需要啟用自動通知，且不下載或安裝任何檔案。自動通知由 `release_check.enabled` 控制。
+- 在 `console_stream.enabled` 的日誌尾部輪詢中，若偵測到輪替或原始資料不連續，系統會建立新的基線、略過不能確認為新資料的片段，而不是將舊日誌重新發到 Discord。Bridge 斷線重連同樣不重播舊紀錄。這種保守策略可能略過斷線期間的訊息，尚非具備位移游標與補送機制的完整持久化串流。
+
+### Compatibility notes (English)
+
+Set `presentation.servers.<server_id>.locale` to `zh_TW` (default) or `en_US`; custom templates override those local defaults. This does **not** claim automatic translations for game-generated advancement or death messages. `/dmcc update` checks a trusted GitHub Release URL on request without publishing a channel notification or installing software. Console polling resets its baseline across rotation/disconnection instead of replaying ambiguous history; messages during disconnection may be lost. Full original DMCC v3 feature parity remains an open review requirement.
