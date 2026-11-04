@@ -271,6 +271,21 @@ class DmccUserCog(commands.Cog):
         author = getattr(message, "author", None)
         if channel_id is None or author is None:
             return
+        poll = getattr(message, "poll", None)
+        question = getattr(getattr(poll, "question", None), "text", None)
+        answers = getattr(poll, "answers", ()) if poll is not None else ()
+        poll_summary = (
+            (str(question), tuple(str(getattr(answer, "text", "")) for answer in answers))
+            if isinstance(question, str) and question.strip() else None
+        )
+        mentioned_names = {}
+        for collection in ("mentions", "role_mentions", "channel_mentions"):
+            for target in tuple(getattr(message, collection, ()) or ()):
+                target_id = getattr(target, "id", None)
+                if target_id is not None:
+                    mentioned_names[str(target_id)] = str(
+                        getattr(target, "display_name", getattr(target, "name", ""))
+                    )[:48]
         await self._relay.forward_message(
             str(getattr(message, "id", "")),
             str(channel_id),
@@ -281,7 +296,40 @@ class DmccUserCog(commands.Cog):
                 str(getattr(item, "url", ""))
                 for item in tuple(getattr(message, "attachments", ()) or ())
             ),
+            sticker_names=tuple(
+                str(getattr(sticker, "name", "")) for sticker in tuple(
+                    getattr(message, "stickers", ()) or ()
+                )
+            ),
+            embed_summaries=tuple(
+                (str(getattr(embed, "title", "") or ""),
+                 str(getattr(embed, "url", "") or ""))
+                for embed in tuple(getattr(message, "embeds", ()) or ())
+            ),
+            poll_summary=poll_summary,
+            mention_names=mentioned_names,
         )
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: Any) -> None:
+        member = getattr(payload, "member", None)
+        user_id = getattr(payload, "user_id", None)
+        if user_id is None or user_id == getattr(getattr(self.bot, "user", None), "id", None):
+            return
+        if member is not None and bool(getattr(member, "bot", False)):
+            return
+        if member is None:
+            user = self.bot.get_user(user_id) if hasattr(self.bot, "get_user") else None
+            if user is None or bool(getattr(user, "bot", False)):
+                return
+            member = user
+        name = str(getattr(member, "display_name", member)).strip()
+        if name:
+            await self._relay.forward_reaction(
+                str(getattr(payload, "message_id", "")),
+                name,
+                str(getattr(payload, "emoji", "")),
+            )
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: Any) -> None:
