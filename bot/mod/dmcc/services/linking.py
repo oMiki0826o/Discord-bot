@@ -44,11 +44,15 @@ class LinkingService:
         code_factory: Callable[[], str] | None = None,
         code_lifetime: timedelta = timedelta(minutes=5),
         link_store: JsonLinkRepository | None = None,
+        max_accounts: int = 0,
     ) -> None:
         if code_lifetime <= timedelta():
             raise ValueError("code_lifetime must be positive")
         if link_store is None:
             raise ValueError("link_store is required; links.json is the account source of truth")
+        if type(max_accounts) is not int or max_accounts < 0 or max_accounts > 100:
+            raise ValueError("max_accounts must be an integer between 0 and 100")
+        self._max_accounts = max_accounts
         self._now_provider = now_provider or (lambda: datetime.now(UTC))
         self._code_factory = code_factory or self._new_code
         self._code_lifetime = code_lifetime
@@ -75,13 +79,24 @@ class LinkingService:
 
         self._require(code, "code")
         self._require(discord_user_id, "discord_user_id")
-        pending = self._by_code.pop(code.upper(), None)
+        pending = self._by_code.get(code.upper())
         if pending is None:
             return None
-        self._code_by_uuid.pop(pending.minecraft_uuid, None)
         if pending.expires_at <= self._now():
+            self._by_code.pop(code.upper(), None)
+            self._code_by_uuid.pop(pending.minecraft_uuid, None)
             return None
-        return self._link_store.link(discord_user_id, pending.minecraft_uuid, pending.minecraft_name)
+        existing = self._link_store.links_for_discord(discord_user_id)
+        if (
+            self._max_accounts > 0
+            and len(existing) >= self._max_accounts
+            and all(link.minecraft_uuid != pending.minecraft_uuid for link in existing)
+        ):
+            raise ValueError("Minecraft account link limit reached")
+        link = self._link_store.link(discord_user_id, pending.minecraft_uuid, pending.minecraft_name)
+        self._by_code.pop(code.upper(), None)
+        self._code_by_uuid.pop(pending.minecraft_uuid, None)
+        return link
 
     def links_for_discord(self, discord_user_id: str) -> tuple[AccountLink, ...]:
         """List this Discord user's linked accounts for the upstream ``links`` command."""
