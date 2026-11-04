@@ -38,6 +38,17 @@ _EVENT_TEMPLATES = {
     "server_stopping": "**{server} 即將關閉**",
     "server_broadcast": "**[{server}] {player}: {message}**",
 }
+_ENGLISH_EVENT_TEMPLATES = {
+    "player_join": "**{player} joined {server}**",
+    "player_quit": "**{player} left {server}**",
+    "player_death": "**{death_message}**",
+    "player_advancement": "**{player} made the advancement [{title}]**",
+    "player_gamemode": "**{player} changed game mode to {game_mode}**",
+    "server_started": "**{server} started**",
+    "server_stopping": "**{server} is stopping**",
+    "server_broadcast": "**[{server}] {player}: {message}**",
+}
+_LOCALES = frozenset({"zh_TW", "en_US"})
 _DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _PLAYER_NAME = re.compile(r"^[A-Za-z0-9_]{3,16}$")
@@ -66,6 +77,7 @@ class ServerPresentation:
     event_channels: Mapping[str, str]
     templates: Mapping[str, str]
     disabled_events: frozenset[str]
+    locale: str = "zh_TW"
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,8 +108,11 @@ class PresentationSettings:
                 raise PresentationError("presentation server_id must be text")
             if not isinstance(item, Mapping):
                 raise PresentationError("presentation server entry must be an object")
-            if set(item) - {"label", "chat", "events", "event_routes", "event_channels", "templates", "disabled_events"}:
+            if set(item) - {"label", "chat", "events", "event_routes", "event_channels", "templates", "disabled_events", "locale"}:
                 raise PresentationError("unknown presentation server option")
+            locale = item.get("locale", "zh_TW")
+            if not isinstance(locale, str) or locale not in _LOCALES:
+                raise PresentationError("presentation.locale must be zh_TW or en_US")
             label = item.get("label", server_id)
             if not isinstance(label, str) or not label.strip() or len(label) > 80:
                 raise PresentationError("presentation.label must be non-empty and at most 80 characters")
@@ -139,7 +154,7 @@ class PresentationSettings:
             result[server_id] = ServerPresentation(
                 label.strip(), chat, events,
                 MappingProxyType(routes), MappingProxyType(channels), MappingProxyType(templates),
-                frozenset(raw_disabled),
+                frozenset(raw_disabled), locale,
             )
         return cls(MappingProxyType(result))
 
@@ -308,7 +323,8 @@ def render_message(
         )
         content = template.format_map(values)
     else:
-        content = profile.templates.get(event.type, _EVENT_TEMPLATES[event.type]).format_map(values)
+        defaults = _ENGLISH_EVENT_TEMPLATES if profile.locale == "en_US" else _EVENT_TEMPLATES
+        content = profile.templates.get(event.type, defaults[event.type]).format_map(values)
     content = content.strip()[:1950]
     if not content:
         return None
