@@ -58,6 +58,7 @@ public final class BridgeMod implements ModInitializer {
     private String serverId;
     private long metricTickCounter;
     private final Map<String, PendingPlayer> pendingLinkPlayers = new ConcurrentHashMap<>();
+    private final CommandEchoSuppressor commandEchoes = new CommandEchoSuppressor();
     private final Map<String, PendingPlayer> pendingUnlinkPlayers = new ConcurrentHashMap<>();
     private volatile long pendingRequestTtlMillis = 120_000;
     private volatile int gracefulShutdownTimeoutMillis = 1_500;
@@ -75,6 +76,11 @@ public final class BridgeMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(this::publishMetricsOnTick);
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             relayPlayerChat(sender, message.signedContent())
+        );
+        // Fabric only invokes this for command messages broadcast to the public,
+        // not recipient-scoped private commands such as /msg or /tell.
+        ServerMessageEvents.COMMAND_MESSAGE.register((message, source, params) ->
+            relayPublicCommand(source.getTextName(), message.signedContent())
         );
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> relayPlayerEvent("player_join", handler.getPlayer()));
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> handlePlayerDisconnect(handler.getPlayer()));
@@ -181,8 +187,21 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
+    private void relayPublicCommand(String sender, String content) {
+        BridgeRuntime active = runtime;
+        if (active == null || serverId == null || content == null || content.isBlank()) return;
+        String senderName = sender == null || sender.isBlank() ? "Server" : sender;
+        if (active.publishEvent(new ProtocolEnvelope(1, "server_broadcast", serverId, null, Map.of(
+            "player_name", senderName,
+            "message", content
+        )))) {
+            commandEchoes.mark(senderName, content);
+        }
+    }
+
     private void relayPlayerChat(ServerPlayer player, String content) {
         if (content.isBlank() || runtime == null || serverId == null) return;
+        if (commandEchoes.consume(player.getName().getString(), content)) return;
         if (!runtime.publishEvent(new ProtocolEnvelope(1, "player_chat", serverId, null,
                 Map.of("minecraft_uuid", player.getStringUUID(), "player_name", player.getName().getString(), "message", content)))) {
             LOGGER.debug("DMCC player chat skipped because the Bridge is offline");
