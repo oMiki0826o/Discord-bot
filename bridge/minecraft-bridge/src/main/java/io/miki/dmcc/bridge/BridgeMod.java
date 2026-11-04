@@ -180,6 +180,12 @@ public final class BridgeMod implements ModInitializer {
             });
             return;
         }
+        if (envelope.type().equals("minecraft_components")) {
+            var decoded = RichTextComponents.parse(envelope.data());
+            if (decoded.isEmpty()) return;
+            server.execute(() -> server.getPlayerList().broadcastSystemMessage(decoded.get(), false));
+            return;
+        }
         if (!envelope.type().equals("minecraft_message")) return;
         Object rawMessage = envelope.data().get("message");
         if (!(rawMessage instanceof String message) || message.isBlank()) return;
