@@ -20,6 +20,7 @@ from ..services.discord_relay import DiscordRelayService
 from ..services.info import InfoService
 from ..services.linking import LinkingService
 from ..services.nickname_sync import NicknameSyncService
+from ..services.mentions import MinecraftMentionService
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -69,6 +70,7 @@ class DmccUserCog(commands.Cog):
         bridge: BridgeRequestService,
         autocomplete: AutocompleteService,
         nicknames: NicknameSyncService | None = None,
+        mentions: MinecraftMentionService | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -79,6 +81,7 @@ class DmccUserCog(commands.Cog):
         self._bridge = bridge
         self._autocomplete = autocomplete
         self._nicknames = nicknames
+        self._mentions = mentions
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -303,7 +306,7 @@ class DmccUserCog(commands.Cog):
                     mentioned_names[str(target_id)] = str(
                         getattr(target, "display_name", getattr(target, "name", ""))
                     )[:48]
-        await self._relay.forward_message(
+        forwarded = await self._relay.forward_message(
             str(getattr(message, "id", "")),
             str(channel_id),
             str(getattr(author, "display_name", author)),
@@ -326,6 +329,12 @@ class DmccUserCog(commands.Cog):
             poll_summary=poll_summary,
             mention_names=mentioned_names,
         )
+        if forwarded and self._mentions is not None:
+            await self._mentions.notify(
+                str(channel_id), str(getattr(author, "display_name", author)),
+                str(getattr(message, "content", "")),
+                tuple(str(user.id) for user in tuple(getattr(message, "mentions", ()) or ())),
+            )
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: Any) -> None:

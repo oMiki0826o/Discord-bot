@@ -44,6 +44,7 @@ from .services.console_stream import ConsoleStreamService
 from .services.op_levels import OpLevelResolver
 from .services.nickname_sync import NicknameSyncService
 from .services.release_updates import ReleaseUpdateService
+from .services.mentions import MinecraftMentionService
 
 
 MODULE_VERSION = "0.3.0"
@@ -250,7 +251,7 @@ def _build_cogs(
         bridge=bridge,
         autocomplete=AutocompleteService(gateway.requests),
         nicknames=nicknames,
-    )
+        mentions=MinecraftMentionService(settings.mentions, state, links, gateway),
     owner = DmccOwnerCog(
         bot,
         info=info,

@@ -21,6 +21,7 @@ from .services.mod_updates import ModUpdateConfig
 from .services.console_stream import ConsoleStreamConfig
 from .services.nickname_sync import NicknameSyncConfig
 from .services.release_updates import ReleaseCheckConfig
+from .services.mentions import MentionConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -43,6 +44,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "account_linking": {"max_accounts": 0},
     "nickname_sync": {"enabled": False},
     "release_check": {"enabled": False},
+    "mentions": {"enabled": False},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -68,6 +70,7 @@ def build_settings_schema(rule_type):
         "account_linking": rule_type(dict),
         "nickname_sync": rule_type(dict),
         "release_check": rule_type(dict),
+        "mentions": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -111,6 +114,7 @@ class DmccSettings:
     max_linked_accounts: int = 0
     nickname_sync: NicknameSyncConfig = field(default_factory=NicknameSyncConfig)
     release_check: ReleaseCheckConfig = field(default_factory=ReleaseCheckConfig)
+    mentions: MentionConfig = field(default_factory=MentionConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -190,6 +194,10 @@ class DmccSettings:
             release_check = ReleaseCheckConfig.from_mapping(raw.get("release_check", {}))
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
+        try:
+            mentions = MentionConfig.from_mapping(raw.get("mentions", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -211,6 +219,7 @@ class DmccSettings:
             max_linked_accounts=max_links,
             nickname_sync=nickname_sync,
             release_check=release_check,
+            mentions=mentions,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 
