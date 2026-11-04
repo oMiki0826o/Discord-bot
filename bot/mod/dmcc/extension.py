@@ -243,7 +243,7 @@ def _build_cogs(
     bridge = BridgeRequestService(gateway.requests)
     user = DmccUserCog(
         bot,
-        relay=DiscordRelayService(state, gateway),
+        relay=DiscordRelayService(state, gateway, rich_chat=settings.rich_chat),
         linking=linking,
         info=info,
         catalog=catalog,
