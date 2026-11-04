@@ -1,7 +1,8 @@
-"""Optional bounded update notifications for this Bot's official GitHub releases.
+"""bot/mod/dmcc/services/release_updates.py
 
-This service never installs, executes or downloads binaries. The release link is
-validated against this repository's fixed GitHub Releases URL.
+Modification():
+
+- Optional bounded update notifications for this Bot's official GitHub releases. This service never installs, executes or downloads binaries. The release link is validated against this repository's fixed GitHub Releases URL.
 """
 from __future__ import annotations
 

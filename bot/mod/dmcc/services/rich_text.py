@@ -1,7 +1,8 @@
-"""Pure-Python, bounded Discord Markdown to Minecraft style segment conversion.
+"""bot/mod/dmcc/services/rich_text.py
 
-This intentionally supports only formatting, not untrusted Minecraft commands,
-click actions, arbitrary colors or JSON text-component fields.
+Modification():
+
+- Pure-Python, bounded Discord Markdown to Minecraft style segment conversion. This intentionally supports only formatting, not untrusted Minecraft commands, click actions, arbitrary colors or JSON text-component fields.
 """
 from __future__ import annotations
 

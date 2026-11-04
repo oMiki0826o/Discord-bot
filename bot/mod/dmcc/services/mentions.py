@@ -1,8 +1,8 @@
-"""Opt-in linked-player notifications for Discord user mentions.
+"""bot/mod/dmcc/services/mentions.py
 
-Only explicit user mentions in an already mapped bridge channel are eligible.
-There are no mass, role, or everyone notifications; the authenticated Fabric
-bridge receives UUIDs rather than usernames for exact targeted delivery.
+Modification():
+
+- Opt-in linked-player notifications for Discord user mentions. Only explicit user mentions in an already mapped bridge channel are eligible. There are no mass, role, or everyone notifications; the authenticated Fabric bridge receives UUIDs r
 """
 from __future__ import annotations
 

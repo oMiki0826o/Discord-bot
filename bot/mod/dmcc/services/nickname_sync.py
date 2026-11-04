@@ -1,7 +1,8 @@
-"""Opt-in, permission-scoped Discord nickname synchronization for linked Minecraft users.
+"""bot/mod/dmcc/services/nickname_sync.py
 
-Never edits a guild outside the configured guild, never edits bots, owners or members
-above the Bot role, and leaves unlinked users untouched unless reset is opted in.
+Modification():
+
+- Opt-in, permission-scoped Discord nickname synchronization for linked Minecraft users. Never edits a guild outside the configured guild, never edits bots, owners or members above the Bot role, and leaves unlinked users untouched unless rese
 """
 from __future__ import annotations
 
