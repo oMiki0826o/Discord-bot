@@ -45,6 +45,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "nickname_sync": {"enabled": False},
     "release_check": {"enabled": False},
     "mentions": {"enabled": False},
+    "rich_chat": False,
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -71,6 +72,7 @@ def build_settings_schema(rule_type):
         "nickname_sync": rule_type(dict),
         "release_check": rule_type(dict),
         "mentions": rule_type(dict),
+        "rich_chat": rule_type(bool),
         "permissions": rule_type(dict),
     }
 
@@ -115,6 +117,7 @@ class DmccSettings:
     nickname_sync: NicknameSyncConfig = field(default_factory=NicknameSyncConfig)
     release_check: ReleaseCheckConfig = field(default_factory=ReleaseCheckConfig)
     mentions: MentionConfig = field(default_factory=MentionConfig)
+    rich_chat: bool = False
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -198,6 +201,9 @@ class DmccSettings:
             mentions = MentionConfig.from_mapping(raw.get("mentions", {}))
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
+        rich_chat = raw.get("rich_chat", False)
+        if type(rich_chat) is not bool:
+            raise SettingsError("rich_chat must be a boolean")
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -220,6 +226,7 @@ class DmccSettings:
             nickname_sync=nickname_sync,
             release_check=release_check,
             mentions=mentions,
+            rich_chat=rich_chat,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 
