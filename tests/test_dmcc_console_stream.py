@@ -88,3 +88,45 @@ def test_stream_only_sends_new_lines_and_bounds_length() -> None:
 def test_invalid_stream_config_rejected(settings):
     with pytest.raises(ValueError):
         ConsoleStreamConfig.from_mapping(settings, {"survival"})
+
+
+def test_console_stream_rotation_and_disconnect_do_not_replay_history() -> None:
+    class Bridge:
+        text = "old startup\\n"
+        async def log(self, server_id):
+            return {"content": self.text}
+
+    class Manager:
+        connected = True
+        def get(self, server_id):
+            return object() if self.connected else None
+
+    class Sender:
+        def __init__(self):
+            self.messages = []
+        async def send_discord_message(self, channel, content):
+            self.messages.append(content)
+
+    async def run() -> None:
+        bridge, manager, sender = Bridge(), Manager(), Sender()
+        stream = ConsoleStreamService(_settings(), bridge, manager, sender)
+        await stream.run_once()
+        bridge.text += "first real line\\n"
+        await stream.run_once()
+        assert len(sender.messages) == 1
+        bridge.text = "new file startup after rotate\\n"
+        await stream.run_once()
+        assert len(sender.messages) == 1
+        bridge.text += "new live entry\\n"
+        await stream.run_once()
+        assert len(sender.messages) == 2
+        assert "new live entry" in sender.messages[1]
+        manager.connected = False
+        await stream.run_once()
+        manager.connected = True
+        bridge.text += "another startup\\n"
+        await stream.run_once()
+        assert len(sender.messages) == 2
+        await stream.close()
+
+    asyncio.run(run())
