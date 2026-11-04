@@ -205,4 +205,40 @@ Monitoring is **disabled by default** and receives authenticated Bridge telemetr
 
 ### Scope statement (English)
 
-The added Discord rich-message bridge produces **readable bounded text**, not fully styled Minecraft chat components. Public-command broadcasts are subscribed through Fabric's broadcast event rather than a raw command interceptor; private DMCC link packets and server statistics remain outside cross-server relays. Optional console log polling masks common secrets but must only be sent to administrator-only Discord channels. `account_linking.max_accounts=0` retains the prior unlimited-link behavior; set it explicitly to `1` to enforce a single link. The monitoring extension adds a separate player-count voice channel and an online/idle/DND Presence policy. Upstream DMCC v3 features not explicitly implemented and verified here — notably NeoForge, styled Minecraft chat, full mention alerts, command filter controls, forced account linking, nickname/OP synchronization and dynamic internationalization — are **not** claimed as reproduced.
+The added Discord rich-message bridge produces **readable bounded text**, not fully styled Minecraft chat components. Public-command broadcasts are subscribed through Fabric's broadcast event rather than a raw command interceptor; private DMCC link packets and server statistics remain outside cross-server relays. Optional console log polling masks common secrets but must only be sent to administrator-only Discord channels. `account_linking.max_accounts=0` retains the prior unlimited-link behavior; set it explicitly to `1` to enforce a single link. The monitoring extension adds a separate player-count voice channel and an online/idle/DND Presence policy. Upstream DMCC v3 features not explicitly implemented and verified here — notably NeoForge, styled Minecraft chat, full mention alerts, command filter controls, forced account linking, automatic OP synchronization and dynamic internationalization — are **not** claimed as reproduced.
+
+## 帳號暱稱同步、更新通知與提及提醒（選用）
+
+這三項功能皆**預設關閉**，可在既有 `settings/dmcc.json` 的最外層新增：
+
+```json
+{
+  "nickname_sync": {
+    "enabled": true,
+    "guild_id": "123456789012345678",
+    "template": "[MC] {player_name}",
+    "reset_unlinked": false,
+    "sweep_interval_seconds": 3600,
+    "max_sweep_per_cycle": 100
+  },
+  "release_check": {
+    "enabled": true,
+    "channel_id": "123456789012345679",
+    "interval_seconds": 21600
+  },
+  "mentions": {
+    "enabled": true,
+    "style": "actionbar",
+    "max_targets": 8,
+    "cooldown_seconds": 15
+  }
+}
+```
+
+- **暱稱同步**：僅在指定 Discord `guild_id` 中，對已完成 Minecraft 帳號綁定、可被 Bot 管理的成員套用模板。Bot 需有「管理暱稱」權限，且角色必須高於目標成員；不會更動 Bot 帳號或伺服器擁有者。支援 `{player_name}`、`{discord_name}`；最多 32 字元。定期掃描限定數量，另於成員加入、暱稱變更以及連結／解除連結時檢查。**解除連結不會自動清除他人設定的暱稱**；僅在明確設定 `reset_unlinked: true` 後才會清除，啟用前請先評估此破壞性操作。
+- **發布版本檢查**：僅查詢本專案 `oMiki0826o/Discord-bot` 的 GitHub Releases，定期通知穩定且較新的版本，僅允許官方 GitHub 連結。**不下載、不執行、不自動升級**，也不能代替 Minecraft／Fabric 版本相容性驗證。此功能與 Modrinth 的遊戲模組更新檢查相互獨立。
+- **玩家提及通知**：Discord 映射頻道中的明確使用者提及（`<@user_id>`）可通知該使用者已綁定的 Minecraft UUID。只對在線玩家發送，不將整則 Discord 訊息重複廣播；可用 `style: "actionbar"` 或 `"chat"`，並限制每次人數及每名玩家冷卻時間。**不支援角色提及、`@everyone` 或 `@here` 的大量通知**，以避免洗版。Minecraft 端需安裝此分支重新編譯的 Bridge JAR，否則新封包可能無法顯示。
+
+### Optional account nickname, release and mention settings (English)
+
+All three settings default to disabled. Nickname sync is scoped to one Discord guild and checks **Manage Nicknames**, role hierarchy, guild ownership, and whether the member is a bot before issuing an edit. It never clears unlinked nicknames unless `reset_unlinked` is explicitly enabled. Release checks query only the official GitHub Releases endpoint, notify newer stable tags and never install anything. Discord user mentions are resolved through verified account links and delivered by UUID to online Minecraft players using an authenticated Bridge message; no role-wide or everyone mentions are sent, and per-player cooldown/recipient limits apply. Live Discord permissions, actual Minecraft client UI and server deployment must still be verified by operators.
