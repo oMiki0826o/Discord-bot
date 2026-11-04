@@ -235,6 +235,7 @@ The added Discord rich-message bridge produces **readable bounded text**, not fu
 }
 ```
 
+- **暱稱同步**：若要接收成員加入與暱稱變更事件，須在 Discord Developer Portal 啟用 **Server Members Intent**，並在 Bot 的 `bot.intents.members` 設定中啟用；未啟用時只會作用於可取得的快取成員，無法保證完整同步。
 - **暱稱同步**：僅在指定 Discord `guild_id` 中，對已完成 Minecraft 帳號綁定、可被 Bot 管理的成員套用模板。Bot 需有「管理暱稱」權限，且角色必須高於目標成員；不會更動 Bot 帳號或伺服器擁有者。支援 `{player_name}`、`{discord_name}`；最多 32 字元。定期掃描限定數量，另於成員加入、暱稱變更以及連結／解除連結時檢查。**解除連結不會自動清除他人設定的暱稱**；僅在明確設定 `reset_unlinked: true` 後才會清除，啟用前請先評估此破壞性操作。
 - **發布版本檢查**：僅查詢本專案 `oMiki0826o/Discord-bot` 的 GitHub Releases，定期通知穩定且較新的版本，僅允許官方 GitHub 連結。**不下載、不執行、不自動升級**，也不能代替 Minecraft／Fabric 版本相容性驗證。此功能與 Modrinth 的遊戲模組更新檢查相互獨立。
 - **玩家提及通知**：Discord 映射頻道中的明確使用者提及（`<@user_id>`）可通知該使用者已綁定的 Minecraft UUID。只對在線玩家發送，不將整則 Discord 訊息重複廣播；可用 `style: "actionbar"` 或 `"chat"`，並限制每次人數及每名玩家冷卻時間。**不支援角色提及、`@everyone` 或 `@here` 的大量通知**，以避免洗版。Minecraft 端需安裝此分支重新編譯的 Bridge JAR，否則新封包可能無法顯示。
