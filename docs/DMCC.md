@@ -242,3 +242,13 @@ The added Discord rich-message bridge produces **readable bounded text**, not fu
 ### Optional account nickname, release and mention settings (English)
 
 All three settings default to disabled. Nickname sync is scoped to one Discord guild and checks **Manage Nicknames**, role hierarchy, guild ownership, and whether the member is a bot before issuing an edit. It never clears unlinked nicknames unless `reset_unlinked` is explicitly enabled. Release checks query only the official GitHub Releases endpoint, notify newer stable tags and never install anything. Discord user mentions are resolved through verified account links and delivered by UUID to online Minecraft players using an authenticated Bridge message; no role-wide or everyone mentions are sent, and per-player cooldown/recipient limits apply. Live Discord permissions, actual Minecraft client UI and server deployment must still be verified by operators.
+
+## Discord → Minecraft 富文字（安全子集）
+
+`rich_chat` 預設為 `false`，可以在 `settings/dmcc.json` 最外層設定 `"rich_chat": true`。啟用後，Discord 文字會先轉換為最多 128 個、總長度受限的**樣式片段**，透過已驗證的 Gateway 傳給 Java Bridge，再轉成原生 Minecraft `Component`。目前可保留一般 Markdown 的粗體、斜體、底線、刪除線與程式碼灰色顯示；不支援任意 JSON、執行指令或可點擊的 ClickEvent，避免 Discord 訊息直接觸發遊戲管理操作。若維持預設關閉，繼續使用舊版純文字封包，保障對老舊 Bridge 的相容。
+
+**注意：啟用前必須部署與此分支相同提交所編譯的 Minecraft Bridge JAR**。與原版 DMCC 完整 Discord Markdown / Hover / Click、附件貼圖完整渲染相比，這仍是明確限定的安全子集，尚未做到 100% 功能對等。
+
+### Rich text (English)
+
+The opt-in `rich_chat: true` setting sends validated, bounded style-only segments (bold, italic, underline, strike-through and code gray) over the authenticated Gateway to the Fabric Bridge. It does not serialize executable Minecraft JSON, ClickEvent, arbitrary URL actions or commands. Deploy a Bridge JAR built from the same source revision before enabling it. Other upstream DMCC rendering features remain unverified or unsupported.
