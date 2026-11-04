@@ -137,3 +137,21 @@ def test_sweep_limits_per_cycle_and_does_not_touch_bots(tmp_path: Path) -> None:
         assert not member.edits
 
     asyncio.run(run())
+
+
+def test_sweep_rotates_members_instead_of_starving_later_users(tmp_path: Path) -> None:
+    bot, guild, first, store = _fixture(tmp_path)
+    second = Member(guild)
+    second.id = 345678901234567890
+    store.link(str(second.id), "123e4567-e89b-12d3-a456-426614174001", "Alex")
+    guild.members = [first, second]
+
+    async def run() -> None:
+        service = NicknameSyncService(bot, store, _config(max_sweep_per_cycle=1))
+        assert await service.sweep_once() == 1
+        assert first.nick == "[MC] Steve"
+        assert second.nick is None
+        assert await service.sweep_once() == 1
+        assert second.nick == "[MC] Alex"
+
+    asyncio.run(run())
