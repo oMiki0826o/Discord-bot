@@ -1,4 +1,6 @@
-"""Public Minecraft command events require independent gateway-side privacy checks."""
+"""tests/test_dmcc_public_commands.py
+Public Minecraft command events require independent gateway-side privacy checks.
+"""
 from bot.mod.dmcc.events import MinecraftEvent
 from bot.mod.dmcc.services.public_commands import sanitize_public_player_command
 from bot.mod.dmcc.services.presentation import PresentationSettings, render_message
