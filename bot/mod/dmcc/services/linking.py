@@ -65,6 +65,14 @@ class LinkingService:
 
         self._require(minecraft_uuid, "minecraft_uuid")
         self._require(minecraft_name, "minecraft_name")
+        active_code = self._code_by_uuid.get(minecraft_uuid)
+        active = self._by_code.get(active_code) if active_code else None
+        if (
+            active is not None
+            and active.minecraft_name == minecraft_name
+            and active.expires_at > self._now()
+        ):
+            return active.code
         previous = self._code_by_uuid.pop(minecraft_uuid, None)
         if previous is not None:
             self._by_code.pop(previous, None)
