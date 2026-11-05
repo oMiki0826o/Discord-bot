@@ -1,5 +1,7 @@
 """bot/mod/dmcc/services/public_commands.py
-Public player-command privacy filters, independent of Minecraft-side allowlisting.
+Modification():
+
+- Public player-command privacy filters, independent of Minecraft-side allowlisting.
 """
 from __future__ import annotations
 
