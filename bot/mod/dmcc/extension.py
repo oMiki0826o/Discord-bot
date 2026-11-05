@@ -154,6 +154,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 BridgeRequestService(gateway.requests),
                 gateway.manager,
                 DiscordDeliveryAdapter(bot),
+                cursor_path=state_path.parent / "console_cursors.json",
             )
             console.start()
         if hasattr(bot, "add_cog"):
