@@ -32,7 +32,7 @@ def _truncate_utf16(text: str, limit: int) -> str:
     return "".join(result)
 
 
-def parse_discord_markdown(message: str) -> list[dict[str, object]]:
+def _parse_plain_markdown(message: str) -> list[dict[str, object]]:
     """Decode a fixed safe subset of Markdown into validated Component style data."""
     if not isinstance(message, str) or not message:
         return []
@@ -112,6 +112,93 @@ def parse_discord_markdown(message: str) -> list[dict[str, object]]:
         })
         return keep
     return pieces
+
+
+
+_ANSI_BLOCK = re.compile(r"\x60\x60\x60ansi[ \t]*\n([\s\S]*?)\x60\x60\x60", re.IGNORECASE)
+_ANSI_SGR = re.compile(r"\x1b\[([0-9;]{1,30})m")
+_ANSI_PALETTE = {
+    30: "#555555", 31: "#AA0000", 32: "#00AA00",
+    33: "#FFAA00", 34: "#5555FF", 35: "#AA00AA",
+    36: "#00AAAA", 37: "#AAAAAA", 90: "#555555",
+    91: "#FF5555", 92: "#55FF55", 93: "#FFFF55",
+    94: "#5555FF", 95: "#FF55FF", 96: "#55FFFF",
+    97: "#FFFFFF",
+}
+
+
+def _ansi_segments(source: str) -> list[dict[str, object]]:
+    """Render Discord's ANSI code-fence subset without passing escape codes onward."""
+    result: list[dict[str, object]] = []
+    color = "gray"
+    start = 0
+
+    def emit(chunk: str) -> None:
+        safe = _CONTROL.sub("", _ANSI.sub("", chunk.replace("\r", " ")))
+        if not safe:
+            return
+        segment: dict[str, object] = {
+            "text": safe,
+            "bold": False, "italic": False, "underlined": False,
+            "strikethrough": False, "obfuscated": False, "color": color,
+        }
+        if result and all(result[-1].get(key) == val for key, val in segment.items() if key != "text"):
+            result[-1]["text"] = str(result[-1]["text"]) + safe
+        else:
+            result.append(segment)
+
+    for match in _ANSI_SGR.finditer(source):
+        emit(source[start:match.start()])
+        for raw in match.group(1).split(";"):
+            code = int(raw) if raw else 0
+            if code == 0 or code == 39:
+                color = "gray"
+            elif code in _ANSI_PALETTE:
+                color = _ANSI_PALETTE[code]
+        start = match.end()
+    emit(source[start:])
+    return result
+
+
+def parse_discord_markdown(message: str) -> list[dict[str, object]]:
+    """Bounded inline Markdown plus safe fenced ANSI colors, preserving text order."""
+    if not isinstance(message, str) or not message:
+        return []
+    if not _ANSI_BLOCK.search(message):
+        return _parse_plain_markdown(message)
+
+    # Restrict the work before regular expression parsing, even for huge inputs.
+    source = message[:12000]
+    parts: list[dict[str, object]] = []
+    start = 0
+    for match in _ANSI_BLOCK.finditer(source):
+        parts.extend(_parse_plain_markdown(source[start:match.start()]))
+        parts.extend(_ansi_segments(match.group(1)))
+        start = match.end()
+    parts.extend(_parse_plain_markdown(source[start:]))
+
+    output: list[dict[str, object]] = []
+    remaining = _LIMIT
+    for part in parts:
+        text = _truncate_utf16(str(part["text"]), remaining)
+        if not text:
+            break
+        clean = {**part, "text": text}
+        if output and all(output[-1].get(key) == val for key, val in clean.items() if key != "text"):
+            output[-1]["text"] = str(output[-1]["text"]) + text
+        else:
+            output.append(clean)
+        remaining -= len(text.encode("utf-16-le")) // 2
+        if remaining == 0:
+            break
+
+    if len(output) > _MAX_SEGMENTS:
+        tail = "".join(str(item["text"]) for item in output[_MAX_SEGMENTS - 1:])
+        output = output[:_MAX_SEGMENTS - 1] + [{
+            "text": tail, "bold": False, "italic": False, "underlined": False,
+            "strikethrough": False, "obfuscated": False, "color": "white",
+        }]
+    return output
 
 
 # Discord's guild color is untrusted presentation metadata, never an authorization grant.
