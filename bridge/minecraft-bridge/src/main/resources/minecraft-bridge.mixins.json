@@ -3,6 +3,7 @@
   "package": "io.miki.dmcc.bridge.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "FrozenPacketMixin",
     "LoginGateMixin",
     "GameModeCommandMixin",
     "PlayerAdvancementsMixin",
