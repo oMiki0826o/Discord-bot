@@ -230,6 +230,7 @@ The added Discord rich-message bridge produces **readable bounded text**, not fu
     "enabled": true,
     "style": "title",
     "sound": true,
+    "role_mentions": false,
     "max_targets": 8,
     "cooldown_seconds": 15
   }
@@ -296,3 +297,51 @@ Scope: Fabric Minecraft **1.21.8 / 1.21.9**, Python Discord Gateway. NeoForge is
 | Multi-server and console | Authenticated routing, bounded log cursor | Stress and disconnect/rotation testing |
 
 **Release gate:** all Python 3.11–3.13 checks, Fabric 1.21.8/1.21.9 Gradle/JUnit/remapJar, release artifact integrity, security review, and a real isolated server end-to-end smoke test must pass before declaring full parity or merging into `main`.
+
+
+## Fabric v3 功能補完：安全預設與權限管理（2026-11-05）
+
+此階段只驗收 **Fabric Minecraft 1.21.8 / 1.21.9**。NeoForge 暫停新增功能。所有選用能力需同時部署相同開發分支來源的 Python Gateway 與 Fabric JAR。
+
+### 玩家公開指令事件
+
+在 `config/minecraft-bridge.properties` 中明確設定：
+
+```properties
+relay_player_commands=true
+```
+
+預設為 `false`。僅轉送 `/say`、`/me`、`/list`、無 selector 條件的 `/tellraw @a` 等公開指令輸入；Java 與 Python 皆有獨立白名單。私人 `/msg`／`/tell`、登入／註冊、隊伍私訊、包含換行或控制字元的指令不會轉送。此功能並非全部命令轉送；不保證與 Fabric 的公開廣播事件去重，部署前須進行實機測試。
+
+### Discord 玩家與角色提及
+
+`settings/dmcc.json`：
+
+```json
+{
+  "mentions": {
+    "enabled": true,
+    "style": "title",
+    "sound": true,
+    "role_mentions": false,
+    "max_targets": 8,
+    "cooldown_seconds": 15
+  }
+}
+```
+
+`role_mentions` 預設 `false`。啟用後仍只會通知已綁定 Minecraft UUID 的使用者；必須由 Discord Server Members Intent 提供**完整成員快取**，並且群組成員數不超出 `max_targets`。若快取不完整或角色對應超限，群組提及直接略過。不支援 `@everyone`／`@here` 自動全員提醒。每台伺服器／玩家仍受冷卻控制。
+
+### OP 權限同步與重啟恢復
+
+Fabric 選用 `op_sync_enabled=true` 搭配 Gateway `op_sync.enabled=true`。當同步開啟時，Fabric 會在設定目錄建立 `minecraft-bridge-managed-ops.properties`，記錄**只有 Bridge 管理的 OP**，並在重啟後重載。該檔案應視為安全敏感的本機資料；不可手動編輯或提交 Git。若檔案損壞，OP 同步停止而非接管既有 Minecraft 管理員的權限。手動新增或修改的 OP 不能被 Bridge 自動覆蓋。
+
+要啟用撤銷，必須明確設定 `op_sync.allow_removals=true` 並提供完整 Discord guild 成員資料。Gateway 提交含 `full_snapshot` 的快照，允許撤銷不再綁定、已離開 Discord guild、或權限降低的 **Bridge 管理項目**。透過 `op_sync_response` 等待 Java 真正套用結果，避免只靠網路寫入成功就宣告已同步。任何失敗需要觀察伺服器日誌，並等待下次週期再次同步。**不保證跨程序的原子交易**，遇到磁碟故障需人工核對原生 `ops.json` 和管理名冊。
+
+### 富文字與互動
+
+在 Gateway `rich_chat=true` 時，額外支援部分 Discord ANSI 色碼區塊，以及經過限制的 HTTP(S) URL 標記／原生 Minecraft OpenUrl + Hover Text。仍會檢查控制字元、總長度及片段數；不接受從 Discord 直接傳入 RunCommand、SuggestCommand、任意 NBT 或 JSON Text Component。這不是無限制 Markdown、ANSI 或上游原版互動元件的完整復刻。
+
+### 驗收門檻
+
+公開功能清單只標記**已實作或部分實作**；完整 DMCC v3 對等需再確認原版全部命令及原生封包特性、動態死亡／進度翻譯、`/tellraw` 的收件者上下文、Discord API 實機互動，以及中斷重連／Minecraft 原生權限與伺服器負載。CI（Python、Fabric Gradle/JUnit/remapJar、啟動 Smoke Test、發行驗證）通過後，仍不得宣稱完成真實 Discord + Minecraft 端對端測試。維持 Draft PR，不合併 main。
