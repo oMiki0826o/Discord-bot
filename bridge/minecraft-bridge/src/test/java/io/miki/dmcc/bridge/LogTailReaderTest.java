@@ -54,13 +54,13 @@ final class LogTailReaderTest {
         var original = LogTailReader.readChunk(log, -1L, "", 8192);
         Path rotated = directory.resolve("latest.log.1");
         Files.move(log, rotated);
-        Files.writeString(log, "abcde12345", StandardCharsets.UTF_8);
-        var first = LogTailReader.readChunk(log, original.nextOffset(), original.fileId(), 5);
-        assertEquals("abcde", first.content());
+        Files.writeString(log, "abc\n123\n", StandardCharsets.UTF_8);
+        var first = LogTailReader.readChunk(log, original.nextOffset(), original.fileId(), 4);
+        assertEquals("abc\n", first.content());
         assertTrue(!original.fileId().equals(first.fileId()));
-        assertEquals(5L, first.nextOffset());
-        var second = LogTailReader.readChunk(log, first.nextOffset(), first.fileId(), 5);
-        assertEquals("12345", second.content());
+        assertEquals(4L, first.nextOffset());
+        var second = LogTailReader.readChunk(log, first.nextOffset(), first.fileId(), 4);
+        assertEquals("123\n", second.content());
     }
 
     @Test
