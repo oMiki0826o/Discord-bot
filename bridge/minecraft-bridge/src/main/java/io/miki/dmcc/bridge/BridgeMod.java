@@ -67,6 +67,8 @@ public final class BridgeMod implements ModInitializer {
     );
     private volatile boolean requireLinking;
     private volatile String unlinkedPlayerAction = "kick";
+    private volatile boolean opSyncEnabled;
+    private final OpSyncApplier opSyncApplier = new OpSyncApplier();
     private final FreezeRegistry frozenPlayers = new FreezeRegistry(
         System::nanoTime, TimeUnit.MINUTES.toNanos(5)
     );
@@ -147,6 +149,7 @@ public final class BridgeMod implements ModInitializer {
             gracefulShutdownTimeoutMillis = settings.gracefulShutdownTimeoutMillis();
             requireLinking = settings.requireLinking();
             unlinkedPlayerAction = settings.unlinkedPlayerAction();
+            opSyncEnabled = settings.opSyncEnabled();
             runtime = new BridgeRuntime(
                 () -> new BridgeClient(settings, (client, envelope) -> handleGatewayPacket(server, client, envelope)),
                 1_000,
@@ -336,6 +339,18 @@ public final class BridgeMod implements ModInitializer {
         }
         if (envelope.type().equals("link_status_response")) {
             handleLinkStatusResponse(envelope);
+            return;
+        }
+        if (envelope.type().equals("op_sync_apply")) {
+            if (!opSyncEnabled) return;
+            var validated = OpSyncPolicy.parse(envelope.data());
+            if (validated.isEmpty()) return;
+            server.execute(() -> {
+                int updated = opSyncApplier.apply(server, validated.get());
+                if (updated > 0) LOGGER.info(
+                    "DMCC synchronized {} managed linked-player operator records", updated
+                );
+            });
             return;
         }
         if (envelope.type().equals("server_info_request")) {
@@ -769,6 +784,8 @@ public final class BridgeMod implements ModInitializer {
         }
         metricTickCounter = 0L;
         requireLinking = false;
+        opSyncEnabled = false;
+        opSyncApplier.clear();
         loginGate.clearAll();
         freezeChecks.clearAll();
         frozenPlayers.clearAll();
