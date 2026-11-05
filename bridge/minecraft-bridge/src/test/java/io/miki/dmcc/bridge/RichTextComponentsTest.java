@@ -41,5 +41,23 @@ class RichTextComponentsTest {
             Map.of("text", "hello", "color", "#123456;run_op")
         ))).isEmpty());
     }
+    @Test
+    void allowsHttpUrlAndHoverWithoutAllowingCommands() {
+        var safe = RichTextComponents.parse(Map.of("segments", List.of(Map.of(
+            "text", "Open docs", "color", "#3366CC",
+            "click_url", "https://example.org/docs",
+            "hover_text", "https://example.org/docs", "underlined", true
+        ))));
+        assertTrue(safe.isPresent());
+        assertNotNull(safe.get().getSiblings().getFirst().getStyle().getClickEvent());
+        assertNotNull(safe.get().getSiblings().getFirst().getStyle().getHoverEvent());
+        assertTrue(RichTextComponents.parse(Map.of("segments", List.of(Map.of(
+            "text", "bad", "click_url", "javascript:alert(1)"
+        ))).isEmpty());
+        assertTrue(RichTextComponents.parse(Map.of("segments", List.of(Map.of(
+            "text", "bad", "click_url", "https://localhost/admin"
+        ))).isEmpty());
+    }
 }
+
 

@@ -137,3 +137,19 @@ def test_ansi_code_rejects_unknown_control_codes_and_stays_bounded():
     assert len(parts) <= 128
     assert sum(len(str(p["text"]).encode("utf-16-le")) // 2 for p in parts) <= 1800
     assert "\x1b" not in "".join(str(p["text"]) for p in parts)
+
+
+def test_safe_markdown_link_becomes_clickable_hoverable_minecraft_segment():
+    parts = parse_discord_markdown("See [the docs](https://example.org/docs?q=1) now.")
+    assert "".join(str(part["text"]) for part in parts) == "See the docs now."
+    link = next(p for p in parts if p["text"] == "the docs")
+    assert link["click_url"] == "https://example.org/docs?q=1"
+    assert link["hover_text"] == "https://example.org/docs?q=1"
+    assert link["underlined"] is True
+
+
+def test_rejects_unsafe_markdown_link_actions_without_running_commands():
+    source = "[do not click](javascript:alert) and [local](https://localhost/private)"
+    parts = parse_discord_markdown(source)
+    assert all(not part.get("click_url") for part in parts)
+    assert "javascript:" in "".join(str(part["text"]) for part in parts)
