@@ -25,6 +25,32 @@ final class BridgeSettingsTest {
     }
 
     @Test
+    void operatorSynchronizationRequiresExplicitServerOptIn() throws Exception {
+        var defaultConfig = BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            """));
+        assertFalse(defaultConfig.opSyncEnabled());
+        var optIn = BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            op_sync_enabled=true
+            """));
+        assertTrue(optIn.opSyncEnabled());
+        assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            op_sync_enabled=maybe
+            """)));
+    }
+
+    @Test
     void disabledLinkGateIsBackwardCompatible() throws Exception {
         var settings = BridgeSettings.fromReader(new StringReader("""
             server_id=survival
