@@ -137,3 +137,40 @@ def test_op_sync_never_grants_operator_by_mutable_discord_names(tmp_path: Path):
         assert gateway.sent == []
 
     asyncio.run(run())
+
+
+def test_empty_authoritative_snapshot_revokes_orphaned_managed_ops(tmp_path: Path):
+    links = JsonLinkRepository(tmp_path / "links.json")
+    resolver = OpLevelResolver.from_mapping({}, links)
+    guild = SimpleNamespace(chunked=True, get_member=lambda _id: None)
+    bot = SimpleNamespace(get_guild=lambda _id: guild)
+    manager = SimpleNamespace(all=lambda: [SimpleNamespace(server_id="survival")])
+    class Gateway:
+        def __init__(self):
+            self.sent = []
+        async def send_packet(self, *args):
+            self.sent.append(args)
+    async def run():
+        gateway = Gateway()
+        service = OpSyncService(_config(allow_removals=True), bot, links, resolver, manager, gateway)
+        assert await service.run_once()
+        assert gateway.sent == [(
+            "survival", "op_sync_apply", None,
+            {"entries": [], "allow_removals": True, "full_snapshot": True},
+        )]
+    asyncio.run(run())
+
+
+def test_partial_guild_cache_cannot_authorize_full_op_reset(tmp_path: Path):
+    links = JsonLinkRepository(tmp_path / "links.json")
+    resolver = OpLevelResolver.from_mapping({}, links)
+    guild = SimpleNamespace(chunked=False, get_member=lambda _id: None)
+    bot = SimpleNamespace(get_guild=lambda _id: guild)
+    manager = SimpleNamespace(all=lambda: [SimpleNamespace(server_id="survival")])
+    class Gateway:
+        async def send_packet(self, *args):
+            raise AssertionError("partial member data cannot trigger OP removal")
+    async def run():
+        service = OpSyncService(_config(allow_removals=True), bot, links, resolver, manager, Gateway())
+        assert not await service.run_once()
+    asyncio.run(run())
