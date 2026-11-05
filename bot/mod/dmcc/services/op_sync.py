@@ -75,7 +75,13 @@ class OpSyncService:
         if guild is None or not hasattr(guild, "get_member"):
             return False
         links = tuple(self._links.all_links())
-        if not links or len(links) > self.config.max_entries:
+        if len(links) > self.config.max_entries:
+            return False
+        if not links and not self.config.allow_removals:
+            return False
+        # Removal reconciles an authoritative full snapshot; a partial
+        # Discord member cache can otherwise accidentally demote operators.
+        if self.config.allow_removals and not bool(getattr(guild, "chunked", False)):
             return False
         # Require all links to resolve before writing anything; this is not
         # a complete-operator-list reset, and does not touch unrelated admins.
@@ -116,7 +122,7 @@ class OpSyncService:
                         "minecraft_name": link.minecraft_name,
                         "level": level,
                     })
-            if entries:
+            if entries or self.config.allow_removals:
                 entries_by_server[server_id] = entries
         if not entries_by_server:
             return False
@@ -127,6 +133,7 @@ class OpSyncService:
                     server_id, "op_sync_apply", None, {
                         "entries": entries,
                         "allow_removals": self.config.allow_removals,
+                        "full_snapshot": self.config.allow_removals,
                     },
                 )
                 delivered = True
