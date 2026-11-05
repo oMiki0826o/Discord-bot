@@ -174,3 +174,43 @@ def test_partial_guild_cache_cannot_authorize_full_op_reset(tmp_path: Path):
         service = OpSyncService(_config(allow_removals=True), bot, links, resolver, manager, Gateway())
         assert not await service.run_once()
     asyncio.run(run())
+
+
+def test_native_op_sync_requires_positive_java_apply_acknowledgement(tmp_path: Path):
+    links = JsonLinkRepository(tmp_path / "links.json")
+    uuid = "123e4567-e89b-12d3-a456-426614174000"
+    links.link("234567890123456789", uuid, "Steve")
+    resolver = OpLevelResolver.from_mapping({
+        "user_mappings": [{"user": "234567890123456789", "op_level": 2}],
+    }, links)
+    member = SimpleNamespace(id=234567890123456789, roles=[])
+    guild = SimpleNamespace(chunked=True, get_member=lambda user_id: member)
+    bot = SimpleNamespace(get_guild=lambda _guild_id: guild)
+    manager = SimpleNamespace(all=lambda: [SimpleNamespace(server_id="survival")])
+
+    class RequestRecorder:
+        def __init__(self):
+            self.response = {"ok": False, "updated": 0, "failed": 1}
+            self.calls = []
+
+        async def request(self, server_id, kind, data):
+            self.calls.append((server_id, kind, data))
+            return self.response
+
+    class Gateway:
+        def __init__(self):
+            self.requests = RequestRecorder()
+
+        async def send_packet(self, *_args):
+            raise AssertionError("OP mutations must use acknowledged requests")
+
+    async def run():
+        gateway = Gateway()
+        service = OpSyncService(_config(), bot, links, resolver, manager, gateway)
+        assert not await service.run_once()
+        assert gateway.requests.calls[0][:2] == ("survival", "op_sync_apply")
+        assert gateway.requests.calls[0][2]["entries"][0]["level"] == 2
+        gateway.requests.response = {"ok": True, "updated": 1, "failed": 0}
+        assert await service.run_once()
+
+    asyncio.run(run())
