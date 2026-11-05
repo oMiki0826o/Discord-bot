@@ -11,7 +11,7 @@ import java.util.Set;
 /** Safe style-only Minecraft component construction, without interactive events or commands. */
 final class RichTextComponents {
     private static final Set<String> FIELDS = Set.of(
-        "text", "bold", "italic", "underlined", "strikethrough", "color"
+        "text", "bold", "italic", "underlined", "strikethrough", "obfuscated", "color"
     );
 
     private RichTextComponents() { }
@@ -33,7 +33,7 @@ final class RichTextComponents {
             }
             length += text.length();
             if (length > 1800) return Optional.empty();
-            for (String flag : List.of("bold", "italic", "underlined", "strikethrough")) {
+            for (String flag : List.of("bold", "italic", "underlined", "strikethrough", "obfuscated")) {
                 Object item = entry.get(flag);
                 if (item != null && !(item instanceof Boolean)) return Optional.empty();
             }
@@ -47,6 +47,7 @@ final class RichTextComponents {
                 .withItalic(Boolean.TRUE.equals(entry.get("italic")))
                 .withUnderlined(Boolean.TRUE.equals(entry.get("underlined")))
                 .withStrikethrough(Boolean.TRUE.equals(entry.get("strikethrough")))
+                .withObfuscated(Boolean.TRUE.equals(entry.get("obfuscated")))
                 .withColor(color.equals("gray") ? ChatFormatting.GRAY : ChatFormatting.WHITE)
             );
             output.append(fragment);

@@ -12,6 +12,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _ANSI = re.compile(r"\x1b\[[0-9;]{0,30}[A-Za-z]")
 _MARKS = (
     ("**", "bold"), ("__", "underlined"), ("~~", "strikethrough"),
+    ("||", "obfuscated"),
     ("`", "code"), ("*", "italic"), ("_", "italic"),
 )
 _LIMIT = 1800
@@ -36,7 +37,7 @@ def parse_discord_markdown(message: str) -> list[dict[str, object]]:
     if not isinstance(message, str) or not message:
         return []
     clean = _truncate_utf16(_CONTROL.sub("", _ANSI.sub("", message.replace("\r", " "))), _LIMIT)
-    state = {"bold": False, "italic": False, "underlined": False, "strikethrough": False, "code": False}
+    state = {"bold": False, "italic": False, "underlined": False, "strikethrough": False, "obfuscated": False, "code": False}
     pieces: list[dict[str, object]] = []
     buf: list[str] = []
 
@@ -49,6 +50,7 @@ def parse_discord_markdown(message: str) -> list[dict[str, object]]:
             "italic": state["italic"] and not state["code"],
             "underlined": state["underlined"] and not state["code"],
             "strikethrough": state["strikethrough"] and not state["code"],
+            "obfuscated": state["obfuscated"] and not state["code"],
             "color": "gray" if state["code"] else "white",
         }
         buf.clear()
@@ -105,6 +107,7 @@ def parse_discord_markdown(message: str) -> list[dict[str, object]]:
             "italic": False,
             "underlined": False,
             "strikethrough": False,
+            "obfuscated": False,
             "color": "white",
         })
         return keep
