@@ -20,9 +20,9 @@ final class PublicTellrawPolicy {
 
     static String sanitize(String message) {
         if (message == null || message.isBlank()) return "";
-        return message.replaceAll("(?i)@everyone", "[everyone]")
+        String sanitized = message.replaceAll("(?i)@everyone", "[everyone]")
             .replaceAll("(?i)@here", "[here]")
-            .replaceAll("[\\p{Cntrl}&&[^\\n\\t]]", "")
-            .substring(0, Math.min(message.length(), 1500));
+            .replaceAll("[\\p{Cntrl}&&[^\\n\\t]]", "");
+        return sanitized.substring(0, Math.min(sanitized.length(), 1500));
     }
 }
