@@ -234,3 +234,21 @@ def test_cursor_mode_retries_failed_discord_delivery(tmp_path) -> None:
         await service.close()
 
     asyncio.run(scenario())
+
+
+def test_console_redacts_private_player_commands_without_exposing_arguments() -> None:
+    samples = [
+        "[Server thread/INFO]: Player issued server command: /msg Steve private information",
+        "[Server thread/INFO]: Player issued server command: /tell Alex password-value",
+        "[Server thread/INFO]: Player issued server command: /login secret123",
+        "[Server thread/INFO]: Player issued server command: /register hidden456",
+        "[Server thread/INFO]: Player issued server command: /dmcc link ABCDEF",
+    ]
+    for entry in samples:
+        rendered = redact_console_line(entry)
+        assert "private information" not in rendered
+        assert "password-value" not in rendered
+        assert "secret123" not in rendered
+        assert "hidden456" not in rendered
+        assert "ABCDEF" not in rendered
+        assert "[REDACTED]" in rendered
