@@ -74,7 +74,7 @@ def test_release_zip_is_reproducible_valid_and_contains_required_files(tmp_path:
 def test_ci_uploads_verified_runtime_and_bridge_artifacts() -> None:
     workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
-    assert "needs: [test, bridge]" in workflow
+    assert "needs: [test, bridge, neoforge]" in workflow
     assert workflow.count("uses: actions/upload-artifact@v4") == 3
     assert workflow.count("uses: actions/download-artifact@v4") == 2
     assert "needs: [test, bridge, neoforge]" in workflow
