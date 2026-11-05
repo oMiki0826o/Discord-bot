@@ -94,7 +94,10 @@ class OpSyncService:
                 except (ValueError, TypeError, AttributeError):
                     return False
                 if member is None:
-                    return False
+                    if self.config.allow_removals:
+                        # A partial role snapshot must never revoke operator rights.
+                        return False
+                    continue
                 roles = tuple(getattr(member, "roles", ()) or ())
                 role_ids = tuple(str(role.id) for role in roles)
                 role_names = tuple(str(getattr(role, "name", "")) for role in roles)
