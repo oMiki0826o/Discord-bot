@@ -53,10 +53,10 @@ class RichTextComponentsTest {
         assertNotNull(safe.get().getSiblings().getFirst().getStyle().getHoverEvent());
         assertTrue(RichTextComponents.parse(Map.of("segments", List.of(Map.of(
             "text", "bad", "click_url", "javascript:alert(1)"
-        ))).isEmpty());
+        )))).isEmpty());
         assertTrue(RichTextComponents.parse(Map.of("segments", List.of(Map.of(
             "text", "bad", "click_url", "https://localhost/admin"
-        ))).isEmpty());
+        )))).isEmpty());
     }
 }
 
