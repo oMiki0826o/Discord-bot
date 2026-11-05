@@ -102,8 +102,13 @@ class OpSyncService:
                     return False
                 if member is None:
                     if self.config.allow_removals:
-                        # A partial role snapshot must never revoke operator rights.
-                        return False
+                        # The complete guild snapshot establishes that this linked
+                        # Discord user left the guild. Revoke only Bridge-owned OP.
+                        entries.append({
+                            "minecraft_uuid": link.minecraft_uuid,
+                            "minecraft_name": link.minecraft_name,
+                            "level": 0,
+                        })
                     continue
                 roles = tuple(getattr(member, "roles", ()) or ())
                 role_ids = tuple(str(role.id) for role in roles)
