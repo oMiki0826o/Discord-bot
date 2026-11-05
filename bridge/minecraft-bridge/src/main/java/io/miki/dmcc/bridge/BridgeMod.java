@@ -395,6 +395,18 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
+    /** Observe an explicitly public /tellraw command without changing vanilla delivery. */
+    public static boolean isPublicTellrawCommand(String command) {
+        return PublicTellrawPolicy.isPublicBroadcast(command);
+    }
+
+    public static void relayTellrawCommand(String sender, String content) {
+        BridgeMod mod = activeInstance;
+        if (mod == null) return;
+        String sanitized = PublicTellrawPolicy.sanitize(content);
+        if (!sanitized.isBlank()) mod.relayPublicCommand(sender, sanitized);
+    }
+
     private void relayPublicCommand(String sender, String content) {
         BridgeRuntime active = runtime;
         if (active == null || serverId == null || content == null || content.isBlank()) return;
