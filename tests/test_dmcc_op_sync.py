@@ -214,3 +214,30 @@ def test_native_op_sync_requires_positive_java_apply_acknowledgement(tmp_path: P
         assert await service.run_once()
 
     asyncio.run(run())
+
+
+def test_full_guild_snapshot_revokes_linked_member_who_left_guild(tmp_path: Path):
+    links = JsonLinkRepository(tmp_path / "links.json")
+    uuid = "123e4567-e89b-12d3-a456-426614174000"
+    links.link("234567890123456789", uuid, "Steve")
+    guild = SimpleNamespace(chunked=True, get_member=lambda _user_id: None)
+    bot = SimpleNamespace(get_guild=lambda _guild_id: guild)
+    manager = SimpleNamespace(all=lambda: [SimpleNamespace(server_id="survival")])
+    class Gateway:
+        def __init__(self):
+            self.sent = []
+        async def send_packet(self, *args):
+            self.sent.append(args)
+
+    async def run():
+        gateway = Gateway()
+        service = OpSyncService(_config(allow_removals=True), bot, links,
+            OpLevelResolver.from_mapping({}, links), manager, gateway)
+        assert await service.run_once()
+        data = gateway.sent[0][3]
+        assert data["full_snapshot"] is True
+        assert data["entries"] == [{
+            "minecraft_uuid": uuid, "minecraft_name": "Steve", "level": 0,
+        }]
+
+    asyncio.run(run())
