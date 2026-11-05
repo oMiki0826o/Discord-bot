@@ -56,4 +56,26 @@ class OpSyncPolicyTest {
             "entries", List.of(entry, entry), "allow_removals", false
         )).isEmpty());
     }
+    @Test
+    void acceptsExplicitCompleteEmptySnapshotOnlyWithRemovals() {
+        assertTrue(OpSyncPolicy.parse(Map.of(
+            "entries", List.of(), "allow_removals", true, "full_snapshot", true
+        )).isPresent());
+        assertTrue(OpSyncPolicy.parse(Map.of(
+            "entries", List.of(), "allow_removals", true
+        )).isEmpty());
+        assertTrue(OpSyncPolicy.parse(Map.of(
+            "entries", List.of(), "allow_removals", false, "full_snapshot", true
+        )).isEmpty());
+    }
+
+    @Test
+    void rejectsUntrustedFullSnapshotFlags() {
+        assertTrue(OpSyncPolicy.parse(Map.of(
+            "entries", List.of(Map.of(
+                "minecraft_uuid", UUID_ONE, "minecraft_name", "Steve", "level", 2
+            )), "allow_removals", true, "full_snapshot", "true"
+        )).isEmpty());
+    }
 }
+
