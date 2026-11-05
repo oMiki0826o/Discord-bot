@@ -19,11 +19,12 @@ from typing import Mapping
 from urllib.parse import urlsplit
 
 from ..events import MinecraftEvent
+from .public_commands import sanitize_public_player_command
 
 EVENT_TYPES = frozenset({
     "player_chat", "player_join", "player_quit", "player_death",
     "player_advancement", "player_gamemode", "server_started", "server_stopping",
-    "server_broadcast",
+    "server_broadcast", "player_command",
 })
 _FIELDS = frozenset({
     "player", "server", "message", "death_message", "game_mode", "title", "label",
@@ -37,6 +38,7 @@ _EVENT_TEMPLATES = {
     "server_started": "**{server} 已啟動**",
     "server_stopping": "**{server} 即將關閉**",
     "server_broadcast": "**[{server}] {player}: {message}**",
+    "player_command": "**[{server}] {player}：{message}**",
 }
 _ENGLISH_EVENT_TEMPLATES = {
     "player_join": "**{player} joined {server}**",
@@ -47,6 +49,7 @@ _ENGLISH_EVENT_TEMPLATES = {
     "server_started": "**{server} started**",
     "server_stopping": "**{server} is stopping**",
     "server_broadcast": "**[{server}] {player}: {message}**",
+    "player_command": "**[{server}] {player} executed {message}**",
 }
 _LOCALES = frozenset({"zh_TW", "en_US"})
 _DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
@@ -288,10 +291,11 @@ def render_message(
     player = data.get("player_name")
     needs_player = event.type in {
         "player_chat", "player_join", "player_quit", "player_gamemode", "player_advancement",
+        "player_command",
     }
     if needs_player and (not isinstance(player, str) or not player.strip()):
         return None
-    if event.type in {"player_chat", "server_broadcast"}:
+    if event.type in {"player_chat", "server_broadcast", "player_command"}:
         message = data.get("message")
         if not isinstance(message, str) or not message.strip():
             return None
@@ -308,9 +312,15 @@ def render_message(
         if not isinstance(game_mode, str) or not game_mode.strip():
             return None
 
+    sanitized_command = None
+    if event.type == "player_command":
+        sanitized_command = sanitize_public_player_command(data.get("message"))
+        if sanitized_command is None:
+            return None
+
     values = {
         "server": profile.label, "player": player.strip() if isinstance(player, str) else "Server",
-        "message": str(data.get("message", "")).strip(),
+        "message": sanitized_command if sanitized_command is not None else str(data.get("message", "")).strip(),
         "death_message": str(data.get("death_message", "")).strip(),
         "title": str(data.get("title", "")).strip(),
         "game_mode": str(data.get("game_mode", "")).strip(),

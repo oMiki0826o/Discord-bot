@@ -72,6 +72,7 @@ public final class BridgeMod implements ModInitializer {
     private volatile boolean requireLinking;
     private volatile String unlinkedPlayerAction = "kick";
     private volatile boolean opSyncEnabled;
+    private volatile boolean relayPlayerCommands;
     private final OpSyncApplier opSyncApplier = new OpSyncApplier();
     private final FreezeRegistry frozenPlayers = new FreezeRegistry(
         System::nanoTime, TimeUnit.MINUTES.toNanos(5)
@@ -138,6 +139,19 @@ public final class BridgeMod implements ModInitializer {
         if (active != null) active.sendAdvancement(player, advancement, progress);
     }
 
+    /** A strict public-command allowlist is checked before publishing any command. */
+    public static void relayPlayerCommand(ServerPlayer player, String command) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || !mod.relayPlayerCommands || player == null) return;
+        String visible = PublicPlayerCommandPolicy.sanitize(command);
+        if (visible.isEmpty() || mod.runtime == null || mod.serverId == null) return;
+        mod.runtime.publishEvent(new ProtocolEnvelope(
+            1, "player_command", mod.serverId, null,
+            Map.of("minecraft_uuid", player.getStringUUID(),
+                "player_name", player.getName().getString(), "message", visible)
+        ));
+    }
+
     /** Called only by the player-death Mixin while the original death message remains available. */
     public static void relayDeath(ServerPlayer player) {
         BridgeMod active = activeInstance;
@@ -154,6 +168,7 @@ public final class BridgeMod implements ModInitializer {
             requireLinking = settings.requireLinking();
             unlinkedPlayerAction = settings.unlinkedPlayerAction();
             opSyncEnabled = settings.opSyncEnabled();
+            relayPlayerCommands = settings.relayPlayerCommands();
             if (opSyncEnabled) {
                 try {
                     opSyncApplier.configure(configPath.resolveSibling("minecraft-bridge-managed-ops.properties"));
@@ -813,6 +828,7 @@ public final class BridgeMod implements ModInitializer {
         metricTickCounter = 0L;
         requireLinking = false;
         opSyncEnabled = false;
+        relayPlayerCommands = false;
         opSyncApplier.clear();
         loginGate.clearAll();
         freezeChecks.clearAll();

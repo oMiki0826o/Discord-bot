@@ -5,6 +5,7 @@
   "mixins": [
     "FrozenPacketMixin",
     "LoginGateMixin",
+    "PlayerCommandMixin",
     "GameModeCommandMixin",
     "TellRawCommandMixin",
     "PlayerAdvancementsMixin",

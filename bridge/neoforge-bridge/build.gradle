@@ -34,7 +34,7 @@ def shared = [
     'FrameCodec.java', 'ProtocolEnvelope.java', 'ProtocolException.java',
     'LogTailReader.java', 'MetricSnapshot.java', 'ServerInfoDiagnostics.java',
     'RichTextComponents.java', 'PlayerMentionRequest.java', 'OpSyncPolicy.java',
-    'OpSyncApplier.java', 'ManagedOpLedger.java', 'DmccRconConsoleSource.java', 'PublicTellrawPolicy.java'
+    'OpSyncApplier.java', 'ManagedOpLedger.java', 'PublicPlayerCommandPolicy.java', 'DmccRconConsoleSource.java', 'PublicTellrawPolicy.java'
 ]
 sourceSets.main.java {
     srcDir '../minecraft-bridge/src/main/java'
@@ -67,7 +67,7 @@ sourceSets.test.java {
         'BridgeRuntimeTest.java', 'BridgeSettingsTest.java',
         'FrameCodecTest.java', 'ProtocolEnvelopeTest.java',
         'PlayerMentionRequestTest.java',
-        'OpSyncPolicyTest.java', 'LogTailReaderTest.java',
+        'OpSyncPolicyTest.java', 'PublicPlayerCommandPolicyTest.java', 'LogTailReaderTest.java',
         'MetricSnapshotTest.java', 'ServerInfoDiagnosticsTest.java'
     ].each { name -> include "io/miki/dmcc/bridge/${name}" }
 }

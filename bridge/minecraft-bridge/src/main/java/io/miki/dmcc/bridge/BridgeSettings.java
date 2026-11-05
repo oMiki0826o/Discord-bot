@@ -21,10 +21,11 @@ public record BridgeSettings(
     int gracefulShutdownTimeoutMillis,
     boolean requireLinking,
     String unlinkedPlayerAction,
-    boolean opSyncEnabled
+    boolean opSyncEnabled,
+    boolean relayPlayerCommands
 ) {
     public BridgeSettings(String serverId, String gatewayHost, int gatewayPort, String authenticationSecret) {
-        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick", false);
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick", false, false);
     }
 
     /** Backward-compatible constructor for callers predating optional link enforcement. */
@@ -36,7 +37,7 @@ public record BridgeSettings(
         this(
             serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
-            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, false, "kick", false
+            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, false, "kick", false, false
         );
     }
 
@@ -50,7 +51,20 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
             pendingRequestTtlMillis, gracefulShutdownTimeoutMillis,
-            requireLinking, unlinkedPlayerAction, false);
+            requireLinking, unlinkedPlayerAction, false, false);
+    }
+
+    /** Preserves the previous OP-enabled constructor for existing users and tests. */
+    public BridgeSettings(
+        String serverId, String gatewayHost, int gatewayPort, String authenticationSecret,
+        int connectTimeoutMillis, int authenticationTimeoutMillis, int readTimeoutMillis,
+        long pendingRequestTtlMillis, int gracefulShutdownTimeoutMillis,
+        boolean requireLinking, String unlinkedPlayerAction, boolean opSyncEnabled
+    ) {
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret,
+            connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
+            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, requireLinking,
+            unlinkedPlayerAction, opSyncEnabled, false);
     }
 
     /** Parses a standard Java properties stream without doing filesystem I/O. */
@@ -85,7 +99,8 @@ public record BridgeSettings(
             positiveInt(properties, "graceful_shutdown_timeout_millis", 1_500),
             strictBoolean(properties, "require_linking", false),
             unlinkedAction(properties),
-            strictBoolean(properties, "op_sync_enabled", false)
+            strictBoolean(properties, "op_sync_enabled", false),
+            strictBoolean(properties, "relay_player_commands", false)
         );
     }
 

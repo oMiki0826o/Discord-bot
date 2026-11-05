@@ -16,3 +16,6 @@ graceful_shutdown_timeout_millis=1500
 # keeping chat and /dmcc link available. It releases immediately if Gateway disconnects.
 require_linking=false
 unlinked_player_action=kick
+
+# Opt-in public-only player command relay to Discord; private/auth commands remain filtered.
+relay_player_commands=false
