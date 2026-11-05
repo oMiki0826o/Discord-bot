@@ -114,7 +114,7 @@ def parse_discord_markdown(message: str) -> list[dict[str, object]]:
     return pieces
 
 
-// Discord's guild color is untrusted presentation metadata, never an authorization grant.
+# Discord's guild color is untrusted presentation metadata, never an authorization grant.
 _AUTHOR_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
