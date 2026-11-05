@@ -1,0 +1,46 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.147'
+}
+
+group = 'io.miki.dmcc'
+version = project.mod_version
+base { archivesName = 'minecraft-bridge-neoforge' }
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+neoForge {
+    version = project.neo_version
+}
+repositories { mavenCentral() }
+
+def shared = [
+    'Authentication.java', 'BridgeClient.java', 'BridgeConnection.java',
+    'BridgeMessageHandler.java', 'BridgeRuntime.java', 'BridgeSettings.java',
+    'FrameCodec.java', 'ProtocolEnvelope.java', 'ProtocolException.java',
+    'LogTailReader.java', 'MetricSnapshot.java', 'ServerInfoDiagnostics.java',
+    'RichTextComponents.java', 'PlayerMentionRequest.java', 'OpSyncPolicy.java',
+    'OpSyncApplier.java', 'DmccRconConsoleSource.java', 'PublicTellrawPolicy.java'
+]
+sourceSets.main.java {
+    srcDir '../minecraft-bridge/src/main/java'
+    include 'io/miki/dmcc/bridge/NeoBridgeMod.java'
+    shared.each { filename -> include "io/miki/dmcc/bridge/${filename}" }
+}
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+tasks.withType(Test).configureEach { useJUnitPlatform() }
+processResources {
+    inputs.property 'mod_version', project.mod_version
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand mod_version: project.mod_version
+    }
+}
