@@ -26,6 +26,19 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick");
     }
 
+    /** Backward-compatible constructor for callers predating optional link enforcement. */
+    public BridgeSettings(
+        String serverId, String gatewayHost, int gatewayPort, String authenticationSecret,
+        int connectTimeoutMillis, int authenticationTimeoutMillis, int readTimeoutMillis,
+        long pendingRequestTtlMillis, int gracefulShutdownTimeoutMillis
+    ) {
+        this(
+            serverId, gatewayHost, gatewayPort, authenticationSecret,
+            connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
+            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, false, "kick"
+        );
+    }
+
     /** Parses a standard Java properties stream without doing filesystem I/O. */
     public static BridgeSettings fromReader(Reader reader) throws IOException {
         Properties properties = new Properties();
