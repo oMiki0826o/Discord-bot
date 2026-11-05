@@ -25,6 +25,53 @@ final class BridgeSettingsTest {
     }
 
     @Test
+    void disabledLinkGateIsBackwardCompatible() throws Exception {
+        var settings = BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            """));
+        assertEquals(false, settings.requireLinking());
+        assertEquals("kick", settings.unlinkedPlayerAction());
+    }
+
+    @Test
+    void acceptsExplicitlyEnabledKickOrFreezeGate() throws Exception {
+        for (String action : new String[]{"kick", "freeze"}) {
+            var settings = BridgeSettings.fromReader(new StringReader(
+                "server_id=survival\\n" +
+                "gateway_host=127.0.0.1\\n" +
+                "gateway_port=8765\\n" +
+                "authentication_secret=shared-secret\\n" +
+                "require_linking=true\\n" +
+                "unlinked_player_action=" + action + "\\n"
+            ));
+            assertEquals(true, settings.requireLinking());
+            assertEquals(action, settings.unlinkedPlayerAction());
+        }
+    }
+
+    @Test
+    void invalidLinkGateSettingsFailBeforeServerStarts() {
+        assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            require_linking=TRUEISH
+            """)));
+        assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            require_linking=true
+            unlinked_player_action=op
+            """)));
+    }
+
+    @Test
     void rejectsUnsafeOrIncompleteConfiguration() {
         assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
             server_id=survival
