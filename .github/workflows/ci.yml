@@ -61,7 +61,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [test, bridge]
+    needs: [test, bridge, neoforge]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v7
@@ -76,7 +76,7 @@ jobs:
       - name: Download current built Fabric bridges
         uses: actions/download-artifact@v4
         with:
-          pattern: minecraft-bridge-*
+          pattern: minecraft-bridge-1.21.*
           path: bridge/builds
           merge-multiple: false
       - name: Stage and verify version-specific Fabric jars
@@ -88,6 +88,16 @@ jobs:
           cp bridge/builds/minecraft-bridge-1.21.9/java_bridge.jar bridge/versions/1.21.9/java_bridge.jar
           cp bridge/builds/minecraft-bridge-1.21.9/SHA256SUMS bridge/versions/1.21.9/SHA256SUMS
           (cd bridge/versions/1.21.9 && sha256sum --check SHA256SUMS)
+      - name: Download NeoForge 1.21.8 server bridge
+        uses: actions/download-artifact@v4
+        with:
+          name: minecraft-bridge-neoforge-1.21.8
+          path: bridge/builds/neoforge-1.21.8
+      - name: Stage and verify NeoForge server bridge
+        run: |
+          mkdir -p bridge/versions/neoforge-1.21.8
+          cp bridge/builds/neoforge-1.21.8/minecraft-bridge-neoforge-*.jar bridge/versions/neoforge-1.21.8/java_bridge.jar
+          (cd bridge/versions/neoforge-1.21.8 && sha256sum java_bridge.jar > SHA256SUMS && sha256sum --check SHA256SUMS)
       - name: Build reproducible release archive
         run: python tools/build_release.py --require-bridge
       - name: Verify release archive

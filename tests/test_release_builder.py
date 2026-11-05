@@ -76,6 +76,8 @@ def test_ci_uploads_verified_runtime_and_bridge_artifacts() -> None:
 
     assert "needs: [test, bridge]" in workflow
     assert workflow.count("uses: actions/upload-artifact@v4") == 3
+    assert workflow.count("uses: actions/download-artifact@v4") == 2
+    assert "needs: [test, bridge, neoforge]" in workflow
     assert "minecraft-bridge-neoforge-1.21.8" in workflow
     assert "dist/Discord-Bot-v${{ steps.version.outputs.value }}.zip" in workflow
     assert "bridge/java_bridge.jar" in workflow
