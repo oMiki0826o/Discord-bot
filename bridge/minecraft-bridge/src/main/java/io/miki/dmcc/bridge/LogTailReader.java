@@ -65,7 +65,19 @@ public final class LogTailReader {
             }
             buffer.flip();
             int bytesRead = buffer.remaining();
-            return new TailChunk(StandardCharsets.UTF_8.decode(buffer).toString(), fileId, start + bytesRead);
+            if (bytesRead == 0) return new TailChunk("", fileId, start);
+            int lastNewline = -1;
+            for (int index = 0; index < bytesRead; index++) {
+                if (buffer.get(index) == (byte) 10) lastNewline = index;
+            }
+            if (lastNewline < 0) {
+                // Never stream fragments of long credential-bearing lines.
+                // If a line exceeds the bound, discard the unread backlog.
+                return new TailChunk("", fileId, bytesRead >= maximumBytes ? size : start);
+            }
+            byte[] wholeLines = new byte[lastNewline + 1];
+            buffer.get(wholeLines);
+            return new TailChunk(new String(wholeLines, StandardCharsets.UTF_8), fileId, start + wholeLines.length);
         }
     }
 
