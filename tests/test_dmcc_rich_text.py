@@ -72,3 +72,16 @@ def test_unpaired_double_delimiter_remains_literal():
     original = "Hello **not closed"
     rendered = "".join(item["text"] for item in parse_discord_markdown(original))
     assert rendered == original
+
+
+def test_discord_spoiler_is_obfuscated_not_exposed_as_raw_markup():
+    segments = parse_discord_markdown("Welcome ||secret|| user")
+    assert "".join(str(s["text"]) for s in segments) == "Welcome secret user"
+    assert any(s["text"] == "secret" and s["obfuscated"] for s in segments)
+
+
+def test_code_backticks_do_not_parse_nested_bold_tokens():
+    segments = parse_discord_markdown("before `**literal**` after")
+    code = [s for s in segments if s["color"] == "gray"]
+    assert code and any("**literal**" in s["text"] for s in code)
+    assert not any(s["bold"] for s in code)
