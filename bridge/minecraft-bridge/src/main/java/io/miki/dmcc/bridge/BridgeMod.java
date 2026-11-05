@@ -448,10 +448,23 @@ public final class BridgeMod implements ModInitializer {
         Path logPath = server.getServerDirectory().resolve("logs").resolve("latest.log").normalize();
         statsWorker.execute(() -> {
             try {
-                String content = LogTailReader.read(logPath, 131_072);
-                if (content.length() > 32_768) content = content.substring(content.length() - 32_768);
-                sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
-                    Map.of("content", content)), "log response");
+                if (envelope.data().containsKey("offset")) {
+                    Object rawOffset = envelope.data().get("offset");
+                    Object rawFileId = envelope.data().get("file_id");
+                    if (!(rawOffset instanceof Number number) || !(rawFileId instanceof String fileId)
+                        || fileId.length() > 64) return;
+                    long offset = number.longValue();
+                    if (offset < -1L || number.doubleValue() != (double) offset) return;
+                    var chunk = LogTailReader.readChunk(logPath, offset, fileId, 1024);
+                    sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
+                        Map.of("content", chunk.content(), "file_id", chunk.fileId(),
+                            "next_offset", chunk.nextOffset())), "log cursor response");
+                } else {
+                    String content = LogTailReader.read(logPath, 131_072);
+                    if (content.length() > 32_768) content = content.substring(content.length() - 32_768);
+                    sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
+                        Map.of("content", content)), "log response");
+                }
             } catch (IOException exception) {
                 sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
                     Map.of("error", "latest.log is unavailable")), "log error response");
