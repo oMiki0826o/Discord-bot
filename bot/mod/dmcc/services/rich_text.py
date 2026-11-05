@@ -112,3 +112,30 @@ def parse_discord_markdown(message: str) -> list[dict[str, object]]:
         })
         return keep
     return pieces
+
+
+// Discord's guild color is untrusted presentation metadata, never an authorization grant.
+_AUTHOR_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def colorize_author_prefix(
+    segments: list[dict[str, object]], prefix: str, color: str | None,
+) -> list[dict[str, object]]:
+    """Color only the exact sender prefix, never message text or Markdown styles."""
+    if not isinstance(color, str) or not _AUTHOR_COLOR.fullmatch(color):
+        return segments
+    if not segments or not isinstance(prefix, str) or not prefix:
+        return segments
+    first = segments[0]
+    raw = first.get("text")
+    if not isinstance(raw, str) or not raw.startswith(prefix):
+        return segments
+    copied = {**first, "text": prefix, "color": color.upper()}
+    suffix = raw[len(prefix):]
+    result = [copied]
+    if suffix:
+        if len(segments) >= _MAX_SEGMENTS:
+            return segments
+        result.append({**first, "text": suffix})
+    result.extend(segments[1:])
+    return result

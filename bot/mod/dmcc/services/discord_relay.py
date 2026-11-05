@@ -17,7 +17,7 @@ from typing import Protocol, Mapping, Sequence
 
 from ..repositories.state import JsonStateRepository
 from .message_format import format_discord_content, render_extras
-from .rich_text import parse_discord_markdown
+from .rich_text import parse_discord_markdown, colorize_author_prefix
 
 
 # ── Gateway Contract ──────────────────────
@@ -84,6 +84,7 @@ class DiscordRelayService:
         embed_summaries: tuple[tuple[str, str], ...] = (),
         poll_summary: tuple[str, Sequence[str]] | None = None,
         mention_names: Mapping[str, str] | None = None,
+        author_color: str | None = None,
     ) -> bool:
         """Forward a Discord create event and retain only transient edit/delete metadata."""
 
@@ -109,7 +110,11 @@ class DiscordRelayService:
             lines.append(f"<{author_name.strip()[:64]}> {rendered}")
         if extras:
             lines.append(extras)
-        delivered = await self._forward(channel_id, "\n".join(lines))
+        delivered = await self._forward(
+            channel_id, "\n".join(lines),
+            author_prefix=f"<{author_name.strip()[:64]}> " if rendered else None,
+            author_color=author_color,
+        )
         if delivered:
             self._remember(message_id, _RelayedMessage(
                 self._repository.server_for_channel(channel_id) or "",
@@ -156,22 +161,31 @@ class DiscordRelayService:
             return False
         return await self._send_to_server(previous.server_id, f"* {previous.author_name} deleted a Discord message")
 
-    async def _forward(self, channel_id: str, message: str) -> bool:
+    async def _forward(
+        self, channel_id: str, message: str, *,
+        author_prefix: str | None = None, author_color: str | None = None,
+    ) -> bool:
         if not isinstance(message, str) or not message.strip():
             return False
         server_id = self._repository.server_for_channel(channel_id)
         if server_id is None:
             return False
-        return await self._send_to_server(server_id, message)
+        return await self._send_to_server(
+            server_id, message, author_prefix=author_prefix, author_color=author_color,
+        )
 
-    async def _send_to_server(self, server_id: str, message: str) -> bool:
+    async def _send_to_server(
+        self, server_id: str, message: str, *,
+        author_prefix: str | None = None, author_color: str | None = None,
+    ) -> bool:
         if not server_id:
             return False
         try:
             if self._rich_chat and hasattr(self._gateway, "send_minecraft_segments"):
-                await self._gateway.send_minecraft_segments(
-                    server_id, parse_discord_markdown(message)
-                )
+                segments = parse_discord_markdown(message)
+                if author_prefix and author_color:
+                    segments = colorize_author_prefix(segments, author_prefix, author_color)
+                await self._gateway.send_minecraft_segments(server_id, segments)
             else:
                 await self._gateway.send_minecraft_message(server_id, message)
         except LookupError:

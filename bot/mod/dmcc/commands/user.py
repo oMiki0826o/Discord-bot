@@ -352,6 +352,7 @@ class DmccUserCog(commands.Cog):
             ),
             poll_summary=poll_summary,
             mention_names=mentioned_names,
+            author_color=self._discord_role_color(author),
         )
         if forwarded and self._mentions is not None:
             await self._mentions.notify(
@@ -427,6 +428,13 @@ class DmccUserCog(commands.Cog):
             discord_user_name=getattr(user, "name", None),
             role_names=(str(getattr(role, "name", "")) for role in roles),
         )
+
+    @staticmethod
+    def _discord_role_color(author: Any) -> str | None:
+        raw = getattr(getattr(author, "color", None), "value", None)
+        if type(raw) is int and 1 <= raw <= 0xFFFFFF:
+            return f"#{raw:06X}"
+        return None
 
     @staticmethod
     def _reply_preview(message: Any) -> str | None:

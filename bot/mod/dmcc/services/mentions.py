@@ -24,21 +24,23 @@ class MentionConfig:
     style: str = "actionbar"
     max_targets: int = 8
     cooldown_seconds: int = 15
+    sound: bool = True
 
     @classmethod
     def from_mapping(cls, raw: object) -> "MentionConfig":
         if not isinstance(raw, Mapping) or set(raw) - {
-            "enabled", "style", "max_targets", "cooldown_seconds"
+            "enabled", "style", "max_targets", "cooldown_seconds", "sound"
         }:
             raise ValueError("mentions has invalid fields")
         enabled, style = raw.get("enabled", False), raw.get("style", "actionbar")
         max_targets = raw.get("max_targets", 8)
         cooldown = raw.get("cooldown_seconds", 15)
-        if (type(enabled) is not bool or style not in {"chat", "actionbar"}
+        sound = raw.get("sound", True)
+        if (type(enabled) is not bool or style not in {"chat", "actionbar", "title"} or type(sound) is not bool
                 or type(max_targets) is not int or not 1 <= max_targets <= 16
                 or type(cooldown) is not int or not 1 <= cooldown <= 3600):
             raise ValueError("invalid mentions policy")
-        return cls(enabled, style, max_targets, cooldown)
+        return cls(enabled, style, max_targets, cooldown, sound)
 
 
 class MinecraftMentionService:
@@ -95,6 +97,7 @@ class MinecraftMentionService:
         data = {
             "player_uuids": uuids,
             "style": self.config.style,
+            "sound": self.config.sound,
             "message": f"{author} 在 Discord 提及了你：" + message,
         }
         try:

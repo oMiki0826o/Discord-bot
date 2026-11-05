@@ -18,6 +18,10 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.AdvancementProgress;
 import net.minecraft.advancements.DisplayInfo;
@@ -376,8 +380,17 @@ public final class BridgeMod implements ModInitializer {
                 for (UUID uuid : request.get().players()) {
                     ServerPlayer target = server.getPlayerList().getPlayer(uuid);
                     if (target != null) {
-                        target.displayClientMessage(Component.literal(request.get().message()),
-                            request.get().actionBar());
+                        PlayerMentionRequest mention = request.get();
+                        Component notice = Component.literal(mention.message());
+                        if (mention.style().equals("title")) {
+                            target.connection.send(new ClientboundSetTitlesAnimationPacket(10, 70, 20));
+                            target.connection.send(new ClientboundSetTitleTextPacket(notice));
+                        } else {
+                            target.displayClientMessage(notice, mention.actionBar());
+                        }
+                        if (mention.sound()) {
+                            target.playNotifySound(SoundEvents.NOTE_BLOCK_PLING.value(), SoundSource.MASTER, 1.0F, 2.0F);
+                        }
                     }
                 }
             });

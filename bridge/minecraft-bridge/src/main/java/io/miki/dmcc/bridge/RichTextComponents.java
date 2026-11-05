@@ -3,6 +3,7 @@ package io.miki.dmcc.bridge;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.TextColor;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -38,7 +39,8 @@ final class RichTextComponents {
                 if (item != null && !(item instanceof Boolean)) return Optional.empty();
             }
             Object colorRaw = entry.containsKey("color") ? entry.get("color") : "white";
-            if (!(colorRaw instanceof String color) || !(color.equals("white") || color.equals("gray"))) {
+            if (!(colorRaw instanceof String color)
+                || !(color.equals("white") || color.equals("gray") || color.matches("#[0-9a-fA-F]{6}"))) {
                 return Optional.empty();
             }
             MutableComponent fragment = Component.literal(text);
@@ -48,7 +50,9 @@ final class RichTextComponents {
                 .withUnderlined(Boolean.TRUE.equals(entry.get("underlined")))
                 .withStrikethrough(Boolean.TRUE.equals(entry.get("strikethrough")))
                 .withObfuscated(Boolean.TRUE.equals(entry.get("obfuscated")))
-                .withColor(color.equals("gray") ? ChatFormatting.GRAY : ChatFormatting.WHITE)
+                .withColor(color.startsWith("#")
+                    ? TextColor.fromRgb(Integer.parseInt(color.substring(1), 16))
+                    : TextColor.fromLegacyFormat(color.equals("gray") ? ChatFormatting.GRAY : ChatFormatting.WHITE))
             );
             output.append(fragment);
         }
