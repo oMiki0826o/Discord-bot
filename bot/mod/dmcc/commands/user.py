@@ -20,7 +20,7 @@ from ..services.discord_relay import DiscordRelayService
 from ..services.info import InfoService
 from ..services.linking import LinkingService
 from ..services.nickname_sync import NicknameSyncService
-from ..services.mentions import MinecraftMentionService
+from ..services.mentions import MinecraftMentionService, collect_role_mention_users
 from ..services.release_updates import ReleaseUpdateService
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
@@ -355,10 +355,19 @@ class DmccUserCog(commands.Cog):
             author_color=self._discord_role_color(author),
         )
         if forwarded and self._mentions is not None:
+            mentioned = tuple(
+                str(user.id) for user in tuple(getattr(message, "mentions", ()) or ())
+            )
+            if self._mentions.config.role_mentions:
+                from_roles = collect_role_mention_users(
+                    getattr(message, "guild", None),
+                    tuple(getattr(message, "role_mentions", ()) or ()),
+                    max_targets=self._mentions.config.max_targets,
+                )
+                mentioned = tuple(dict.fromkeys((*mentioned, *from_roles)))
             await self._mentions.notify(
                 str(channel_id), str(getattr(author, "display_name", author)),
-                str(getattr(message, "content", "")),
-                tuple(str(user.id) for user in tuple(getattr(message, "mentions", ()) or ())),
+                str(getattr(message, "content", "")), mentioned,
             )
 
     @commands.Cog.listener()

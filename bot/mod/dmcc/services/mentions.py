@@ -25,22 +25,24 @@ class MentionConfig:
     max_targets: int = 8
     cooldown_seconds: int = 15
     sound: bool = True
+    role_mentions: bool = False
 
     @classmethod
     def from_mapping(cls, raw: object) -> "MentionConfig":
         if not isinstance(raw, Mapping) or set(raw) - {
-            "enabled", "style", "max_targets", "cooldown_seconds", "sound"
+            "enabled", "style", "max_targets", "cooldown_seconds", "sound", "role_mentions"
         }:
             raise ValueError("mentions has invalid fields")
         enabled, style = raw.get("enabled", False), raw.get("style", "actionbar")
         max_targets = raw.get("max_targets", 8)
         cooldown = raw.get("cooldown_seconds", 15)
         sound = raw.get("sound", True)
-        if (type(enabled) is not bool or style not in {"chat", "actionbar", "title"} or type(sound) is not bool
+        role_mentions = raw.get("role_mentions", False)
+        if (type(enabled) is not bool or style not in {"chat", "actionbar", "title"} or type(sound) is not bool or type(role_mentions) is not bool
                 or type(max_targets) is not int or not 1 <= max_targets <= 16
                 or type(cooldown) is not int or not 1 <= cooldown <= 3600):
             raise ValueError("invalid mentions policy")
-        return cls(enabled, style, max_targets, cooldown, sound)
+        return cls(enabled, style, max_targets, cooldown, sound, role_mentions)
 
 
 class MinecraftMentionService:
@@ -110,3 +112,41 @@ class MinecraftMentionService:
         for key in allowed:
             self._last[key] = now
         return True
+
+
+def collect_role_mention_users(
+    guild: object, roles: Sequence[object], *, max_targets: int,
+) -> tuple[str, ...]:
+    """Resolve explicit role mentions without partial cached-member snapshots.
+
+    All-or-nothing protects against incomplete membership data and accidental
+    large notifications. The Discord API is never called from this function.
+    """
+    if type(max_targets) is not int or not 1 <= max_targets <= 16:
+        return ()
+    if not roles or len(roles) > 16 or not bool(getattr(guild, "chunked", False)):
+        return ()
+    members = getattr(guild, "members", None)
+    if not isinstance(members, (list, tuple)) or len(members) > 200_000:
+        return ()
+    targets: set[str] = set()
+    for role in roles:
+        identity = str(getattr(role, "id", ""))
+        if not _SNOWFLAKE.fullmatch(identity):
+            return ()
+        targets.add(identity)
+    found: set[str] = set()
+    for member in members:
+        if bool(getattr(member, "bot", False)):
+            continue
+        user_id = str(getattr(member, "id", ""))
+        if not _SNOWFLAKE.fullmatch(user_id):
+            return ()
+        user_roles = getattr(member, "roles", None)
+        if not isinstance(user_roles, (list, tuple)):
+            return ()
+        if any(str(getattr(role, "id", "")) in targets for role in user_roles):
+            found.add(user_id)
+            if len(found) > max_targets:
+                return ()
+    return tuple(sorted(found))
