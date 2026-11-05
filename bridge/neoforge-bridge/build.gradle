@@ -44,3 +44,15 @@ processResources {
         expand mod_version: project.mod_version
     }
 }
+
+sourceSets.test.java {
+    srcDir '../minecraft-bridge/src/test/java'
+    [
+        'AuthenticationTest.java', 'BridgeClientTest.java',
+        'BridgeRuntimeTest.java', 'BridgeSettingsTest.java',
+        'FrameCodecTest.java', 'ProtocolEnvelopeTest.java',
+        'RichTextComponentsTest.java', 'PlayerMentionRequestTest.java',
+        'OpSyncPolicyTest.java', 'LogTailReaderTest.java',
+        'MetricSnapshotTest.java', 'ServerInfoDiagnosticsTest.java'
+    ].each { name -> include "io/miki/dmcc/bridge/${name}" }
+}
