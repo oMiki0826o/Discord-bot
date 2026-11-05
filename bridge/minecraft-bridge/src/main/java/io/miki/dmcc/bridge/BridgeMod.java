@@ -67,6 +67,14 @@ public final class BridgeMod implements ModInitializer {
     );
     private volatile boolean requireLinking;
     private volatile String unlinkedPlayerAction = "kick";
+    private final FreezeRegistry frozenPlayers = new FreezeRegistry(
+        System::nanoTime, TimeUnit.MINUTES.toNanos(5)
+    );
+    private final LinkGateRegistry freezeChecks = new LinkGateRegistry(
+        System::nanoTime, TimeUnit.SECONDS.toNanos(5)
+    );
+    private final Map<UUID, FreezeSession> freezeSessions = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> freezeCorrectedAt = new ConcurrentHashMap<>();
     private final Map<String, PendingPlayer> pendingUnlinkPlayers = new ConcurrentHashMap<>();
     private volatile long pendingRequestTtlMillis = 120_000;
     private volatile int gracefulShutdownTimeoutMillis = 1_500;
@@ -81,7 +89,10 @@ public final class BridgeMod implements ModInitializer {
         activeInstance = this;
         ServerLifecycleEvents.SERVER_STARTED.register(this::startRuntime);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stopRuntime());
-        ServerTickEvents.END_SERVER_TICK.register(this::publishMetricsOnTick);
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            checkFrozenPlayers(server);
+            publishMetricsOnTick(server);
+        });
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             relayPlayerChat(sender, message.signedContent())
         );
@@ -90,7 +101,10 @@ public final class BridgeMod implements ModInitializer {
         ServerMessageEvents.COMMAND_MESSAGE.register((message, source, params) ->
             relayPublicCommand(source.getTextName(), message.signedContent())
         );
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> relayPlayerEvent("player_join", handler.getPlayer()));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            freezeOnJoin(handler.getPlayer());
+            relayPlayerEvent("player_join", handler.getPlayer());
+        });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> handlePlayerDisconnect(handler.getPlayer()));
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
             literal("dmcc")
@@ -213,9 +227,98 @@ public final class BridgeMod implements ModInitializer {
             Object code = envelope.data().get("code");
             loginGate.respond(parsed, envelope.requestId(), result,
                 code instanceof String text ? text : null);
+            freezeChecks.respond(parsed, envelope.requestId(), result,
+                code instanceof String text ? text : null);
         } catch (IllegalArgumentException ignored) {
             // Invalid or stale responses cannot prevent a vanilla login.
         }
+    }
+
+    /** Can be used by mixins on the server thread to gate frozen movement and actions. */
+    public static boolean isFrozenPlayer(ServerPlayer player) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || player == null) return false;
+        BridgeRuntime active = mod.runtime;
+        return mod.frozenPlayers.isFrozen(
+            player.getUUID(), active != null && active.isAuthenticated()
+        );
+    }
+
+    public static void correctFrozenPlayer(ServerPlayer player) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || !isFrozenPlayer(player)) return;
+        UUID uuid = player.getUUID();
+        long now = System.nanoTime();
+        Long last = mod.freezeCorrectedAt.get(uuid);
+        if (last != null && now - last < TimeUnit.SECONDS.toNanos(1)) return;
+        FreezeRegistry.Anchor anchor = mod.frozenPlayers.anchor(uuid);
+        if (anchor == null) return;
+        mod.freezeCorrectedAt.put(uuid, now);
+        player.connection.teleport(anchor.x(), anchor.y(), anchor.z(), anchor.yaw(), anchor.pitch());
+    }
+
+    private void freezeOnJoin(ServerPlayer player) {
+        BridgeRuntime active = runtime;
+        if (!requireLinking || !"freeze".equals(unlinkedPlayerAction)
+            || active == null || !active.isAuthenticated()) return;
+        UUID uuid = player.getUUID();
+        frozenPlayers.freeze(uuid, new FreezeRegistry.Anchor(
+            player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot()
+        ));
+        freezeSessions.put(uuid, new FreezeSession());
+        player.sendSystemMessage(Component.literal(
+            "DMCC: Checking your Discord account link. You can still use chat and commands."
+        ));
+    }
+
+    private void checkFrozenPlayers(MinecraftServer server) {
+        if (freezeSessions.isEmpty()) return;
+        BridgeRuntime active = runtime;
+        boolean available = active != null && active.isAuthenticated();
+        long now = System.nanoTime();
+        for (var item : new ArrayList<>(freezeSessions.entrySet())) {
+            UUID uuid = item.getKey();
+            FreezeSession session = item.getValue();
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player == null || !frozenPlayers.isFrozen(uuid, available)) {
+                releaseFreeze(uuid);
+                continue;
+            }
+            if (now < session.nextRequestAtNanos) continue;
+            LinkGateRegistry.Decision decision = freezeChecks.poll(
+                uuid, player, available,
+                requestId -> sendLinkCheck(uuid, player.getName().getString(), requestId)
+            );
+            if (decision.verdict() == LinkGateRegistry.Verdict.WAIT) continue;
+            if (decision.verdict() == LinkGateRegistry.Verdict.ALLOW) {
+                releaseFreeze(uuid);
+                player.sendSystemMessage(Component.literal(
+                    "DMCC: Account linking verified or service unavailable. You may play."
+                ));
+                continue;
+            }
+            String code = decision.code();
+            if (!code.equals(session.lastCode)) {
+                session.lastCode = code;
+                player.sendSystemMessage(Component.literal(
+                    "DMCC: Link your Discord account using /dmcc link " + code + " in Discord."
+                ));
+            }
+            freezeChecks.clear(uuid);
+            session.nextRequestAtNanos = now + TimeUnit.SECONDS.toNanos(15);
+        }
+    }
+
+    private void releaseFreeze(UUID uuid) {
+        frozenPlayers.release(uuid);
+        freezeChecks.clear(uuid);
+        freezeSessions.remove(uuid);
+        freezeCorrectedAt.remove(uuid);
+    }
+
+    private static final class FreezeSession {
+        long nextRequestAtNanos;
+        String lastCode = "";
     }
 
     private void handleGatewayPacket(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
@@ -655,6 +758,10 @@ public final class BridgeMod implements ModInitializer {
         metricTickCounter = 0L;
         requireLinking = false;
         loginGate.clearAll();
+        freezeChecks.clearAll();
+        frozenPlayers.clearAll();
+        freezeSessions.clear();
+        freezeCorrectedAt.clear();
         pendingLinkPlayers.clear();
         pendingUnlinkPlayers.clear();
         statsWorker.shutdownNow();
@@ -689,6 +796,7 @@ public final class BridgeMod implements ModInitializer {
 
     private void handlePlayerDisconnect(ServerPlayer player) {
         UUID playerId = player.getUUID();
+        releaseFreeze(playerId);
         pendingLinkPlayers.values().removeIf(item -> item.playerId().equals(playerId));
         pendingUnlinkPlayers.values().removeIf(item -> item.playerId().equals(playerId));
         relayPlayerEvent("player_quit", player);
