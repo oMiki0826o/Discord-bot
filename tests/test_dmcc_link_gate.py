@@ -60,3 +60,20 @@ def test_link_status_check_ignores_invalid_identifiers(tmp_path: Path) -> None:
                 "request_id": "r", "minecraft_uuid": raw, "minecraft_name": "Steve",
             }))
     asyncio.run(scenario())
+
+
+def test_unlinked_player_status_recheck_keeps_original_discord_code(tmp_path: Path) -> None:
+    from datetime import datetime, UTC, timedelta
+
+    now = [datetime(2026, 11, 5, tzinfo=UTC)]
+    codes = iter(("ABCDEF", "GHJKLM"))
+    store = JsonLinkRepository(tmp_path / "links.json")
+    linking = LinkingService(
+        link_store=store, code_factory=lambda: next(codes), now_provider=lambda: now[0]
+    )
+    uuid = "123e4567-e89b-12d3-a456-426614174000"
+    assert linking.begin_minecraft_link(uuid, "Steve") == "ABCDEF"
+    now[0] += timedelta(seconds=30)
+    assert linking.begin_minecraft_link(uuid, "Steve") == "ABCDEF"
+    now[0] += timedelta(minutes=6)
+    assert linking.begin_minecraft_link(uuid, "Steve") == "GHJKLM"
