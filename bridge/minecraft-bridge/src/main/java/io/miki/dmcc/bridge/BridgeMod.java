@@ -5,6 +5,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.authlib.GameProfile;
+import net.minecraft.network.Connection;
+import net.minecraft.server.network.ServerLoginPacketListenerImpl;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -59,6 +62,11 @@ public final class BridgeMod implements ModInitializer {
     private long metricTickCounter;
     private final Map<String, PendingPlayer> pendingLinkPlayers = new ConcurrentHashMap<>();
     private final CommandEchoSuppressor commandEchoes = new CommandEchoSuppressor();
+    private final LinkGateRegistry loginGate = new LinkGateRegistry(
+        System::nanoTime, TimeUnit.SECONDS.toNanos(5)
+    );
+    private volatile boolean requireLinking;
+    private volatile String unlinkedPlayerAction = "kick";
     private final Map<String, PendingPlayer> pendingUnlinkPlayers = new ConcurrentHashMap<>();
     private volatile long pendingRequestTtlMillis = 120_000;
     private volatile int gracefulShutdownTimeoutMillis = 1_500;
@@ -123,6 +131,8 @@ public final class BridgeMod implements ModInitializer {
             serverId = settings.serverId();
             pendingRequestTtlMillis = settings.pendingRequestTtlMillis();
             gracefulShutdownTimeoutMillis = settings.gracefulShutdownTimeoutMillis();
+            requireLinking = settings.requireLinking();
+            unlinkedPlayerAction = settings.unlinkedPlayerAction();
             runtime = new BridgeRuntime(
                 () -> new BridgeClient(settings, (client, envelope) -> handleGatewayPacket(server, client, envelope)),
                 1_000,
@@ -137,6 +147,77 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
+    /** Called from the login-thread mixin; never waits for Discord or another thread. */
+    public static boolean shouldHoldLogin(
+        ServerLoginPacketListenerImpl listener, Connection connection, GameProfile profile
+    ) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || !mod.requireLinking || !"kick".equals(mod.unlinkedPlayerAction)) return false;
+        if (!connection.isConnected()) return false;
+        UUID uuid = profileIdentifier(profile);
+        String name = profileName(profile);
+        if (uuid == null || name == null || !name.matches("[A-Za-z0-9_]{3,16}")) return false;
+        BridgeRuntime active = mod.runtime;
+        LinkGateRegistry.Decision decision = mod.loginGate.poll(
+            uuid, connection, active != null && active.isAuthenticated(),
+            requestId -> mod.sendLinkCheck(uuid, name, requestId)
+        );
+        if (decision.verdict() == LinkGateRegistry.Verdict.WAIT) return true;
+        if (decision.verdict() == LinkGateRegistry.Verdict.DENY) {
+            listener.disconnect(Component.literal(
+                "Discord account linking required. In Discord use /dmcc link " + decision.code()
+            ));
+            return true;
+        }
+        return false;
+    }
+
+    private static UUID profileIdentifier(GameProfile profile) {
+        Object value = profileAccessor(profile, "id", "getId");
+        return value instanceof UUID uuid ? uuid : null;
+    }
+
+    private static String profileName(GameProfile profile) {
+        Object value = profileAccessor(profile, "name", "getName");
+        return value instanceof String name ? name : null;
+    }
+
+    private static Object profileAccessor(GameProfile profile, String first, String second) {
+        for (String accessor : new String[]{first, second}) {
+            try {
+                return profile.getClass().getMethod(accessor).invoke(profile);
+            } catch (ReflectiveOperationException | SecurityException ignored) {
+                // Authlib has used both property and JavaBean names across MC versions.
+            }
+        }
+        return null;
+    }
+
+    private boolean sendLinkCheck(UUID uuid, String name, String requestId) {
+        BridgeRuntime active = runtime;
+        if (active == null || !active.isAuthenticated() || serverId == null) return false;
+        var sent = active.sendRequired(new ProtocolEnvelope(
+            1, "link_status_request", serverId, requestId,
+            Map.of("minecraft_uuid", uuid.toString(), "minecraft_name", name)
+        ));
+        return !sent.isCompletedExceptionally();
+    }
+
+    private void handleLinkStatusResponse(ProtocolEnvelope envelope) {
+        Object uuid = envelope.data().get("minecraft_uuid");
+        Object linked = envelope.data().get("linked");
+        if (!(uuid instanceof String identifier) || !(linked instanceof Boolean result)
+            || envelope.requestId() == null) return;
+        try {
+            UUID parsed = UUID.fromString(identifier);
+            Object code = envelope.data().get("code");
+            loginGate.respond(parsed, envelope.requestId(), result,
+                code instanceof String text ? text : null);
+        } catch (IllegalArgumentException ignored) {
+            // Invalid or stale responses cannot prevent a vanilla login.
+        }
+    }
+
     private void handleGatewayPacket(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
         if (envelope.type().equals("command_request")) {
             handleCommandRequest(server, client, envelope);
@@ -148,6 +229,10 @@ public final class BridgeMod implements ModInitializer {
         }
         if (envelope.type().equals("unlink_response")) {
             handleUnlinkResponse(server, envelope);
+            return;
+        }
+        if (envelope.type().equals("link_status_response")) {
+            handleLinkStatusResponse(envelope);
             return;
         }
         if (envelope.type().equals("server_info_request")) {
@@ -568,6 +653,8 @@ public final class BridgeMod implements ModInitializer {
             runtime = null;
         }
         metricTickCounter = 0L;
+        requireLinking = false;
+        loginGate.clearAll();
         pendingLinkPlayers.clear();
         pendingUnlinkPlayers.clear();
         statsWorker.shutdownNow();
