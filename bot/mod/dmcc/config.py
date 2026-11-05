@@ -22,6 +22,7 @@ from .services.console_stream import ConsoleStreamConfig
 from .services.nickname_sync import NicknameSyncConfig
 from .services.release_updates import ReleaseCheckConfig
 from .services.mentions import MentionConfig
+from .services.op_sync import OpSyncConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -46,6 +47,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "release_check": {"enabled": False},
     "mentions": {"enabled": False},
     "rich_chat": False,
+    "op_sync": {"enabled": False},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -73,6 +75,7 @@ def build_settings_schema(rule_type):
         "release_check": rule_type(dict),
         "mentions": rule_type(dict),
         "rich_chat": rule_type(bool),
+        "op_sync": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -118,6 +121,7 @@ class DmccSettings:
     release_check: ReleaseCheckConfig = field(default_factory=ReleaseCheckConfig)
     mentions: MentionConfig = field(default_factory=MentionConfig)
     rich_chat: bool = False
+    op_sync: OpSyncConfig = field(default_factory=OpSyncConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -204,6 +208,10 @@ class DmccSettings:
         rich_chat = raw.get("rich_chat", False)
         if type(rich_chat) is not bool:
             raise SettingsError("rich_chat must be a boolean")
+        try:
+            op_sync = OpSyncConfig.from_mapping(raw.get("op_sync", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -227,6 +235,7 @@ class DmccSettings:
             release_check=release_check,
             mentions=mentions,
             rich_chat=rich_chat,
+            op_sync=op_sync,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 

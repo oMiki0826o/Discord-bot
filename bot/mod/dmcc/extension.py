@@ -45,6 +45,7 @@ from .services.op_levels import OpLevelResolver
 from .services.nickname_sync import NicknameSyncService
 from .services.release_updates import ReleaseUpdateService
 from .services.mentions import MinecraftMentionService
+from .services.op_sync import OpSyncService
 
 
 MODULE_VERSION = "0.3.0"
@@ -63,6 +64,7 @@ class _Runtime:
     console: ConsoleStreamService | None = None
     nicknames: NicknameSyncService | None = None
     release_updates: ReleaseUpdateService | None = None
+    op_sync: OpSyncService | None = None
 
 
 _loaded_modules: weakref.WeakKeyDictionary[object, _Runtime] = weakref.WeakKeyDictionary()
@@ -116,9 +118,17 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     console: ConsoleStreamService | None = None
     nicknames: NicknameSyncService | None = None
     release_updates: ReleaseUpdateService | None = None
+    op_sync: OpSyncService | None = None
     try:
         await gateway.start()
         linking = LinkingService(link_store=links, max_accounts=settings.max_linked_accounts)
+        if settings.op_sync.enabled:
+            op_sync = OpSyncService(
+                settings.op_sync, bot, links,
+                OpLevelResolver.from_mapping(raw_settings.get("permissions", {}), links),
+                gateway.manager, gateway,
+            )
+            op_sync.start()
         gateway.relay.subscribe(LinkRequestHandler(linking, gateway).handle)
         if settings.nickname_sync.enabled:
             nicknames = NicknameSyncService(bot, links, settings.nickname_sync)
@@ -179,6 +189,8 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 await bot.add_cog(cog)
                 added_cogs.append(cog.qualified_name)
     except BaseException:
+        if op_sync is not None:
+            await op_sync.close()
         if release_updates is not None:
             await release_updates.close()
         if nicknames is not None:
@@ -196,7 +208,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
         for client in panel_clients:
             await client.close()
         raise
-    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue, monitor, updates, console, nicknames, release_updates)
+    _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue, monitor, updates, console, nicknames, release_updates, op_sync)
     setattr(bot, "dmcc_gateway", gateway)
 
 
@@ -209,6 +221,8 @@ async def teardown(bot) -> None:
     try:
         await _remove_cogs(bot, tuple(reversed(runtime.cog_names)))
     finally:
+        if runtime.op_sync is not None:
+            await runtime.op_sync.close()
         if runtime.release_updates is not None:
             await runtime.release_updates.close()
         if runtime.nicknames is not None:
