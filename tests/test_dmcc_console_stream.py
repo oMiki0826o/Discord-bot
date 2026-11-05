@@ -130,3 +130,107 @@ def test_console_stream_rotation_and_disconnect_do_not_replay_history() -> None:
         await stream.close()
 
     asyncio.run(run())
+
+
+def test_cursor_mode_survives_service_restart_without_replaying_old_lines(tmp_path) -> None:
+    class Bridge:
+        def __init__(self):
+            self.text = "older history\n"
+            self.file_id = "inode-a"
+            self.calls = []
+
+        async def log_chunk(self, server_id, offset, file_id):
+            self.calls.append((offset, file_id))
+            if offset == -1:
+                return {"content": "", "file_id": self.file_id, "next_offset": len(self.text)}
+            if file_id != self.file_id:
+                return {"content": self.text, "file_id": self.file_id, "next_offset": len(self.text)}
+            return {
+                "content": self.text[offset:],
+                "file_id": self.file_id,
+                "next_offset": len(self.text),
+            }
+
+    class Sender:
+        def __init__(self):
+            self.messages = []
+        async def send_discord_message(self, channel, content):
+            self.messages.append((channel, content))
+
+    class Manager:
+        connected = True
+        def get(self, server):
+            return object() if self.connected else None
+
+    async def scenario() -> None:
+        bridge, sender, manager = Bridge(), Sender(), Manager()
+        cursor_file = tmp_path / "cursors.json"
+        first = ConsoleStreamService(
+            _settings(), bridge, manager, sender, cursor_path=cursor_file
+        )
+        await first.run_once()
+        assert not sender.messages
+        bridge.text += "new event one\n"
+        await first.run_once()
+        assert len(sender.messages) == 1
+        assert "new event one" in sender.messages[-1][1]
+        await first.close()
+
+        manager.connected = False
+        bridge.text += "offline but recoverable\n"
+        restarted = ConsoleStreamService(
+            _settings(), bridge, manager, sender, cursor_path=cursor_file
+        )
+        await restarted.run_once()
+        manager.connected = True
+        await restarted.run_once()
+        assert len(sender.messages) == 2
+        assert "offline but recoverable" in sender.messages[-1][1]
+        assert "older history" not in sender.messages[-1][1]
+        await restarted.run_once()
+        assert len(sender.messages) == 2
+        await restarted.close()
+
+    asyncio.run(scenario())
+
+
+def test_cursor_mode_retries_failed_discord_delivery(tmp_path) -> None:
+    class Bridge:
+        text = "history\n"
+        async def log_chunk(self, server_id, offset, file_id):
+            if offset == -1:
+                return {"content": "", "file_id": "inode-z", "next_offset": len(self.text)}
+            return {
+                "content": self.text[offset:], "file_id": "inode-z",
+                "next_offset": len(self.text),
+            }
+
+    class Sender:
+        failures = 1
+        messages = []
+        async def send_discord_message(self, channel, content):
+            if self.failures:
+                self.failures -= 1
+                raise ConnectionError("not delivered")
+            self.messages.append(content)
+
+    class Manager:
+        def get(self, server_id):
+            return object()
+
+    async def scenario() -> None:
+        bridge, sender = Bridge(), Sender()
+        service = ConsoleStreamService(
+            _settings(), bridge, Manager(), sender,
+            cursor_path=tmp_path / "cursors.json",
+        )
+        await service.run_once()
+        bridge.text += "must retry\n"
+        await service.run_once()
+        assert sender.messages == []
+        await service.run_once()
+        assert len(sender.messages) == 1
+        assert "must retry" in sender.messages[0]
+        await service.close()
+
+    asyncio.run(scenario())
