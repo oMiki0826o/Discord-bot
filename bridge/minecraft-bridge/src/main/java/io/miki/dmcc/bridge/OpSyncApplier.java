@@ -28,12 +28,20 @@ final class OpSyncApplier {
         managed = ManagedOpLedger.load(ledgerFile);
     }
 
+    record ApplyReport(int updated, int failed) { }
+
     int apply(MinecraftServer server, OpSyncPolicy policy) {
+        return applyWithReport(server, policy).updated();
+    }
+
+    ApplyReport applyWithReport(MinecraftServer server, OpSyncPolicy policy) {
         int applied = 0;
+        int failed = 0;
         for (OpSyncPolicy.Entry entry : policy.entries()) {
             try {
                 if (applyOne(server, entry, policy.allowRemovals())) applied++;
             } catch (ReflectiveOperationException | IOException | SecurityException | IllegalArgumentException error) {
+                failed++;
                 LOGGER.warn(
                     "DMCC operator sync skipped UUID={} ({})",
                     entry.playerId(), error.getClass().getSimpleName()
@@ -51,12 +59,13 @@ final class OpSyncApplier {
                         applied++;
                     }
                 } catch (ReflectiveOperationException | IOException | SecurityException | IllegalArgumentException error) {
+                    failed++;
                     LOGGER.warn("DMCC skipped stale operator UUID={} ({})",
                         owner.getKey(), error.getClass().getSimpleName());
                 }
             }
         }
-        return applied;
+        return new ApplyReport(applied, failed);
     }
 
     private boolean applyOne(MinecraftServer server, OpSyncPolicy.Entry entry, boolean removals)

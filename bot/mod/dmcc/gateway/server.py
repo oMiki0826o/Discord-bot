@@ -210,6 +210,7 @@ class Gateway:
             "server_info_response",
             "log_response",
             "stats_response",
+            "op_sync_response",
         }:
             if not self.requests.resolve(envelope):
                 await connection.close()

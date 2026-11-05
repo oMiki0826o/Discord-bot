@@ -129,13 +129,21 @@ class OpSyncService:
         delivered = False
         for server_id, entries in entries_by_server.items():
             try:
-                await self._gateway.send_packet(
-                    server_id, "op_sync_apply", None, {
-                        "entries": entries,
-                        "allow_removals": self.config.allow_removals,
-                        "full_snapshot": self.config.allow_removals,
-                    },
-                )
+                payload = {
+                    "entries": entries,
+                    "allow_removals": self.config.allow_removals,
+                    "full_snapshot": self.config.allow_removals,
+                }
+                request_port = getattr(getattr(self._gateway, "requests", None), "request", None)
+                if callable(request_port):
+                    response = await request_port(server_id, "op_sync_apply", payload)
+                    if not isinstance(response, Mapping) or response.get("ok") is not True:
+                        LOGGER.warning("DMCC OP sync rejected by server=%s", server_id)
+                        continue
+                else:
+                    # Older test shims lack an acknowledgement interface.
+                    # Production Gateway always uses RequestService.
+                    await self._gateway.send_packet(server_id, "op_sync_apply", None, payload)
                 delivered = True
             except Exception:
                 LOGGER.warning("DMCC OP synchronization unavailable for server=%s", server_id)

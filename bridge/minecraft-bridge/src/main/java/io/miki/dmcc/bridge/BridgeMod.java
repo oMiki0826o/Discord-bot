@@ -358,10 +358,17 @@ public final class BridgeMod implements ModInitializer {
             var validated = OpSyncPolicy.parse(envelope.data());
             if (validated.isEmpty()) return;
             server.execute(() -> {
-                int updated = opSyncApplier.apply(server, validated.get());
-                if (updated > 0) LOGGER.info(
-                    "DMCC synchronized {} managed linked-player operator records", updated
+                OpSyncApplier.ApplyReport result = opSyncApplier.applyWithReport(server, validated.get());
+                if (result.updated() > 0) LOGGER.info(
+                    "DMCC synchronized {} managed linked-player operator records", result.updated()
                 );
+                if (envelope.requestId() != null) {
+                    sendRequired(new ProtocolEnvelope(
+                        1, "op_sync_response", envelope.serverId(), envelope.requestId(),
+                        Map.of("ok", result.failed() == 0,
+                            "updated", result.updated(), "failed", result.failed())
+                    ), "operator sync confirmation");
+                }
             });
             return;
         }
