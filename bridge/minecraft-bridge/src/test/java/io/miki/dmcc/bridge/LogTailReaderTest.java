@@ -64,6 +64,20 @@ final class LogTailReaderTest {
     }
 
     @Test
+    void oversizedLogLineDoesNotStreamPartialSensitiveValues() throws Exception {
+        Path log = directory.resolve("latest.log");
+        Files.writeString(log, "token=" + "x".repeat(80), StandardCharsets.UTF_8);
+        var first = LogTailReader.readChunk(log, 0L, "", 32);
+        assertEquals("", first.content());
+        assertEquals(Files.size(log), first.nextOffset());
+        Files.writeString(log, "\npublic event\n", StandardCharsets.UTF_8,
+            java.nio.file.StandardOpenOption.APPEND);
+        var next = LogTailReader.readChunk(log, first.nextOffset(), first.fileId(), 32);
+        assertTrue(next.content().contains("public event"));
+        assertTrue(!next.content().contains("token="));
+    }
+
+    @Test
     void missingFileReturnsEmptyTail() throws Exception {
         assertEquals("", LogTailReader.read(directory.resolve("missing.log"), 64));
     }
