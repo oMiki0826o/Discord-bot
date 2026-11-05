@@ -52,6 +52,31 @@ jobs:
       - name: Test and build NeoForge bridge
         working-directory: bridge/minecraft-bridge
         run: ./gradlew --no-daemon --project-dir ../neoforge-bridge test jar
+      - name: Smoke-test actual NeoForge dedicated server startup
+        working-directory: bridge/minecraft-bridge
+        run: |
+          mkdir -p ../neoforge-bridge/run/config
+          printf 'eula=true\n' > ../neoforge-bridge/run/eula.txt
+          cat > ../neoforge-bridge/run/config/minecraft-bridge.properties <<'EOF'
+          server_id=survival
+          gateway_host=127.0.0.1
+          gateway_port=8765
+          authentication_secret=smoke-only-development-secret
+          EOF
+          set +e
+          timeout --signal=TERM --kill-after=5s 150s ./gradlew --no-daemon --project-dir ../neoforge-bridge runServer > ../neoforge-bridge/run/smoke.log 2>&1
+          code=$?
+          set -e
+          if ! grep -Eq 'Done \([0-9.]+s\)' ../neoforge-bridge/run/logs/latest.log; then
+            tail -n 180 ../neoforge-bridge/run/smoke.log
+            echo "NeoForge server startup not observed (exit=$code)" >&2
+            exit 1
+          fi
+          if grep -E 'ModLoadingException|Failed to create mod instance|NoClassDefFoundError|ExceptionInInitializerError' ../neoforge-bridge/run/smoke.log; then
+            tail -n 180 ../neoforge-bridge/run/smoke.log
+            exit 1
+          fi
+          echo "NeoForge 1.21.8 dedicated server startup verified"
       - name: Upload NeoForge JAR
         uses: actions/upload-artifact@v4
         with:
