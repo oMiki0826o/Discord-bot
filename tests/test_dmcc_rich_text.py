@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from bot.mod.dmcc.services.rich_text import parse_discord_markdown
+from bot.mod.dmcc.services.rich_text import parse_discord_markdown, colorize_author_prefix
 from bot.mod.dmcc.repositories.state import JsonStateRepository
 from bot.mod.dmcc.services.discord_relay import DiscordRelayService
 
@@ -85,3 +85,36 @@ def test_code_backticks_do_not_parse_nested_bold_tokens():
     code = [s for s in segments if s["color"] == "gray"]
     assert code and any("**literal**" in s["text"] for s in code)
     assert not any(s["bold"] for s in code)
+
+
+def test_relay_minecraft_rich_chat_colors_only_discord_author(tmp_path: Path):
+    class Gateway:
+        def __init__(self):
+            self.segments = []
+
+        async def send_minecraft_segments(self, server_id, segments):
+            self.segments.append((server_id, segments))
+
+    async def run():
+        state = JsonStateRepository(tmp_path / "state.json")
+        state.initialize()
+        state.set_channel_mapping("survival", "123456789012345678")
+        gateway = Gateway()
+        relay = DiscordRelayService(state, gateway, rich_chat=True)
+        assert await relay.forward_message(
+            "color-1", "123456789012345678", "Alex", "Hello **Steve**",
+            author_color="#12AB34",
+        )
+        segments = gateway.segments[0][1]
+        assert "".join(str(part["text"]) for part in segments) == "<Alex> Hello Steve"
+        assert any(part["text"] == "<Alex> " and part["color"] == "#12AB34" for part in segments)
+        assert any("Hello " in part["text"] and part["color"] == "white" for part in segments)
+        assert any(part["text"] == "Steve" and part["bold"] for part in segments)
+    asyncio.run(run())
+
+
+def test_colorize_author_prefix_rejects_spoofed_or_invalid_colors():
+    plain = parse_discord_markdown("<Alex> hello")
+    assert colorize_author_prefix(plain, "<Alex> ", "#CC11ff")[0]["color"] == "#CC11FF"
+    assert colorize_author_prefix(plain, "<Alex> ", "#GGGGGG") == plain
+    assert colorize_author_prefix(plain, "<Bob> ", "#CC11FF") == plain

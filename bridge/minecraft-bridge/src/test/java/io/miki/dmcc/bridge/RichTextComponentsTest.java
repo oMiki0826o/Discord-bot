@@ -27,4 +27,19 @@ class RichTextComponentsTest {
         )).isEmpty());
         assertTrue(RichTextComponents.parse(Map.of("segments", List.of())).isEmpty());
     }
+    @Test
+    void acceptsValidatedDiscordRoleColorButRejectsUntrustedColorStrings() {
+        var parsed = RichTextComponents.parse(Map.of("segments", List.of(
+            Map.of("text", "<Alex>", "color", "#Aa00fF")
+        )));
+        assertTrue(parsed.isPresent());
+        assertEquals(0xAA00FF, parsed.get().getSiblings().getFirst().getStyle().getColor().getValue());
+        assertTrue(RichTextComponents.parse(Map.of("segments", List.of(
+            Map.of("text", "hello", "color", "#NN0000")
+        ))).isEmpty());
+        assertTrue(RichTextComponents.parse(Map.of("segments", List.of(
+            Map.of("text", "hello", "color", "#123456;run_op")
+        ))).isEmpty());
+    }
 }
+

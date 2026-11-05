@@ -82,3 +82,12 @@ def test_missing_mapping_prevents_mentions(tmp_path: Path):
         )
         assert not await service.notify("123456789012345678", "Alex", "hello", ("111111111111111111",))
     asyncio.run(scenario())
+
+
+def test_title_mentions_and_optional_sound_are_supported():
+    config = MentionConfig.from_mapping({"enabled": True, "style": "title", "sound": False})
+    assert config.style == "title"
+    assert config.sound is False
+    assert MentionConfig.from_mapping({"enabled": True}).sound is True
+    with pytest.raises(ValueError):
+        MentionConfig.from_mapping({"enabled": True, "sound": "off"})
