@@ -7,6 +7,8 @@ Modification():
 from __future__ import annotations
 
 import re
+import ipaddress
+from urllib.parse import urlsplit
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _ANSI = re.compile(r"\x1b\[[0-9;]{0,30}[A-Za-z]")
@@ -17,6 +19,9 @@ _MARKS = (
 )
 _LIMIT = 1800
 _MAX_SEGMENTS = 128
+_LINK_RE = re.compile(r"\[([^\]\r\n]{1,120})\]\((https?://[^\s<>()]{1,512})\)")
+_RAW_URL_RE = re.compile(r"https?://[^\s<>\x22\x27\x60]+")
+
 
 
 def _truncate_utf16(text: str, limit: int) -> str:
@@ -30,6 +35,25 @@ def _truncate_utf16(text: str, limit: int) -> str:
         result.append(char)
         length += size
     return "".join(result)
+
+
+def _safe_click_url(url: str) -> bool:
+    if not isinstance(url, str) or not 1 <= len(url) <= 512 or not url.isascii():
+        return False
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        if parts.scheme not in {"http", "https"} or not host or parts.username or parts.password:
+            return False
+        if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return "." in host
+        return address.is_global
+    except ValueError:
+        return False
 
 
 def _parse_plain_markdown(message: str) -> list[dict[str, object]]:
@@ -61,6 +85,27 @@ def _parse_plain_markdown(message: str) -> list[dict[str, object]]:
 
     pos = 0
     while pos < len(clean):
+        if not state["code"]:
+            link = _LINK_RE.match(clean, pos)
+            bare = _RAW_URL_RE.match(clean, pos) if link is None else None
+            if link is not None or bare is not None:
+                label, url = (
+                    (link.group(1), link.group(2)) if link is not None
+                    else (bare.group(0).rstrip(".,;!?)"), bare.group(0).rstrip(".,;!?)"))
+                )
+                if _safe_click_url(url):
+                    flush()
+                    part: dict[str, object] = {
+                        "text": label,
+                        "bold": state["bold"], "italic": state["italic"],
+                        "underlined": True, "strikethrough": state["strikethrough"],
+                        "obfuscated": state["obfuscated"],
+                        "color": "#3366CC",
+                        "click_url": url, "hover_text": url,
+                    }
+                    pieces.append(part)
+                    pos += len(link.group(0)) if link is not None else len(url)
+                    continue
         if clean[pos] == "\\" and pos + 1 < len(clean) and clean[pos + 1] in "*_~`\\":
             buf.append(clean[pos + 1])
             pos += 2
