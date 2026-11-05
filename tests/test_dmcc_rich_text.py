@@ -118,3 +118,22 @@ def test_colorize_author_prefix_rejects_spoofed_or_invalid_colors():
     assert colorize_author_prefix(plain, "<Alex> ", "#CC11ff")[0]["color"] == "#CC11FF"
     assert colorize_author_prefix(plain, "<Alex> ", "#GGGGGG") == plain
     assert colorize_author_prefix(plain, "<Bob> ", "#CC11FF") == plain
+
+
+def test_fenced_ansi_code_preserves_safe_colors_and_neighbor_text():
+    text = "Before ```ansi\n\x1b[31mRed\x1b[0m Plain``` After"
+    parts = parse_discord_markdown(text)
+    joined = "".join(str(item["text"]) for item in parts)
+    assert joined == "Before Red Plain After"
+    assert "\x1b" not in joined
+    assert any(item["text"] == "Red" and item["color"] == "#AA0000" for item in parts)
+    assert any("Plain" in str(item["text"]) and item["color"] == "gray" for item in parts)
+
+
+def test_ansi_code_rejects_unknown_control_codes_and_stays_bounded():
+    text = "```ansi\n\x1b[999m" + "X" * 6000 + "```"
+    parts = parse_discord_markdown(text)
+    assert parts
+    assert len(parts) <= 128
+    assert sum(len(str(p["text"]).encode("utf-16-le")) // 2 for p in parts) <= 1800
+    assert "\x1b" not in "".join(str(p["text"]) for p in parts)
