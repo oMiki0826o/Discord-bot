@@ -98,6 +98,11 @@ class LinkingService:
         self._code_by_uuid.pop(pending.minecraft_uuid, None)
         return link
 
+    def is_minecraft_linked(self, minecraft_uuid: str) -> bool:
+        """Read the single durable account-link source of truth."""
+        self._require(minecraft_uuid, "minecraft_uuid")
+        return self._link_store.discord_for_minecraft(minecraft_uuid) is not None
+
     def links_for_discord(self, discord_user_id: str) -> tuple[AccountLink, ...]:
         """List this Discord user's linked accounts for the upstream ``links`` command."""
 
