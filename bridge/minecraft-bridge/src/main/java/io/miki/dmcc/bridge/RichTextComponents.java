@@ -61,7 +61,7 @@ final class RichTextComponents {
                 return Optional.empty();
             }
             URI clickTarget = click;
-            String hoverLabel = rawHover instanceof String value ? value : null;
+            String hoverLabel = rawHover instanceof String hoverValue ? hoverValue : null;
             MutableComponent fragment = Component.literal(text);
             fragment.withStyle(style -> {
                 var styled = style
