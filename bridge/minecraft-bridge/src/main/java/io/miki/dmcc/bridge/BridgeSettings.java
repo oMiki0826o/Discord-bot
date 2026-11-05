@@ -18,10 +18,12 @@ public record BridgeSettings(
     int authenticationTimeoutMillis,
     int readTimeoutMillis,
     long pendingRequestTtlMillis,
-    int gracefulShutdownTimeoutMillis
+    int gracefulShutdownTimeoutMillis,
+    boolean requireLinking,
+    String unlinkedPlayerAction
 ) {
     public BridgeSettings(String serverId, String gatewayHost, int gatewayPort, String authenticationSecret) {
-        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500);
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick");
     }
 
     /** Parses a standard Java properties stream without doing filesystem I/O. */
@@ -53,8 +55,26 @@ public record BridgeSettings(
             positiveInt(properties, "authentication_timeout_millis", 15_000),
             positiveInt(properties, "read_timeout_millis", 60_000),
             positiveInt(properties, "pending_request_ttl_millis", 120_000),
-            positiveInt(properties, "graceful_shutdown_timeout_millis", 1_500)
+            positiveInt(properties, "graceful_shutdown_timeout_millis", 1_500),
+            strictBoolean(properties, "require_linking", false),
+            unlinkedAction(properties)
         );
+    }
+
+    private static boolean strictBoolean(Properties properties, String key, boolean fallback) {
+        String value = properties.getProperty(key);
+        if (value == null || value.isBlank()) return fallback;
+        if (value.equals("true")) return true;
+        if (value.equals("false")) return false;
+        throw new ProtocolException(key + " must be true or false");
+    }
+
+    private static String unlinkedAction(Properties properties) {
+        String action = properties.getProperty("unlinked_player_action", "kick").trim();
+        if (!action.equals("kick") && !action.equals("freeze")) {
+            throw new ProtocolException("unlinked_player_action must be kick or freeze");
+        }
+        return action;
     }
 
     private static String required(Properties properties, String key) {
