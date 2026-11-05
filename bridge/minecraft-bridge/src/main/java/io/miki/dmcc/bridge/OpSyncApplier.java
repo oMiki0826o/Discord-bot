@@ -5,6 +5,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -20,37 +22,69 @@ import org.slf4j.LoggerFactory;
  */
 final class OpSyncApplier {
     private static final Logger LOGGER = LoggerFactory.getLogger("minecraft_bridge/op_sync");
-    private final Set<UUID> managed = new HashSet<>();
+    private ManagedOpLedger managed = ManagedOpLedger.inMemory();
+
+    void configure(Path ledgerFile) throws IOException {
+        managed = ManagedOpLedger.load(ledgerFile);
+    }
 
     int apply(MinecraftServer server, OpSyncPolicy policy) {
         int applied = 0;
         for (OpSyncPolicy.Entry entry : policy.entries()) {
             try {
                 if (applyOne(server, entry, policy.allowRemovals())) applied++;
-            } catch (ReflectiveOperationException | SecurityException | IllegalArgumentException error) {
+            } catch (ReflectiveOperationException | IOException | SecurityException | IllegalArgumentException error) {
                 LOGGER.warn(
                     "DMCC operator sync skipped UUID={} ({})",
                     entry.playerId(), error.getClass().getSimpleName()
                 );
             }
         }
+        if (policy.allowRemovals() && policy.fullSnapshot()) {
+            Set<UUID> included = new HashSet<>();
+            policy.entries().forEach(entry -> included.add(entry.playerId()));
+            for (var owner : managed.snapshot().entrySet()) {
+                if (included.contains(owner.getKey())) continue;
+                try {
+                    var old = owner.getValue();
+                    if (applyOne(server, new OpSyncPolicy.Entry(owner.getKey(), old.name(), 0), true)) {
+                        applied++;
+                    }
+                } catch (ReflectiveOperationException | IOException | SecurityException | IllegalArgumentException error) {
+                    LOGGER.warn("DMCC skipped stale operator UUID={} ({})",
+                        owner.getKey(), error.getClass().getSimpleName());
+                }
+            }
+        }
         return applied;
     }
 
     private boolean applyOne(MinecraftServer server, OpSyncPolicy.Entry entry, boolean removals)
-        throws ReflectiveOperationException {
-        Object list = server.getPlayerList();
+        throws ReflectiveOperationException, IOException {
         Object ops = server.getPlayerList().getOps();
         Object principal = principal(entry.playerId(), entry.playerName());
         Method get = lookup(ops.getClass(), "get", principal.getClass());
         if (get == null) throw new NoSuchMethodException("ServerOpList.get");
         Object existing = get.invoke(ops, principal);
-        if (existing != null && !managed.contains(entry.playerId())) {
-            // Never overwrite a preexisting manually granted operator.
+        ManagedOpLedger.Entry owned = managed.get(entry.playerId());
+        if (existing != null && owned == null) {
+            // Never adopt a preexisting manually granted operator.
             return false;
         }
+        if (existing != null && owned != null) {
+            Object rawLevel = existing.getClass().getMethod("getLevel").invoke(existing);
+            if (!(rawLevel instanceof Number level) || level.intValue() != owned.level()) {
+                // Someone modified this native operator; relinquish DMCC ownership.
+                managed.remove(entry.playerId());
+                return false;
+            }
+        }
+        if (existing == null && owned != null) {
+            managed.remove(entry.playerId());
+            owned = null;
+        }
         if (entry.level() == 0) {
-            if (!removals || !managed.contains(entry.playerId()) || existing == null) {
+            if (!removals || owned == null || existing == null) {
                 return false;
             }
             Method remove = lookup(ops.getClass(), "remove", principal.getClass());
@@ -81,7 +115,7 @@ final class OpSyncApplier {
         Method add = lookup(ops.getClass(), "add", entryType);
         if (add == null) throw new NoSuchMethodException("ServerOpList.add");
         add.invoke(ops, next);
-        managed.add(entry.playerId());
+        managed.put(entry.playerId(), entry.playerName(), entry.level());
         refresh(server, entry.playerId());
         return true;
     }
@@ -111,6 +145,7 @@ final class OpSyncApplier {
     }
 
     void clear() {
-        managed.clear();
+        // Never delete durable ownership on server shutdown.
+        managed = ManagedOpLedger.inMemory();
     }
 }

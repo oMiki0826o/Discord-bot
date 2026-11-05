@@ -154,6 +154,14 @@ public final class BridgeMod implements ModInitializer {
             requireLinking = settings.requireLinking();
             unlinkedPlayerAction = settings.unlinkedPlayerAction();
             opSyncEnabled = settings.opSyncEnabled();
+            if (opSyncEnabled) {
+                try {
+                    opSyncApplier.configure(configPath.resolveSibling("minecraft-bridge-managed-ops.properties"));
+                } catch (IOException badLedger) {
+                    opSyncEnabled = false;
+                    LOGGER.error("DMCC OP sync disabled: ownership ledger unavailable", badLedger);
+                }
+            }
             runtime = new BridgeRuntime(
                 () -> new BridgeClient(settings, (client, envelope) -> handleGatewayPacket(server, client, envelope)),
                 1_000,

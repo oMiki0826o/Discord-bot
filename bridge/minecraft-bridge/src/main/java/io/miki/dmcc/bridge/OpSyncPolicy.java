@@ -11,17 +11,21 @@ import java.util.UUID;
  * A bounded, authenticated intent to reconcile specific linked Minecraft UUIDs.
  * This is never a blanket ops.json replacement; unknown admins are untouched.
  */
-record OpSyncPolicy(List<OpSyncPolicy.Entry> entries, boolean allowRemovals) {
+record OpSyncPolicy(List<OpSyncPolicy.Entry> entries, boolean allowRemovals, boolean fullSnapshot) {
     record Entry(UUID playerId, String playerName, int level) { }
 
     static Optional<OpSyncPolicy> parse(Map<String, Object> packet) {
-        if (!packet.keySet().equals(java.util.Set.of("entries", "allow_removals"))) {
+        if (!packet.keySet().equals(java.util.Set.of("entries", "allow_removals"))
+            && !packet.keySet().equals(java.util.Set.of("entries", "allow_removals", "full_snapshot"))) {
             return Optional.empty();
         }
         Object rawEntries = packet.get("entries");
         Object rawRemovals = packet.get("allow_removals");
-        if (!(rawEntries instanceof List<?> source) || source.isEmpty()
-            || source.size() > 100 || !(rawRemovals instanceof Boolean removals)) {
+        Object rawFull = packet.getOrDefault("full_snapshot", false);
+        if (!(rawEntries instanceof List<?> source)
+            || source.size() > 100 || !(rawRemovals instanceof Boolean removals)
+            || !(rawFull instanceof Boolean fullSnapshot)
+            || (source.isEmpty() && !(removals && fullSnapshot))) {
             return Optional.empty();
         }
         var parsed = new ArrayList<Entry>();
@@ -51,6 +55,6 @@ record OpSyncPolicy(List<OpSyncPolicy.Entry> entries, boolean allowRemovals) {
                 return Optional.empty();
             }
         }
-        return Optional.of(new OpSyncPolicy(List.copyOf(parsed), removals));
+        return Optional.of(new OpSyncPolicy(List.copyOf(parsed), removals, fullSnapshot));
     }
 }

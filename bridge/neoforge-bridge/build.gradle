@@ -34,7 +34,7 @@ def shared = [
     'FrameCodec.java', 'ProtocolEnvelope.java', 'ProtocolException.java',
     'LogTailReader.java', 'MetricSnapshot.java', 'ServerInfoDiagnostics.java',
     'RichTextComponents.java', 'PlayerMentionRequest.java', 'OpSyncPolicy.java',
-    'OpSyncApplier.java', 'DmccRconConsoleSource.java', 'PublicTellrawPolicy.java'
+    'OpSyncApplier.java', 'ManagedOpLedger.java', 'DmccRconConsoleSource.java', 'PublicTellrawPolicy.java'
 ]
 sourceSets.main.java {
     srcDir '../minecraft-bridge/src/main/java'
