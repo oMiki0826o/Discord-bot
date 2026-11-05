@@ -264,3 +264,17 @@ The opt-in `rich_chat: true` setting sends validated, bounded style-only segment
 ### Compatibility notes (English)
 
 Set `presentation.servers.<server_id>.locale` to `zh_TW` (default) or `en_US`; custom templates override those local defaults. This does **not** claim automatic translations for game-generated advancement or death messages. `/dmcc update` checks a trusted GitHub Release URL on request without publishing a channel notification or installing software. Console polling resets its baseline across rotation/disconnection instead of replaying ambiguous history; messages during disconnection may be lost. Full original DMCC v3 feature parity remains an open review requirement.
+
+## Cursor-based console log streaming (opt-in)
+
+With `console_stream.enabled: true`, the Bot now uses an authenticated byte-offset cursor rather than repeatedly diffing the last part of `latest.log`. The Fabric Bridge returns no historical text on the first connection, then returns **only newline-terminated records**, limited to 1 KiB per poll, with a file identity and the next byte offset. The Bot atomically checkpoints each server's cursor in its ignored runtime directory (`data/dmcc/console_cursors.json`, or the directory of the configured DMCC state file).
+
+- A disconnected Minecraft Bridge does not erase the cursor. On reconnect or Bot restart, logs are read from the last committed byte offset; a Discord API error prevents cursor advancement, so the batch is retried. This provides **at-least-once delivery**; if Discord accepted a message but the cursor file could not be saved, duplicates are still possible.
+- Rotation is detected using the local log file identity and resumes at the start of the new file. If a single log line is longer than the read limit, the reader skips that unbounded fragment rather than leaking a partial secret or allocating an unlimited buffer; this can drop some backlog.
+- Sensitive log content remains restricted to administrator-only channels, with IP/token redaction. Automated redaction is best-effort, not a guarantee that every credential is hidden. Revoke leaked credentials if they appear in logs.
+- This requires the new Fabric Bridge JAR and Python Bot to be deployed together; the old `/dmcc log` on-demand command continues to use the legacy excerpt protocol. A new Bot with an old Bridge cannot use cursor streaming.
+- **NeoForge, full upstream command interception, exact OP synchronization and login freeze are not part of this addition.** Do not consider this implementation full DMCC v3 parity.
+
+### Console cursor streaming (English)
+
+With the optional console stream enabled, each authenticated Fabric server produces bounded complete-line log chunks with file identity and byte offsets. Per-server cursors are atomically saved under the ignored runtime data directory and survive reconnect/restart. Offsets advance only after a successful Discord delivery attempt. Delivery is *at least once*, not exactly once, because a crash between Discord acceptance and checkpoint persistence can repeat an entry. Oversized lines are dropped to prevent partial-credential leakage. Operators must restrict the target channel to trusted administrators. Build and deploy matching Python/Java revisions.
