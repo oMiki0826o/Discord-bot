@@ -8,6 +8,8 @@ import java.lang.reflect.Method;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Authenticated, opt-in Minecraft-native operator changes on the server thread.
@@ -17,6 +19,7 @@ import java.util.UUID;
  * operators created by other admins are never overwritten.
  */
 final class OpSyncApplier {
+    private static final Logger LOGGER = LoggerFactory.getLogger("minecraft_bridge/op_sync");
     private final Set<UUID> managed = new HashSet<>();
 
     int apply(MinecraftServer server, OpSyncPolicy policy) {
@@ -25,7 +28,7 @@ final class OpSyncApplier {
             try {
                 if (applyOne(server, entry, policy.allowRemovals())) applied++;
             } catch (ReflectiveOperationException | SecurityException | IllegalArgumentException error) {
-                BridgeMod.LOGGER.warn(
+                LOGGER.warn(
                     "DMCC operator sync skipped UUID={} ({})",
                     entry.playerId(), error.getClass().getSimpleName()
                 );
