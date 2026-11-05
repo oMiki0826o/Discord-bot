@@ -228,7 +228,8 @@ The added Discord rich-message bridge produces **readable bounded text**, not fu
   },
   "mentions": {
     "enabled": true,
-    "style": "actionbar",
+    "style": "title",
+    "sound": true,
     "max_targets": 8,
     "cooldown_seconds": 15
   }
@@ -238,7 +239,7 @@ The added Discord rich-message bridge produces **readable bounded text**, not fu
 - **暱稱同步**：若要接收成員加入與暱稱變更事件，須在 Discord Developer Portal 啟用 **Server Members Intent**，並在 Bot 的 `bot.intents.members` 設定中啟用；未啟用時只會作用於可取得的快取成員，無法保證完整同步。
 - **暱稱同步**：僅在指定 Discord `guild_id` 中，對已完成 Minecraft 帳號綁定、可被 Bot 管理的成員套用模板。Bot 需有「管理暱稱」權限，且角色必須高於目標成員；不會更動 Bot 帳號或伺服器擁有者。支援 `{player_name}`、`{discord_name}`；最多 32 字元。定期掃描限定數量，另於成員加入、暱稱變更以及連結／解除連結時檢查。**解除連結不會自動清除他人設定的暱稱**；僅在明確設定 `reset_unlinked: true` 後才會清除，啟用前請先評估此破壞性操作。
 - **發布版本檢查**：僅查詢本專案 `oMiki0826o/Discord-bot` 的 GitHub Releases，定期通知穩定且較新的版本，僅允許官方 GitHub 連結。**不下載、不執行、不自動升級**，也不能代替 Minecraft／Fabric 版本相容性驗證。此功能與 Modrinth 的遊戲模組更新檢查相互獨立。
-- **玩家提及通知**：Discord 映射頻道中的明確使用者提及（`<@user_id>`）可通知該使用者已綁定的 Minecraft UUID。只對在線玩家發送，不將整則 Discord 訊息重複廣播；可用 `style: "actionbar"` 或 `"chat"`，並限制每次人數及每名玩家冷卻時間。**不支援角色提及、`@everyone` 或 `@here` 的大量通知**，以避免洗版。Minecraft 端需安裝此分支重新編譯的 Bridge JAR，否則新封包可能無法顯示。
+- **玩家提及通知**：Discord 映射頻道中的明確使用者提及（`<@user_id>`）可通知該使用者已綁定的 Minecraft UUID。只對在線玩家發送，不將整則 Discord 訊息重複廣播；可用 `style: "actionbar"`、`"chat"` 或 `"title"`，搭配 `sound: true/false` 控制提示音，並限制每次人數及每名玩家冷卻時間。**不支援角色提及、`@everyone` 或 `@here` 的大量通知**，以避免洗版。Minecraft 端需安裝此分支重新編譯的 Bridge JAR，否則新封包可能無法顯示。
 
 ### Optional account nickname, release and mention settings (English)
 
@@ -246,7 +247,7 @@ All three settings default to disabled. Nickname sync is scoped to one Discord g
 
 ## Discord → Minecraft 富文字（安全子集）
 
-`rich_chat` 預設為 `false`，可以在 `settings/dmcc.json` 最外層設定 `"rich_chat": true`。啟用後，Discord 文字會先轉換為最多 128 個、總長度受限的**樣式片段**，透過已驗證的 Gateway 傳給 Java Bridge，再轉成原生 Minecraft `Component`。目前可保留一般 Markdown 的粗體、斜體、底線、刪除線與程式碼灰色顯示；不支援任意 JSON、執行指令或可點擊的 ClickEvent，避免 Discord 訊息直接觸發遊戲管理操作。若維持預設關閉，繼續使用舊版純文字封包，保障對老舊 Bridge 的相容。
+`rich_chat` 預設為 `false`，可以在 `settings/dmcc.json` 最外層設定 `"rich_chat": true`。啟用後，Discord 文字會先轉換為最多 128 個、總長度受限的**樣式片段**，透過已驗證的 Gateway 傳給 Java Bridge，再轉成原生 Minecraft `Component`。目前可保留一般 Markdown 的粗體、斜體、底線、刪除線與程式碼灰色顯示；新版亦會在 Discord 成員有有效身分組顏色時，僅將驗證過的 `#RRGGBB` 套用到訊息作者前綴（文字內容不繼承），不支援任意 JSON、執行指令或可點擊的 ClickEvent，避免 Discord 訊息直接觸發遊戲管理操作。若維持預設關閉，繼續使用舊版純文字封包，保障對老舊 Bridge 的相容。
 
 **注意：啟用前必須部署與此分支相同提交所編譯的 Minecraft Bridge JAR**。與原版 DMCC 完整 Discord Markdown / Hover / Click、附件貼圖完整渲染相比，這仍是明確限定的安全子集，尚未做到 100% 功能對等。
 
@@ -278,3 +279,20 @@ With `console_stream.enabled: true`, the Bot now uses an authenticated byte-offs
 ### Console cursor streaming (English)
 
 With the optional console stream enabled, each authenticated Fabric server produces bounded complete-line log chunks with file identity and byte offsets. Per-server cursors are atomically saved under the ignored runtime data directory and survive reconnect/restart. Offsets advance only after a successful Discord delivery attempt. Delivery is *at least once*, not exactly once, because a crash between Discord acceptance and checkpoint persistence can repeat an entry. Oversized lines are dropped to prevent partial-credential leakage. Operators must restrict the target channel to trusted administrators. Build and deploy matching Python/Java revisions.
+
+## Fabric v3 Parity Audit (Branch-only)
+
+Scope: Fabric Minecraft **1.21.8 / 1.21.9**, Python Discord Gateway. NeoForge is explicitly out of scope for this milestone. A GitHub Actions build alone is not an actual Minecraft + Discord end-to-end test.
+
+| Feature slice | Branch implementation | Remaining acceptance work |
+|---|---|---|
+| Discord message relay and media summaries | Implemented with bounded metadata | Live Discord permissions and rate-limit verification |
+| Mention notifications | Targeted UUID notification, chat/actionbar/title, optional sound | Role and mass-mention policy, real client display |
+| Rich text / role colors | Safe Markdown subset; validated sender-only role color | Links, hover events, ANSI blocks, fuller markdown; client verification |
+| Minecraft command sources | Public broadcast and guarded tellraw observation | Exact per-recipient tellraw behavior, configurable command filters, no private leakage |
+| Account linking and login policies | Fabric linking; fail-open kick and freeze controls | Real handshake, reconnect and TTL validation |
+| Native OP synchronization | Opt-in linked-player updates with stable IDs | Persistent ownership, unlink/restart reconciliation and acknowledgment |
+| Localization | zh_TW/en_US event templates | Dynamic advancement/death localization and complete placeholders |
+| Multi-server and console | Authenticated routing, bounded log cursor | Stress and disconnect/rotation testing |
+
+**Release gate:** all Python 3.11–3.13 checks, Fabric 1.21.8/1.21.9 Gradle/JUnit/remapJar, release artifact integrity, security review, and a real isolated server end-to-end smoke test must pass before declaring full parity or merging into `main`.
