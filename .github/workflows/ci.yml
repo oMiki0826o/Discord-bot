@@ -107,6 +107,29 @@ jobs:
       - name: Test and build Fabric bridge
         working-directory: bridge/minecraft-bridge
         run: ./gradlew --no-daemon -Pminecraft_version=${{ matrix.minecraft }} -Pfabric_api_version=${{ matrix.fabric_api }} test remapJar
+      - name: Smoke-test actual Fabric server startup
+        working-directory: bridge/minecraft-bridge
+        run: |
+          mkdir -p run
+          printf 'eula=true\n' > run/eula.txt
+          set +e
+          timeout --signal=TERM --kill-after=5s 120s ./gradlew --no-daemon \
+            -Pminecraft_version=${{ matrix.minecraft }} \
+            -Pfabric_api_version=${{ matrix.fabric_api }} \
+            runServer --args=nogui > run/smoke.log 2>&1
+          code=$?
+          set -e
+          if ! grep -Eq 'Done \([0-9.]+s\)!|Done \([0-9.]+s\)' run/logs/latest.log; then
+            tail -n 160 run/smoke.log
+            echo "Fabric smoke failed: server startup was not observed (exit=$code)" >&2
+            exit 1
+          fi
+          if grep -E 'Mixin apply failed|Critical injection failure|InvalidInjectionException|MixinTransformerError' run/smoke.log; then
+            tail -n 160 run/smoke.log
+            exit 1
+          fi
+          echo "Fabric server startup and mixin loading smoke verified"
+
       - name: Stage compiled Fabric bridge and checksum
         working-directory: bridge/minecraft-bridge
         run: |
