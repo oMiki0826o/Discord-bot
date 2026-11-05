@@ -44,8 +44,9 @@ class OpSyncConfig:
             raise ValueError("op_sync.guild_id must be a Discord ID")
         if type(interval) is not int or not 60 <= interval <= 86400:
             raise ValueError("op_sync.interval_seconds must be 60..86400")
-        if type(max_entries) is not int or not 1 <= max_entries <= 500:
-            raise ValueError("op_sync.max_entries must be 1..500")
+        if type(max_entries) is not int or not 1 <= max_entries <= 100:
+            # The Java OpSyncPolicy parser rejects snapshots above 100 entries.
+            raise ValueError("op_sync.max_entries must be 1..100")
         return cls(enabled, guild_id, interval, max_entries, removals)
 
 
@@ -100,11 +101,12 @@ class OpSyncService:
                     continue
                 roles = tuple(getattr(member, "roles", ()) or ())
                 role_ids = tuple(str(role.id) for role in roles)
-                role_names = tuple(str(getattr(role, "name", "")) for role in roles)
+                # Native Minecraft OP is privileged and persistent. Do not
+                # authorize it through mutable Discord usernames or role names.
+                # Command permission compatibility can still resolve names,
+                # but OP sync requires immutable Discord user/role IDs.
                 level = self._resolver.resolve(
                     link.discord_user_id, role_ids, server_id,
-                    discord_user_name=str(getattr(member, "name", "")),
-                    role_names=role_names,
                 )
                 if type(level) is not int or not -1 <= level <= 4:
                     return False

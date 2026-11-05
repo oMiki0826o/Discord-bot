@@ -34,6 +34,7 @@ def test_op_sync_settings_fail_closed():
         {"enabled": "yes", "guild_id": "123456789012345678"},
         {"enabled": True, "guild_id": "bad"},
         {"enabled": True, "guild_id": "123456789012345678", "max_entries": 0},
+        {"enabled": True, "guild_id": "123456789012345678", "max_entries": 101},
         {"enabled": True, "guild_id": "123456789012345678", "allow_removals": "yes"},
     ):
         with pytest.raises(ValueError):
@@ -98,4 +99,41 @@ def test_missing_discord_member_never_causes_ops_revocation(tmp_path: Path):
             OpLevelResolver.from_mapping({}, links), Manager(), Gateway(),
         )
         assert not await service.run_once()
+    asyncio.run(run())
+
+
+def test_op_sync_max_entries_matches_java_protocol_limit():
+    assert _config(max_entries=100).max_entries == 100
+    with pytest.raises(ValueError, match=r"1\.\.100"):
+        _config(max_entries=101)
+
+
+def test_op_sync_never_grants_operator_by_mutable_discord_names(tmp_path: Path):
+    links = JsonLinkRepository(tmp_path / "links.json")
+    links.link("234567890123456789", "123e4567-e89b-12d3-a456-426614174000", "Steve")
+    resolver = OpLevelResolver.from_mapping({
+        "user_mappings": [{"user": "ServerOwner", "op_level": 4}],
+        "role_mappings": [{"role": "Admin", "op_level": 4}],
+    }, links)
+    member = SimpleNamespace(
+        id=234567890123456789, name="ServerOwner",
+        roles=[SimpleNamespace(id=678901234567890123, name="Admin")],
+    )
+    guild = SimpleNamespace(get_member=lambda _user_id: member)
+    bot = SimpleNamespace(get_guild=lambda _guild_id: guild)
+    manager = SimpleNamespace(all=lambda: [SimpleNamespace(server_id="survival")])
+
+    class Gateway:
+        def __init__(self):
+            self.sent = []
+
+        async def send_packet(self, *args):
+            self.sent.append(args)
+
+    async def run():
+        gateway = Gateway()
+        service = OpSyncService(_config(), bot, links, resolver, manager, gateway)
+        assert not await service.run_once()
+        assert gateway.sent == []
+
     asyncio.run(run())
