@@ -1,3 +1,7 @@
+
+// Minecraft-dependent Component JUnit tests are executed by the Fabric
+// Loom matrix. NeoForge verifies the shared HMAC/protocol/transport logic
+// with ordinary JVM tests; the native entrypoint must compile in this build.
 plugins {
     id 'java-library'
     id 'net.neoforged.moddev' version '2.0.147'
@@ -29,6 +33,7 @@ sourceSets.main.java {
     shared.each { filename -> include "io/miki/dmcc/bridge/${filename}" }
 }
 dependencies {
+    testImplementation 'com.google.code.gson:gson:2.11.0'
     testImplementation platform('org.junit:junit-bom:5.11.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -51,7 +56,7 @@ sourceSets.test.java {
         'AuthenticationTest.java', 'BridgeClientTest.java',
         'BridgeRuntimeTest.java', 'BridgeSettingsTest.java',
         'FrameCodecTest.java', 'ProtocolEnvelopeTest.java',
-        'RichTextComponentsTest.java', 'PlayerMentionRequestTest.java',
+        'PlayerMentionRequestTest.java',
         'OpSyncPolicyTest.java', 'LogTailReaderTest.java',
         'MetricSnapshotTest.java', 'ServerInfoDiagnosticsTest.java'
     ].each { name -> include "io/miki/dmcc/bridge/${name}" }
