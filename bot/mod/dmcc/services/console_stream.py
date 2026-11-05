@@ -12,6 +12,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 import logging
 import re
+from pathlib import Path
+
+from ..repositories.json_file import AtomicJsonFile
 
 _LOGGER = logging.getLogger(__name__)
 _IPV4 = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
@@ -21,6 +24,24 @@ _BEARER = re.compile(r"(?i)\bauthorization\s*:\s*bearer\s+\S+")
 _MASS = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
 _MAX_LINES = 80
 _MAX_CHARS = 1850
+
+
+def _validate_cursors(raw: object) -> dict[str, dict[str, str | int]]:
+    if not isinstance(raw, dict) or len(raw) > 32:
+        raise ValueError("invalid DMCC cursor document")
+    for server, entry in raw.items():
+        if (
+            not isinstance(server, str) or not server or len(server) > 128
+            or not isinstance(entry, dict)
+            or set(entry) != {"file_id", "next_offset"}
+            or not isinstance(entry["file_id"], str)
+            or not 1 <= len(entry["file_id"]) <= 64
+            or not entry["file_id"].isascii()
+            or type(entry["next_offset"]) is not int
+            or not 0 <= entry["next_offset"] <= (2 ** 63 - 1)
+        ):
+            raise ValueError("invalid DMCC cursor entry")
+    return raw
 
 
 def redact_console_line(line: str) -> str:
@@ -68,12 +89,20 @@ class ConsoleStreamConfig:
 class ConsoleStreamService:
     """Best-effort incremental log mirror; cannot execute server commands."""
 
-    def __init__(self, config: ConsoleStreamConfig, bridge: object, manager: object, sender: object) -> None:
+    def __init__(
+        self, config: ConsoleStreamConfig, bridge: object, manager: object,
+        sender: object, *, cursor_path: Path | None = None,
+    ) -> None:
         self._config = config
         self._bridge = bridge
         self._manager = manager
         self._sender = sender
         self._last: dict[str, str] = {}
+        self._cursor_file = (
+            AtomicJsonFile(cursor_path, _validate_cursors)
+            if cursor_path is not None else None
+        )
+        self._cursors = self._cursor_file.read({}) if self._cursor_file is not None else {}
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -94,6 +123,9 @@ class ConsoleStreamService:
         for server_id, channel_id in self._config.servers.items():
             if self._manager.get(server_id) is None:
                 self._last.pop(server_id, None)
+                continue
+            if self._cursor_file is not None:
+                await self._run_cursor_once(server_id, channel_id)
                 continue
             try:
                 response = await asyncio.wait_for(self._bridge.log(server_id), timeout=8)
@@ -125,6 +157,53 @@ class ConsoleStreamService:
                 _LOGGER.warning("DMCC console stream unavailable server_id=%s", server_id)
             except Exception:
                 _LOGGER.exception("DMCC console stream failed server_id=%s", server_id)
+
+    async def _run_cursor_once(self, server_id: str, channel_id: str) -> None:
+        """Commit the file cursor only after a successful Discord delivery."""
+        previous = self._cursors.get(server_id)
+        offset = previous["next_offset"] if previous else -1
+        file_id = previous["file_id"] if previous else ""
+        try:
+            response = await asyncio.wait_for(
+                self._bridge.log_chunk(server_id, offset, file_id),
+                timeout=8,
+            )
+            if not isinstance(response, Mapping):
+                raise ValueError("malformed cursor response")
+            chunk = response.get("content")
+            new_id = response.get("file_id")
+            next_offset = response.get("next_offset")
+            if (
+                not isinstance(chunk, str) or len(chunk) > 4096
+                or not isinstance(new_id, str) or not 1 <= len(new_id) <= 64
+                or not new_id.isascii()
+                or type(next_offset) is not int
+                or not 0 <= next_offset <= (2 ** 63 - 1)
+            ):
+                raise ValueError("invalid cursor response fields")
+            if offset != -1 and chunk:
+                clean_lines = [
+                    redact_console_line(line)
+                    for line in chunk.splitlines()[-_MAX_LINES:]
+                ]
+                cleaned = "\n".join(line for line in clean_lines if line).strip()[:_MAX_CHARS]
+                if cleaned:
+                    text = f"```text\n{cleaned}\n```"
+                    required = getattr(self._sender, "send_discord_message_required", None)
+                    if callable(required):
+                        await required(channel_id, text)
+                    else:
+                        await self._sender.send_discord_message(channel_id, text)
+            updated = dict(self._cursors)
+            updated[server_id] = {"file_id": new_id, "next_offset": next_offset}
+            if self._cursor_file is None:
+                return
+            self._cursor_file.write(updated)
+            self._cursors = updated
+        except (ConnectionError, LookupError, TimeoutError, ValueError, OSError):
+            _LOGGER.warning("DMCC cursor poll unavailable server_id=%s", server_id)
+        except Exception:
+            _LOGGER.exception("DMCC cursor poll failed server_id=%s", server_id)
 
     @staticmethod
     def _delta(previous: str, current: str) -> str:
