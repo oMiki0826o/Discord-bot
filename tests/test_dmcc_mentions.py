@@ -91,3 +91,31 @@ def test_title_mentions_and_optional_sound_are_supported():
     assert MentionConfig.from_mapping({"enabled": True}).sound is True
     with pytest.raises(ValueError):
         MentionConfig.from_mapping({"enabled": True, "sound": "off"})
+
+
+def test_role_mentions_only_accept_complete_guild_snapshots():
+    from types import SimpleNamespace
+    from bot.mod.dmcc.services.mentions import collect_role_mention_users
+
+    target = SimpleNamespace(id=111111111111111111)
+    members = [
+        SimpleNamespace(id=222222222222222222, bot=False, roles=[target]),
+        SimpleNamespace(id=333333333333333333, bot=False, roles=[target]),
+        SimpleNamespace(id=444444444444444444, bot=True, roles=[target]),
+    ]
+    guild = SimpleNamespace(chunked=True, members=members)
+    assert collect_role_mention_users(guild, [target], max_targets=8) == (
+        "222222222222222222", "333333333333333333",
+    )
+    assert collect_role_mention_users(SimpleNamespace(chunked=False, members=members), [target], max_targets=8) == ()
+    assert collect_role_mention_users(guild, [target], max_targets=1) == ()
+    assert collect_role_mention_users(guild, [target, target], max_targets=8) == (
+        "222222222222222222", "333333333333333333",
+    )
+
+
+def test_role_mentions_opt_in_default_off_and_strict_type_check():
+    assert MentionConfig.from_mapping({}).role_mentions is False
+    assert MentionConfig.from_mapping({"role_mentions": True}).role_mentions is True
+    with pytest.raises(ValueError):
+        MentionConfig.from_mapping({"role_mentions": "yes"})
