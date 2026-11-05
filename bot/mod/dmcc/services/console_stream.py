@@ -22,6 +22,12 @@ _IPV6 = re.compile(r"(?<![A-Za-z0-9])(?:[0-9A-Fa-f]{0,4}:){2,8}[0-9A-Fa-f]{0,4}(
 _SECRET = re.compile(r"(?i)\b(password|token|api[_-]?key|secret|authorization|session)\s*[:=]\s*\S+")
 _BEARER = re.compile(r"(?i)\bauthorization\s*:\s*bearer\s+\S+")
 _MASS = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
+_PRIVATE_COMMAND = re.compile(
+    r"(?i)(\bissued\s+(?:server\s+)?command\s*:\s*)/"
+    r"(?:msg|tell|w|r|whisper|login|register|password|auth|dmcc|link|unlink)"
+    r"(?=\s|$).*"
+)
+
 _MAX_LINES = 80
 _MAX_CHARS = 1850
 
@@ -48,7 +54,8 @@ def redact_console_line(line: str) -> str:
     """Conservatively remove addresses, credentials and ping syntax."""
     if not isinstance(line, str):
         return ""
-    value = _IPV4.sub("[REDACTED]", line)
+    value = _PRIVATE_COMMAND.sub(lambda match: match.group(1) + "[REDACTED]", line)
+    value = _IPV4.sub("[REDACTED]", value)
     value = _IPV6.sub("[REDACTED]", value)
     value = _BEARER.sub("Authorization=[REDACTED]", value)
     value = _SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
