@@ -173,6 +173,7 @@ jobs:
           gateway_port=8765
           authentication_secret=smoke-only-development-secret
           translation_locale=zh_tw
+          overwrite_native_messages=true
           EOF
           DMCC_SMOKE_SECRET=smoke-only-development-secret python3 ../../tools/fabric_gateway_smoke.py --output run/dmcc-gateway-verified.json > run/gateway-smoke.log 2>&1 &
           gateway_pid=$!

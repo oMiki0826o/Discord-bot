@@ -345,3 +345,31 @@ Fabric 選用 `op_sync_enabled=true` 搭配 Gateway `op_sync.enabled=true`。當
 ### 驗收門檻
 
 公開功能清單只標記**已實作或部分實作**；完整 DMCC v3 對等需再確認原版全部命令及原生封包特性、動態死亡／進度翻譯、`/tellraw` 的收件者上下文、Discord API 實機互動，以及中斷重連／Minecraft 原生權限與伺服器負載。CI（Python、Fabric Gradle/JUnit/remapJar、啟動 Smoke Test、發行驗證）通過後，仍不得宣稱完成真實 Discord + Minecraft 端對端測試。維持 Draft PR，不合併 main。
+
+
+## Fabric v3：語言翻譯、原生訊息覆寫與實際 Gateway 測試
+
+### Minecraft 語言翻譯
+
+Fabric `config/minecraft-bridge.properties` 新增 `translation_locale=zh_tw`（預設 `en_us`，採語言_地區碼）。
+
+- 將官方或自訂 Minecraft 語言 JSON 放在 `config/minecraft-bridge/lang/zh_tw.json`、`en_us.json`。不會在伺服器主 Tick 下載遠端語言包。
+- Bridge 也會讀取已安裝 Fabric Mod 根目錄中的 `assets/<namespace>/lang/<locale>.json`，其中自訂語言檔優先，英文作為備援。此階段**尚未直接讀取已啟用資料包的 Client Resources，也不自動下載 Mojang 官方完整語系**；這兩種來源仍需額外驗收。
+- 每五分鐘在背景重新載入不可變語言表；語言檔損毀時保留上一份快照。文字翻譯支持 `%s`、`%1$s`、`%%` 與部分巢狀 Text Component，長度上限 1800 個 UTF-16 單位。
+- 事件：死亡訊息、進度標題與說明、遊戲模式，以及公開 `/tellraw @a` 的內容，會先嘗試翻譯並安全截斷。未找到鍵值時保留原翻譯鍵；不是把缺失鍵值虛構成中文。
+
+### 原生聊天覆寫（**明確選用**）
+
+```properties
+overwrite_native_messages=false
+```
+
+設為 `true` 後，Bridge 透過 Fabric 的 `ALLOW_CHAT_MESSAGE`／`ALLOW_COMMAND_MESSAGE` 事件，在玩家和公開指令的原生廣播位置提供長度受限的本機系統訊息，原生廣播不重複發送；Discord Relay 仍送出已核准的事件。**這會將原生簽章聊天改成系統訊息，失去原本的簽章與檢舉語意**。建議保持關閉，除非伺服器管理者理解此影響。私人指令和登入用指令不應經此管道傳播。
+
+### Minecraft 原生互動提示
+
+玩家連結碼可透過 Minecraft ClickEvent.CopyToClipboard 複製，HoverEvent 顯示提示；`/dmcc unlink` 僅作為受控的 SuggestCommand。外部 Discord 內容不能任意指定 Minecraft RunCommand／任意互動事件，避免把聊天內容提升成伺服器權限。
+
+### CI 真實整合測試邊界
+
+Fabric 1.21.8 與 1.21.9 在 GitHub Actions 啟動真實專用伺服器，Bridge 連接到**本機 Python 模擬 Gateway**，完成 Protocol v1 HMAC 驗證，並要求收到 `server_started`、`server_info_response`、Minecraft `/say` 命令執行回覆與 `server_broadcast`。另以 Python 單元測試驗證 Gateway 協定測試器。這是**真正的 Fabric Java ↔ TCP Gateway** 驗收，而不是「僅編譯」；仍不等於使用正式 Discord Token 驗證 Webhook 權限、反向貼文或真實 Minecraft 客戶端的顯示效果。僅有外部 Bot 連線後才能對這些邊界做完整端對端驗收。

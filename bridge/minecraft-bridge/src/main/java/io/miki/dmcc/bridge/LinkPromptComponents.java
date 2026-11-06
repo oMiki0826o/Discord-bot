@@ -27,7 +27,8 @@ final class LinkPromptComponents {
                 .withHoverEvent(new HoverEvent.ShowText(
                     Component.literal("Click to copy this one-time code")))
             ))
-            .append(Component.literal(" — paste it into Discord /dmcc link."));
+            .append(Component.literal(" — paste it into Discord /dmcc link. Later: "))
+            .append(unlinkHint());
     }
 
     static Component unlinkHint() {
