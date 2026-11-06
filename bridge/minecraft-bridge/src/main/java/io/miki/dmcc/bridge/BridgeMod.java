@@ -73,6 +73,7 @@ public final class BridgeMod implements ModInitializer {
     private volatile String unlinkedPlayerAction = "kick";
     private volatile boolean opSyncEnabled;
     private volatile boolean relayPlayerCommands;
+    private volatile boolean overwriteNativeMessages;
     private volatile MinecraftTranslations translations = MinecraftTranslations.empty();
     private volatile Path translationDirectory;
     private volatile String translationLocale = "en_us";
@@ -103,6 +104,25 @@ public final class BridgeMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             checkFrozenPlayers(server);
             publishMetricsOnTick(server);
+        });
+        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
+            if (!overwriteNativeMessages) return true;
+            if (sender.level().getServer() == null) return true;
+            sender.level().getServer().getPlayerList().broadcastSystemMessage(
+                NativeMessageFormatter.playerChat(sender.getName().getString(), message.signedContent()),
+                false
+            );
+            relayPlayerChat(sender, message.signedContent());
+            return false;
+        });
+        ServerMessageEvents.ALLOW_COMMAND_MESSAGE.register((message, source, params) -> {
+            if (!overwriteNativeMessages) return true;
+            source.getServer().getPlayerList().broadcastSystemMessage(
+                NativeMessageFormatter.publicCommand(source.getTextName(), message.signedContent()),
+                false
+            );
+            relayPublicCommand(source.getTextName(), message.signedContent());
+            return false;
         });
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             relayPlayerChat(sender, message.signedContent())
@@ -173,6 +193,7 @@ public final class BridgeMod implements ModInitializer {
             unlinkedPlayerAction = settings.unlinkedPlayerAction();
             opSyncEnabled = settings.opSyncEnabled();
             relayPlayerCommands = settings.relayPlayerCommands();
+            overwriteNativeMessages = settings.overwriteNativeMessages();
             translationLocale = settings.translationLocale();
             translationDirectory = configPath.resolveSibling("minecraft-bridge").resolve("lang");
             translationRoots = FabricLoader.getInstance().getAllMods().stream()
@@ -853,6 +874,7 @@ public final class BridgeMod implements ModInitializer {
         requireLinking = false;
         opSyncEnabled = false;
         relayPlayerCommands = false;
+        overwriteNativeMessages = false;
         opSyncApplier.clear();
         translations = MinecraftTranslations.empty();
         translationDirectory = null;

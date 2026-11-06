@@ -126,6 +126,32 @@ final class BridgeSettingsTest {
     }
 
     @Test
+    void nativeMessageReplacementIsExplicitAndStrictlyBoolean() throws Exception {
+        var defaults = BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            """));
+        assertFalse(defaults.overwriteNativeMessages());
+        var enabled = BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            overwrite_native_messages=true
+            """));
+        assertTrue(enabled.overwriteNativeMessages());
+        assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            overwrite_native_messages=YES
+            """)));
+    }
+
+    @Test
     void rejectsUnsafeOrIncompleteConfiguration() {
         assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
             server_id=survival

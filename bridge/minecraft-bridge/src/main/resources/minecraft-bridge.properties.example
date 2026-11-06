@@ -23,3 +23,8 @@ relay_player_commands=false
 # Optional Minecraft language catalog. Files are loaded from config/minecraft-bridge/lang/
 # with English fallback; update files while the server runs (5-minute refresh).
 translation_locale=en_us
+
+# Optional: replace Minecraft's signed chat/command broadcasts with styled system messages.
+# WARNING: players lose native chat signature/report semantics in this mode.
+# Leave false unless the server owner explicitly wants upstream-style overwrite.
+overwrite_native_messages=false
