@@ -341,9 +341,7 @@ public final class BridgeMod implements ModInitializer {
             String code = decision.code();
             if (!code.equals(session.lastCode)) {
                 session.lastCode = code;
-                player.sendSystemMessage(Component.literal(
-                    "DMCC: Link your Discord account using /dmcc link " + code + " in Discord."
-                ));
+                player.sendSystemMessage(LinkPromptComponents.linkCode(code));
             }
             freezeChecks.clear(uuid);
             session.nextRequestAtNanos = now + TimeUnit.SECONDS.toNanos(15);
@@ -602,7 +600,7 @@ public final class BridgeMod implements ModInitializer {
         server.execute(() -> {
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerId());
             if (player != null) {
-                player.sendSystemMessage(Component.literal("DMCC link code: " + code + " — use /dmcc link " + code + " in Discord."));
+                player.sendSystemMessage(LinkPromptComponents.linkCode(code));
             }
         });
     }
