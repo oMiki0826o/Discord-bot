@@ -165,8 +165,18 @@ jobs:
       - name: Smoke-test actual Fabric server startup
         working-directory: bridge/minecraft-bridge
         run: |
-          mkdir -p run
+          mkdir -p run/config
           printf 'eula=true\n' > run/eula.txt
+          cat > run/config/minecraft-bridge.properties <<'EOF'
+          server_id=survival
+          gateway_host=127.0.0.1
+          gateway_port=8765
+          authentication_secret=smoke-only-development-secret
+          translation_locale=zh_tw
+          EOF
+          DMCC_SMOKE_SECRET=smoke-only-development-secret python3 ../../tools/fabric_gateway_smoke.py --output run/dmcc-gateway-verified.json > run/gateway-smoke.log 2>&1 &
+          gateway_pid=$!
+          sleep 1
           set +e
           timeout --signal=TERM --kill-after=5s 120s ./gradlew --no-daemon \
             -Pminecraft_version=${{ matrix.minecraft }} \
@@ -183,7 +193,19 @@ jobs:
             tail -n 160 run/smoke.log
             exit 1
           fi
-          echo "Fabric server startup and mixin loading smoke verified"
+          if ! test -s run/dmcc-gateway-verified.json; then
+            cat run/gateway-smoke.log
+            echo "Fabric Bridge never authenticated to the loopback Gateway" >&2
+            exit 1
+          fi
+          wait "$gateway_pid"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path("run/dmcc-gateway-verified.json").read_text())
+          assert result["authenticated"] and result["server_info_response"]
+          PY
+          echo "Fabric server startup, mixin loading and authenticated Gateway exchange verified"
 
       - name: Stage compiled Fabric bridge and checksum
         working-directory: bridge/minecraft-bridge
