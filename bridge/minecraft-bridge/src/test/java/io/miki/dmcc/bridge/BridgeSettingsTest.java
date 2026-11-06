@@ -100,6 +100,32 @@ final class BridgeSettingsTest {
     }
 
     @Test
+    void translationLocaleIsOptInAndValidated() throws Exception {
+        var defaults = BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            """));
+        assertEquals("en_us", defaults.translationLocale());
+        var chosen = BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            translation_locale=zh_tw
+            """));
+        assertEquals("zh_tw", chosen.translationLocale());
+        assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
+            server_id=survival
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            translation_locale=../zh_tw
+            """)));
+    }
+
+    @Test
     void rejectsUnsafeOrIncompleteConfiguration() {
         assertThrows(ProtocolException.class, () -> BridgeSettings.fromReader(new StringReader("""
             server_id=survival

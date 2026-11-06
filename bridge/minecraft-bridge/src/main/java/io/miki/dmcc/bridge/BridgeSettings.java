@@ -22,10 +22,11 @@ public record BridgeSettings(
     boolean requireLinking,
     String unlinkedPlayerAction,
     boolean opSyncEnabled,
-    boolean relayPlayerCommands
+    boolean relayPlayerCommands,
+    String translationLocale
 ) {
     public BridgeSettings(String serverId, String gatewayHost, int gatewayPort, String authenticationSecret) {
-        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick", false, false);
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick", false, false, "en_us");
     }
 
     /** Backward-compatible constructor for callers predating optional link enforcement. */
@@ -37,7 +38,7 @@ public record BridgeSettings(
         this(
             serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
-            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, false, "kick", false, false
+            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, false, "kick", false, false, "en_us"
         );
     }
 
@@ -51,7 +52,7 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
             pendingRequestTtlMillis, gracefulShutdownTimeoutMillis,
-            requireLinking, unlinkedPlayerAction, false, false);
+            requireLinking, unlinkedPlayerAction, false, false, "en_us");
     }
 
     /** Preserves the previous OP-enabled constructor for existing users and tests. */
@@ -64,7 +65,21 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
             pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, requireLinking,
-            unlinkedPlayerAction, opSyncEnabled, false);
+            unlinkedPlayerAction, opSyncEnabled, false, "en_us");
+    }
+
+    /** Preserves pre-translation configuration API. */
+    public BridgeSettings(
+        String serverId, String gatewayHost, int gatewayPort, String authenticationSecret,
+        int connectTimeoutMillis, int authenticationTimeoutMillis, int readTimeoutMillis,
+        long pendingRequestTtlMillis, int gracefulShutdownTimeoutMillis,
+        boolean requireLinking, String unlinkedPlayerAction, boolean opSyncEnabled,
+        boolean relayPlayerCommands
+    ) {
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret,
+            connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
+            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, requireLinking,
+            unlinkedPlayerAction, opSyncEnabled, relayPlayerCommands, "en_us");
     }
 
     /** Parses a standard Java properties stream without doing filesystem I/O. */
@@ -100,8 +115,18 @@ public record BridgeSettings(
             strictBoolean(properties, "require_linking", false),
             unlinkedAction(properties),
             strictBoolean(properties, "op_sync_enabled", false),
-            strictBoolean(properties, "relay_player_commands", false)
+            strictBoolean(properties, "relay_player_commands", false),
+            locale(properties)
         );
+    }
+
+    private static String locale(Properties properties) {
+        String value = properties.getProperty("translation_locale", "en_us")
+            .trim().toLowerCase(java.util.Locale.ROOT);
+        if (!value.matches("[a-z]{2}_[a-z]{2}")) {
+            throw new ProtocolException("translation_locale must be a language_region code");
+        }
+        return value;
     }
 
     private static boolean strictBoolean(Properties properties, String key, boolean fallback) {

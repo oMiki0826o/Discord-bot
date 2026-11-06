@@ -19,3 +19,7 @@ unlinked_player_action=kick
 
 # Opt-in public-only player command relay to Discord; private/auth commands remain filtered.
 relay_player_commands=false
+
+# Optional Minecraft language catalog. Files are loaded from config/minecraft-bridge/lang/
+# with English fallback; update files while the server runs (5-minute refresh).
+translation_locale=en_us

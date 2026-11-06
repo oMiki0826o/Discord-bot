@@ -73,6 +73,9 @@ public final class BridgeMod implements ModInitializer {
     private volatile String unlinkedPlayerAction = "kick";
     private volatile boolean opSyncEnabled;
     private volatile boolean relayPlayerCommands;
+    private volatile MinecraftTranslations translations = MinecraftTranslations.empty();
+    private volatile Path translationDirectory;
+    private volatile String translationLocale = "en_us";
     private final OpSyncApplier opSyncApplier = new OpSyncApplier();
     private final FreezeRegistry frozenPlayers = new FreezeRegistry(
         System::nanoTime, TimeUnit.MINUTES.toNanos(5)
@@ -169,6 +172,10 @@ public final class BridgeMod implements ModInitializer {
             unlinkedPlayerAction = settings.unlinkedPlayerAction();
             opSyncEnabled = settings.opSyncEnabled();
             relayPlayerCommands = settings.relayPlayerCommands();
+            translationLocale = settings.translationLocale();
+            translationDirectory = configPath.resolveSibling("minecraft-bridge").resolve("lang");
+            refreshTranslations();
+            statsWorker.scheduleAtFixedRate(this::refreshTranslations, 300, 300, TimeUnit.SECONDS);
             if (opSyncEnabled) {
                 try {
                     opSyncApplier.configure(configPath.resolveSibling("minecraft-bridge-managed-ops.properties"));
@@ -494,13 +501,28 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
+    /**
+     * Immutable snapshots permit asynchronous reloads without exposing partial locale maps
+     * to callbacks on the Minecraft tick thread.
+     */
+    private void refreshTranslations() {
+        Path directory = translationDirectory;
+        if (directory == null) return;
+        try {
+            translations = MinecraftTranslations.load(directory, translationLocale);
+        } catch (IOException | IllegalArgumentException invalid) {
+            LOGGER.warn("DMCC language catalogs unavailable; preserving previous snapshot: {}",
+                invalid.toString());
+        }
+    }
+
     private void sendGameModeChange(ServerPlayer player, GameType gameType) {
         BridgeRuntime active = runtime;
         if (active == null || serverId == null) return;
         if (!active.publishEvent(new ProtocolEnvelope(1, "player_gamemode", serverId, null, Map.of(
                 "minecraft_uuid", player.getStringUUID(),
                 "player_name", player.getName().getString(),
-                "game_mode", gameType.getLongDisplayName().getString()
+                "game_mode", translations.translate(gameType.getLongDisplayName())
             )))) {
             LOGGER.debug("DMCC game mode event skipped because the Bridge is offline");
         }
@@ -512,7 +534,7 @@ public final class BridgeMod implements ModInitializer {
         if (!active.publishEvent(new ProtocolEnvelope(1, "player_death", serverId, null, Map.of(
                 "minecraft_uuid", player.getStringUUID(),
                 "player_name", player.getName().getString(),
-                "death_message", player.getCombatTracker().getDeathMessage().getString()
+                "death_message", translations.translate(player.getCombatTracker().getDeathMessage())
             )))) {
             LOGGER.debug("DMCC death event skipped because the Bridge is offline");
         }
@@ -536,8 +558,8 @@ public final class BridgeMod implements ModInitializer {
         if (!active.publishEvent(new ProtocolEnvelope(1, "player_advancement", serverId, null, Map.of(
                 "minecraft_uuid", player.getStringUUID(),
                 "player_name", player.getName().getString(),
-                "title", display.getTitle().getString(),
-                "description", display.getDescription().getString(),
+                "title", translations.translate(display.getTitle()),
+                "description", translations.translate(display.getDescription()),
                 "advancement_type", type
             )))) {
             LOGGER.debug("DMCC advancement event skipped because the Bridge is offline");
@@ -830,6 +852,8 @@ public final class BridgeMod implements ModInitializer {
         opSyncEnabled = false;
         relayPlayerCommands = false;
         opSyncApplier.clear();
+        translations = MinecraftTranslations.empty();
+        translationDirectory = null;
         loginGate.clearAll();
         freezeChecks.clearAll();
         frozenPlayers.clearAll();
