@@ -91,16 +91,30 @@ def verify_fabric_bridge(
             peer.sendall(packet("login_success", {}))
             started = None
             response = None
-            while response is None:
+            command_ack = False
+            public_broadcast = False
+            while not (response is not None and command_ack and public_broadcast):
                 incoming = _receive(peer)
                 kind = incoming.get("type")
-                if kind == "server_started":
+                if kind == "server_started" and started is None:
                     started = incoming
-                    peer.sendall(packet(
-                        "server_info_request", {}, "smoke-info-1",
-                    ))
+                    peer.sendall(packet("server_info_request", {}, "smoke-info-1"))
                 elif kind == "server_info_response" and incoming.get("request_id") == "smoke-info-1":
                     response = incoming
+                    peer.sendall(packet(
+                        "command_request",
+                        {"command": "say DMCC_GATEWAY_SMOKE", "op_level": 4},
+                        "smoke-command-1",
+                    ))
+                elif kind == "command_response" and incoming.get("request_id") == "smoke-command-1":
+                    data = incoming["data"]
+                    if not isinstance(data.get("result"), (int, float)):
+                        raise AssertionError("Java command response missing result")
+                    command_ack = True
+                elif kind == "server_broadcast":
+                    data = incoming["data"]
+                    if "DMCC_GATEWAY_SMOKE" in str(data.get("message", "")):
+                        public_broadcast = True
                 elif kind == "ping":
                     peer.sendall(packet("pong", incoming["data"], incoming.get("request_id")))
             if started is None or not isinstance(started["data"].get("minecraft_version"), str):
@@ -113,9 +127,11 @@ def verify_fabric_bridge(
                 "authenticated": True,
                 "minecraft_version": started["data"]["minecraft_version"],
                 "server_info_response": True,
+                "command_acknowledged": command_ack,
+                "public_broadcast_observed": public_broadcast,
             }), encoding="utf-8")
             temporary.replace(output)
-            print("DMCC live Fabric handshake and server_info verified", flush=True)
+            print("DMCC Fabric authentication, server info, command and event relay verified", flush=True)
 
 
 def main() -> int:

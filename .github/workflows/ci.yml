@@ -204,6 +204,7 @@ jobs:
           from pathlib import Path
           result = json.loads(Path("run/dmcc-gateway-verified.json").read_text())
           assert result["authenticated"] and result["server_info_response"]
+          assert result["command_acknowledged"] and result["public_broadcast_observed"]
           PY
           echo "Fabric server startup, mixin loading and authenticated Gateway exchange verified"
 

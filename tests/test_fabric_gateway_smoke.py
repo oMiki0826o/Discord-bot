@@ -54,6 +54,13 @@ def test_live_fabric_gateway_probe_exchanges_hmac_and_server_info(tmp_path: Path
         sock.sendall(packet("server_started", {"minecraft_version": "1.21.8"}))
         assert _read(sock)["type"] == "server_info_request"
         sock.sendall(packet("server_info_response", {"online_players": 0}, "smoke-info-1"))
+        command = _read(sock)
+        assert command["type"] == "command_request"
+        assert command["data"]["command"] == "say DMCC_GATEWAY_SMOKE"
+        sock.sendall(packet(
+            "server_broadcast", {"message": "DMCC_GATEWAY_SMOKE", "player_name": "Server"}
+        ))
+        sock.sendall(packet("command_response", {"result": 1, "output": ""}, "smoke-command-1"))
     thread.join(timeout=3)
     assert not thread.is_alive()
     assert not errors
@@ -61,4 +68,6 @@ def test_live_fabric_gateway_probe_exchanges_hmac_and_server_info(tmp_path: Path
         "authenticated": True,
         "minecraft_version": "1.21.8",
         "server_info_response": True,
+        "command_acknowledged": True,
+        "public_broadcast_observed": True,
     }
