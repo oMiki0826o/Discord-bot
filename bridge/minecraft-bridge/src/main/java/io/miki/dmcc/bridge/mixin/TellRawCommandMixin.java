@@ -30,7 +30,7 @@ final class TellRawCommandMixin {
         if (recipient == null) return;
         Component message = ComponentArgument.getResolvedComponent(context, "message", recipient);
         BridgeMod.relayTellrawCommand(
-            context.getSource().getTextName(), message.getString()
+            context.getSource().getTextName(), message
         );
     }
 }

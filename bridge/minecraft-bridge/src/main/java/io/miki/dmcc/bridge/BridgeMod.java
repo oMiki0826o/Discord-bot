@@ -467,10 +467,10 @@ public final class BridgeMod implements ModInitializer {
         return PublicTellrawPolicy.isPublicBroadcast(command);
     }
 
-    public static void relayTellrawCommand(String sender, String content) {
+    public static void relayTellrawCommand(String sender, Component content) {
         BridgeMod mod = activeInstance;
-        if (mod == null) return;
-        String sanitized = PublicTellrawPolicy.sanitize(content);
+        if (mod == null || content == null) return;
+        String sanitized = PublicTellrawPolicy.sanitize(mod.translations.translate(content));
         if (!sanitized.isBlank()) mod.relayPublicCommand(sender, sanitized);
     }
 
