@@ -76,6 +76,7 @@ public final class BridgeMod implements ModInitializer {
     private volatile MinecraftTranslations translations = MinecraftTranslations.empty();
     private volatile Path translationDirectory;
     private volatile String translationLocale = "en_us";
+    private volatile List<Path> translationRoots = List.of();
     private final OpSyncApplier opSyncApplier = new OpSyncApplier();
     private final FreezeRegistry frozenPlayers = new FreezeRegistry(
         System::nanoTime, TimeUnit.MINUTES.toNanos(5)
@@ -174,6 +175,9 @@ public final class BridgeMod implements ModInitializer {
             relayPlayerCommands = settings.relayPlayerCommands();
             translationLocale = settings.translationLocale();
             translationDirectory = configPath.resolveSibling("minecraft-bridge").resolve("lang");
+            translationRoots = FabricLoader.getInstance().getAllMods().stream()
+                .flatMap(mod -> mod.getRootPaths().stream())
+                .limit(256).toList();
             refreshTranslations();
             statsWorker.scheduleAtFixedRate(this::refreshTranslations, 300, 300, TimeUnit.SECONDS);
             if (opSyncEnabled) {
@@ -509,7 +513,7 @@ public final class BridgeMod implements ModInitializer {
         Path directory = translationDirectory;
         if (directory == null) return;
         try {
-            translations = MinecraftTranslations.load(directory, translationLocale);
+            translations = MinecraftTranslations.load(directory, translationLocale, translationRoots);
         } catch (IOException | IllegalArgumentException invalid) {
             LOGGER.warn("DMCC language catalogs unavailable; preserving previous snapshot: {}",
                 invalid.toString());
@@ -854,6 +858,7 @@ public final class BridgeMod implements ModInitializer {
         opSyncApplier.clear();
         translations = MinecraftTranslations.empty();
         translationDirectory = null;
+        translationRoots = List.of();
         loginGate.clearAll();
         freezeChecks.clearAll();
         frozenPlayers.clearAll();

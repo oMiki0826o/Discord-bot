@@ -13,6 +13,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.List;
+import java.util.stream.Stream;
 import java.util.regex.Pattern;
 
 /**
@@ -37,15 +39,46 @@ final class MinecraftTranslations {
     }
 
     static MinecraftTranslations load(Path directory, String rawLocale) throws IOException {
+        return load(directory, rawLocale, List.of());
+    }
+
+    static MinecraftTranslations load(Path directory, String rawLocale, Iterable<Path> roots) throws IOException {
         if (directory == null) throw new IllegalArgumentException("missing language directory");
         String locale = rawLocale == null ? "en_us" : rawLocale.toLowerCase(Locale.ROOT);
         if (!LOCALE.matcher(locale).matches()) throw new IllegalArgumentException("invalid locale");
         Map<String, String> result = new HashMap<>();
         readLanguage(directory.resolve(locale + ".json"), result);
+        readModRoots(roots, locale, result);
         if (!locale.equals("en_us")) {
             readLanguage(directory.resolve("en_us.json"), result);
+            readModRoots(roots, "en_us", result);
         }
         return new MinecraftTranslations(result);
+    }
+
+    private static void readModRoots(
+        Iterable<Path> roots, String locale, Map<String, String> target
+    ) {
+        if (roots == null) return;
+        int scanned = 0;
+        for (Path root : roots) {
+            if (++scanned > 256) break;
+            if (root == null) continue;
+            Path assets = root.resolve("assets");
+            if (!Files.isDirectory(assets) || Files.isSymbolicLink(assets)) continue;
+            try (Stream<Path> namespaces = Files.list(assets)) {
+                for (Path namespace : namespaces.limit(128).toList()) {
+                    if (!Files.isDirectory(namespace) || Files.isSymbolicLink(namespace)) continue;
+                    try {
+                        readLanguage(namespace.resolve("lang").resolve(locale + ".json"), target);
+                    } catch (IOException invalid) {
+                        // One damaged or oversized mod translation must not break other mods.
+                    }
+                }
+            } catch (IOException invalid) {
+                // Optional mod resource roots may be missing or temporarily inaccessible.
+            }
+        }
     }
 
     private static void readLanguage(Path file, Map<String, String> target) throws IOException {

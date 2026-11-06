@@ -44,6 +44,30 @@ class MinecraftTranslationsTest {
     }
 
     @Test
+    void readsModLanguageAssetsWithCustomOverridesAndEnglishFallback() throws Exception {
+        Path config = directory.resolve("config");
+        Path mod = directory.resolve("mod-root");
+        Path assets = mod.resolve("assets").resolve("example").resolve("lang");
+        Files.createDirectories(config);
+        Files.createDirectories(assets);
+        Files.writeString(config.resolve("zh_tw.json"), """
+            {"mod.title":"自訂繁中"}
+            """);
+        Files.writeString(assets.resolve("zh_tw.json"), """
+            {"mod.title":"模組繁中", "mod.description":"模組說明"}
+            """);
+        Files.writeString(assets.resolve("en_us.json"), """
+            {"mod.fallback":"Fallback from mod"}
+            """);
+        MinecraftTranslations translations = MinecraftTranslations.load(
+            config, "zh_tw", java.util.List.of(mod)
+        );
+        assertEquals("自訂繁中", translations.translateKey("mod.title"));
+        assertEquals("模組說明", translations.translateKey("mod.description"));
+        assertEquals("Fallback from mod", translations.translateKey("mod.fallback"));
+    }
+
+    @Test
     void formattingIsBoundedAndDoesNotExecuteUnexpectedPlaceholders() throws Exception {
         Path folder = directory.resolve("lang");
         Files.createDirectories(folder);
