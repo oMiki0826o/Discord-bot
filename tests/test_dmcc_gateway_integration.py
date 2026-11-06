@@ -133,3 +133,62 @@ def test_unauthenticated_bridge_cannot_inject_minecraft_chat():
         finally:
             await gateway.close()
     asyncio.run(scenario())
+
+
+def test_link_status_roundtrip_over_authenticated_gateway(tmp_path):
+    from bot.mod.dmcc.repositories.links import JsonLinkRepository
+    from bot.mod.dmcc.services.linking import LinkingService
+    from bot.mod.dmcc.services.link_requests import LinkRequestHandler
+
+    async def scenario():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        settings = DmccSettings.from_mapping({
+            **DEFAULT_SETTINGS,
+            "gateway": {"host": "127.0.0.1", "port": port},
+            "servers": [{"server_id": "survival", "bridge": {
+                "enabled": True, "secret_env": "BRIDGE_TEST_SECRET",
+            }}],
+        }, environ={"BRIDGE_TEST_SECRET": "a-long-unique-local-integration-secret"})
+        gateway = Gateway(settings)
+        store = JsonLinkRepository(tmp_path / "links.json")
+        linking = LinkingService(link_store=store, code_factory=lambda: "ABCDEF")
+        gateway.relay.subscribe(LinkRequestHandler(linking, gateway).handle)
+        await gateway.start()
+        try:
+            reader, writer = await asyncio.open_connection(*gateway.address)
+            try:
+                await _send(writer, "handshake", {})
+                challenge = await _receive(reader)
+                await _send(writer, "authenticate", {
+                    "response": create_response(
+                        challenge.data["challenge"], "a-long-unique-local-integration-secret"
+                    )
+                })
+                assert (await _receive(reader)).type == "login_success"
+                uuid = "123e4567-e89b-12d3-a456-426614174000"
+                writer.write(encode_frame(Envelope(1, "link_status_request", "survival", "status-1", {
+                    "minecraft_uuid": uuid, "minecraft_name": "Steve",
+                })))
+                await writer.drain()
+                response = await _receive(reader)
+                assert response.type == "link_status_response"
+                assert response.request_id == "status-1"
+                assert response.data["linked"] is False
+                assert response.data["code"] == "ABCDEF"
+                linking.confirm_discord_link("ABCDEF", "234567890123456789")
+                writer.write(encode_frame(Envelope(1, "link_status_request", "survival", "status-2", {
+                    "minecraft_uuid": uuid, "minecraft_name": "Steve",
+                })))
+                await writer.drain()
+                response = await _receive(reader)
+                assert response.type == "link_status_response"
+                assert response.request_id == "status-2"
+                assert response.data == {"minecraft_uuid": uuid, "linked": True}
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        finally:
+            await gateway.close()
+    asyncio.run(scenario())

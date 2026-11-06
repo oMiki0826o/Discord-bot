@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Mapping, Sequence
 
 from ..repositories.state import JsonStateRepository
+from .message_format import format_discord_content, render_extras
+from .rich_text import parse_discord_markdown, colorize_author_prefix
 
 
 # ── Gateway Contract ──────────────────────
@@ -49,12 +51,14 @@ class DiscordRelayService:
         gateway: MinecraftMessageSender,
         *,
         history_limit: int = 1_000,
+        rich_chat: bool = False,
     ) -> None:
         if history_limit < 1:
             raise ValueError("history_limit must be positive")
         self._repository = repository
         self._gateway = gateway
         self._history_limit = history_limit
+        self._rich_chat = rich_chat
         self._messages: OrderedDict[str, _RelayedMessage] = OrderedDict()
 
     async def forward_discord_message(
@@ -76,6 +80,11 @@ class DiscordRelayService:
         *,
         reply_preview: str | None = None,
         attachment_urls: tuple[str, ...] = (),
+        sticker_names: tuple[str, ...] = (),
+        embed_summaries: tuple[tuple[str, str], ...] = (),
+        poll_summary: tuple[str, Sequence[str]] | None = None,
+        mention_names: Mapping[str, str] | None = None,
+        author_color: str | None = None,
     ) -> bool:
         """Forward a Discord create event and retain only transient edit/delete metadata."""
 
@@ -84,16 +93,28 @@ class DiscordRelayService:
         if not isinstance(author_name, str) or not author_name.strip():
             return False
         normalized_content = content.strip() if isinstance(content, str) else ""
-        attachments = tuple(url.strip() for url in attachment_urls if isinstance(url, str) and url.strip())
-        if not normalized_content and not attachments:
+        attachments = tuple((url.rsplit("/", 1)[-1][:80], url) for url in attachment_urls if isinstance(url, str))
+        rendered = format_discord_content(normalized_content, mentions=mention_names)
+        extras = render_extras(
+            attachments=attachments,
+            stickers=sticker_names,
+            embeds=embed_summaries,
+            poll=poll_summary,
+        )
+        if not rendered and not extras:
             return False
         lines: list[str] = []
         if isinstance(reply_preview, str) and reply_preview.strip():
-            lines.append("↪ " + reply_preview.strip()[:500])
-        if normalized_content:
-            lines.append(f"<{author_name.strip()}> {normalized_content}")
-        lines.extend("Attachment: " + url for url in attachments[:5])
-        delivered = await self._forward(channel_id, "\n".join(lines))
+            lines.append("↪ " + format_discord_content(reply_preview, mentions=mention_names, limit=300))
+        if rendered:
+            lines.append(f"<{author_name.strip()[:64]}> {rendered}")
+        if extras:
+            lines.append(extras)
+        delivered = await self._forward(
+            channel_id, "\n".join(lines),
+            author_prefix=f"<{author_name.strip()[:64]}> " if rendered else None,
+            author_color=author_color,
+        )
         if delivered:
             self._remember(message_id, _RelayedMessage(
                 self._repository.server_for_channel(channel_id) or "",
@@ -101,6 +122,21 @@ class DiscordRelayService:
                 normalized_content,
             ))
         return delivered
+
+    async def forward_reaction(
+        self, message_id: str, reactor_name: str, emoji: str,
+    ) -> bool:
+        """Relay only reactions for messages originally forwarded by this bridge."""
+        previous = self._messages.get(message_id)
+        if previous is None or not reactor_name or not emoji:
+            return False
+        rendered = format_discord_content(emoji, limit=60)
+        if not rendered:
+            return False
+        return await self._send_to_server(
+            previous.server_id,
+            f"* {reactor_name.strip()[:64]} reacted {rendered} to {previous.author_name[:64]}'s message",
+        )
 
     async def forward_edit(self, message_id: str, updated_content: str) -> bool:
         """Emit a bounded edit notice only to the server that received the original message."""
@@ -125,19 +161,33 @@ class DiscordRelayService:
             return False
         return await self._send_to_server(previous.server_id, f"* {previous.author_name} deleted a Discord message")
 
-    async def _forward(self, channel_id: str, message: str) -> bool:
+    async def _forward(
+        self, channel_id: str, message: str, *,
+        author_prefix: str | None = None, author_color: str | None = None,
+    ) -> bool:
         if not isinstance(message, str) or not message.strip():
             return False
         server_id = self._repository.server_for_channel(channel_id)
         if server_id is None:
             return False
-        return await self._send_to_server(server_id, message)
+        return await self._send_to_server(
+            server_id, message, author_prefix=author_prefix, author_color=author_color,
+        )
 
-    async def _send_to_server(self, server_id: str, message: str) -> bool:
+    async def _send_to_server(
+        self, server_id: str, message: str, *,
+        author_prefix: str | None = None, author_color: str | None = None,
+    ) -> bool:
         if not server_id:
             return False
         try:
-            await self._gateway.send_minecraft_message(server_id, message)
+            if self._rich_chat and hasattr(self._gateway, "send_minecraft_segments"):
+                segments = parse_discord_markdown(message)
+                if author_prefix and author_color:
+                    segments = colorize_author_prefix(segments, author_prefix, author_color)
+                await self._gateway.send_minecraft_segments(server_id, segments)
+            else:
+                await self._gateway.send_minecraft_message(server_id, message)
         except LookupError:
             return False
         return True

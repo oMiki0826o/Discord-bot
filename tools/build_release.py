@@ -148,7 +148,7 @@ def build_release(output: Path | None = None, *, require_bridge: bool = False) -
         parts = sums.read_text(encoding="utf-8").strip().split()
         if len(parts) != 2 or parts[1] != "java_bridge.jar" or hashlib.sha256(artifact.read_bytes()).hexdigest() != parts[0]:
             raise RuntimeError("Minecraft Bridge artifact checksum is invalid")
-        for version in ("1.21.9",):
+        for version in ("1.21.9", "neoforge-1.21.8"):
             extra = PROJECT_ROOT / "bridge" / "versions" / version
             binary, checksums = extra / "java_bridge.jar", extra / "SHA256SUMS"
             if binary not in files or checksums not in files:

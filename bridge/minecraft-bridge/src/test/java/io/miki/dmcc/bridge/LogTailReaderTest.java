@@ -32,6 +32,52 @@ final class LogTailReaderTest {
     }
 
     @Test
+    void cursorStartsAtEndAndResumesWithoutDuplicateHistory() throws Exception {
+        Path log = directory.resolve("latest.log");
+        Files.writeString(log, "older history\n", StandardCharsets.UTF_8);
+        var initial = LogTailReader.readChunk(log, -1L, "", 8192);
+        assertEquals("", initial.content());
+        assertTrue(initial.nextOffset() > 0);
+        assertTrue(!initial.fileId().isEmpty());
+        Files.writeString(log, "new line\n", StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.APPEND);
+        var next = LogTailReader.readChunk(log, initial.nextOffset(), initial.fileId(), 8192);
+        assertEquals("new line\n", next.content());
+        assertEquals(Files.size(log), next.nextOffset());
+        var again = LogTailReader.readChunk(log, next.nextOffset(), next.fileId(), 8192);
+        assertEquals("", again.content());
+    }
+
+    @Test
+    void cursorDetectsRotationAndSupportsBoundedBacklog() throws Exception {
+        Path log = directory.resolve("latest.log");
+        Files.writeString(log, "old content\n", StandardCharsets.UTF_8);
+        var original = LogTailReader.readChunk(log, -1L, "", 8192);
+        Path rotated = directory.resolve("latest.log.1");
+        Files.move(log, rotated);
+        Files.writeString(log, "abc\n123\n", StandardCharsets.UTF_8);
+        var first = LogTailReader.readChunk(log, original.nextOffset(), original.fileId(), 4);
+        assertEquals("abc\n", first.content());
+        assertTrue(!original.fileId().equals(first.fileId()));
+        assertEquals(4L, first.nextOffset());
+        var second = LogTailReader.readChunk(log, first.nextOffset(), first.fileId(), 4);
+        assertEquals("123\n", second.content());
+    }
+
+    @Test
+    void oversizedLogLineDoesNotStreamPartialSensitiveValues() throws Exception {
+        Path log = directory.resolve("latest.log");
+        Files.writeString(log, "token=" + "x".repeat(80), StandardCharsets.UTF_8);
+        var first = LogTailReader.readChunk(log, 0L, "", 32);
+        assertEquals("", first.content());
+        assertEquals(Files.size(log), first.nextOffset());
+        Files.writeString(log, "\npublic event\n", StandardCharsets.UTF_8,
+            java.nio.file.StandardOpenOption.APPEND);
+        var next = LogTailReader.readChunk(log, first.nextOffset(), first.fileId(), 32);
+        assertTrue(next.content().contains("public event"));
+        assertTrue(!next.content().contains("token="));
+    }
+
+    @Test
     void missingFileReturnsEmptyTail() throws Exception {
         assertEquals("", LogTailReader.read(directory.resolve("missing.log"), 64));
     }

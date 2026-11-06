@@ -19,6 +19,9 @@ from ..services.command_catalog import CommandCatalog
 from ..services.discord_relay import DiscordRelayService
 from ..services.info import InfoService
 from ..services.linking import LinkingService
+from ..services.nickname_sync import NicknameSyncService
+from ..services.mentions import MinecraftMentionService, collect_role_mention_users
+from ..services.release_updates import ReleaseUpdateService
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -67,6 +70,9 @@ class DmccUserCog(commands.Cog):
         op_levels: OpLevelResolver,
         bridge: BridgeRequestService,
         autocomplete: AutocompleteService,
+        nicknames: NicknameSyncService | None = None,
+        mentions: MinecraftMentionService | None = None,
+        release_updates: ReleaseUpdateService | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -76,6 +82,9 @@ class DmccUserCog(commands.Cog):
         self._op_levels = op_levels
         self._bridge = bridge
         self._autocomplete = autocomplete
+        self._nicknames = nicknames
+        self._mentions = mentions
+        self._release_updates = release_updates
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -84,6 +93,27 @@ class DmccUserCog(commands.Cog):
         names = self._info.help_for(self._op_level(interaction))
         await interaction.response.send_message(
             "DMCC commands: " + ", ".join(f"`{name}`" for name in names),
+            ephemeral=True,
+        )
+
+    @dmcc_slash.command(name="update", description="Check for a newer Discord Minecraft Bridge release")
+    async def slash_update(self, interaction) -> None:
+        if self._release_updates is None:
+            await interaction.response.send_message(
+                "DMCC release check is unavailable.", ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await self._release_updates.check_now()
+        if result is None:
+            await interaction.followup.send(
+                "No verified newer stable DMCC release was found, or GitHub is unavailable.",
+                ephemeral=True,
+            )
+            return
+        tag, url = result
+        await interaction.followup.send(
+            f"New DMCC release: {tag}\\n{url}\\nCheck Fabric compatibility before updating.",
             ephemeral=True,
         )
 
@@ -233,6 +263,8 @@ class DmccUserCog(commands.Cog):
         await interaction.response.send_message(
             f"Linked Minecraft account `{account.minecraft_name}`.", ephemeral=True
         )
+        if self._nicknames is not None:
+            await self._nicknames.sync_user(str(interaction.user.id))
 
     @dmcc_slash.command(name="unlink", description="Unlink all of your Minecraft accounts")
     async def slash_unlink(self, interaction) -> None:
@@ -241,6 +273,8 @@ class DmccUserCog(commands.Cog):
         if removed:
             message = f"Unlinked {removed} Minecraft account(s)."
         await interaction.response.send_message(message, ephemeral=True)
+        if removed and self._nicknames is not None:
+            await self._nicknames.sync_user(str(interaction.user.id))
 
     @dmcc_slash.command(name="links", description="List linked Minecraft accounts for a Discord user")
     async def slash_links(self, interaction, discord_user_id: str) -> None:
@@ -264,6 +298,16 @@ class DmccUserCog(commands.Cog):
         )
 
     @commands.Cog.listener()
+    async def on_member_join(self, member: Any) -> None:
+        if self._nicknames is not None:
+            await self._nicknames.sync_user(str(member.id), member=member)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: Any, after: Any) -> None:
+        if self._nicknames is not None and before.nick != after.nick:
+            await self._nicknames.sync_user(str(after.id), member=after)
+
+    @commands.Cog.listener()
     async def on_message(self, message: Any) -> None:
         if bool(getattr(getattr(message, "author", None), "bot", False)):
             return
@@ -271,7 +315,22 @@ class DmccUserCog(commands.Cog):
         author = getattr(message, "author", None)
         if channel_id is None or author is None:
             return
-        await self._relay.forward_message(
+        poll = getattr(message, "poll", None)
+        question = getattr(getattr(poll, "question", None), "text", None)
+        answers = getattr(poll, "answers", ()) if poll is not None else ()
+        poll_summary = (
+            (str(question), tuple(str(getattr(answer, "text", "")) for answer in answers))
+            if isinstance(question, str) and question.strip() else None
+        )
+        mentioned_names = {}
+        for collection in ("mentions", "role_mentions", "channel_mentions"):
+            for target in tuple(getattr(message, collection, ()) or ()):
+                target_id = getattr(target, "id", None)
+                if target_id is not None:
+                    mentioned_names[str(target_id)] = str(
+                        getattr(target, "display_name", getattr(target, "name", ""))
+                    )[:48]
+        forwarded = await self._relay.forward_message(
             str(getattr(message, "id", "")),
             str(channel_id),
             str(getattr(author, "display_name", author)),
@@ -281,7 +340,56 @@ class DmccUserCog(commands.Cog):
                 str(getattr(item, "url", ""))
                 for item in tuple(getattr(message, "attachments", ()) or ())
             ),
+            sticker_names=tuple(
+                str(getattr(sticker, "name", "")) for sticker in tuple(
+                    getattr(message, "stickers", ()) or ()
+                )
+            ),
+            embed_summaries=tuple(
+                (str(getattr(embed, "title", "") or ""),
+                 str(getattr(embed, "url", "") or ""))
+                for embed in tuple(getattr(message, "embeds", ()) or ())
+            ),
+            poll_summary=poll_summary,
+            mention_names=mentioned_names,
+            author_color=self._discord_role_color(author),
         )
+        if forwarded and self._mentions is not None:
+            mentioned = tuple(
+                str(user.id) for user in tuple(getattr(message, "mentions", ()) or ())
+            )
+            if self._mentions.config.role_mentions:
+                from_roles = collect_role_mention_users(
+                    getattr(message, "guild", None),
+                    tuple(getattr(message, "role_mentions", ()) or ()),
+                    max_targets=self._mentions.config.max_targets,
+                )
+                mentioned = tuple(dict.fromkeys((*mentioned, *from_roles)))
+            await self._mentions.notify(
+                str(channel_id), str(getattr(author, "display_name", author)),
+                str(getattr(message, "content", "")), mentioned,
+            )
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: Any) -> None:
+        member = getattr(payload, "member", None)
+        user_id = getattr(payload, "user_id", None)
+        if user_id is None or user_id == getattr(getattr(self.bot, "user", None), "id", None):
+            return
+        if member is not None and bool(getattr(member, "bot", False)):
+            return
+        if member is None:
+            user = self.bot.get_user(user_id) if hasattr(self.bot, "get_user") else None
+            if user is None or bool(getattr(user, "bot", False)):
+                return
+            member = user
+        name = str(getattr(member, "display_name", member)).strip()
+        if name:
+            await self._relay.forward_reaction(
+                str(getattr(payload, "message_id", "")),
+                name,
+                str(getattr(payload, "emoji", "")),
+            )
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: Any) -> None:
@@ -329,6 +437,13 @@ class DmccUserCog(commands.Cog):
             discord_user_name=getattr(user, "name", None),
             role_names=(str(getattr(role, "name", "")) for role in roles),
         )
+
+    @staticmethod
+    def _discord_role_color(author: Any) -> str | None:
+        raw = getattr(getattr(author, "color", None), "value", None)
+        if type(raw) is int and 1 <= raw <= 0xFFFFFF:
+            return f"#{raw:06X}"
+        return None
 
     @staticmethod
     def _reply_preview(message: Any) -> str | None:

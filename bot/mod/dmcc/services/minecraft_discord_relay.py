@@ -16,6 +16,7 @@ from typing import Protocol
 from ..events import MinecraftEvent
 from ..repositories.state import JsonStateRepository
 from .presentation import OutboundDiscordMessage, PresentationSettings, render_message
+from .public_commands import sanitize_public_player_command
 
 
 class DiscordMessageSender(Protocol):
@@ -65,6 +66,18 @@ class MinecraftDiscordRelayService:
 
 def _legacy_content(event: MinecraftEvent) -> str | None:
     player_name = event.data.get("player_name")
+    if event.type == "player_command":
+        command = sanitize_public_player_command(event.data.get("message"))
+        if not command or not isinstance(player_name, str) or not player_name.strip():
+            return None
+        return f"**[{event.server_id}] {player_name.strip()[:64]} executed {command}**"
+    if event.type == "server_broadcast":
+        raw = event.data.get("message")
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        source = event.data.get("player_name")
+        source = source.strip()[:64] if isinstance(source, str) and source.strip() else "Server"
+        return f"**[{event.server_id}] {source}: {raw.strip()[:1500]}**"
     if event.type == "player_chat":
         message = event.data.get("message")
         if not isinstance(player_name, str) or not player_name.strip() or not isinstance(message, str) or not message.strip():

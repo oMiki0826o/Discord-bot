@@ -10,3 +10,21 @@ authentication_timeout_millis=15000
 read_timeout_millis=60000
 pending_request_ttl_millis=120000
 graceful_shutdown_timeout_millis=1500
+# OPTIONAL. Disabled by default. Requires current Python Gateway and a verified online-mode player UUID.
+# When true, "kick" checks accounts before accepting login (5s max, fail open).
+# "freeze" lets unlinked players join but temporarily restricts gameplay (5min max),
+# keeping chat and /dmcc link available. It releases immediately if Gateway disconnects.
+require_linking=false
+unlinked_player_action=kick
+
+# Opt-in public-only player command relay to Discord; private/auth commands remain filtered.
+relay_player_commands=false
+
+# Optional Minecraft language catalog. Files are loaded from config/minecraft-bridge/lang/
+# with English fallback; update files while the server runs (5-minute refresh).
+translation_locale=en_us
+
+# Optional: replace Minecraft's signed chat/command broadcasts with styled system messages.
+# WARNING: players lose native chat signature/report semantics in this mode.
+# Leave false unless the server owner explicitly wants upstream-style overwrite.
+overwrite_native_messages=false

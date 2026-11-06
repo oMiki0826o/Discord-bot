@@ -19,10 +19,12 @@ from typing import Mapping
 from urllib.parse import urlsplit
 
 from ..events import MinecraftEvent
+from .public_commands import sanitize_public_player_command
 
 EVENT_TYPES = frozenset({
     "player_chat", "player_join", "player_quit", "player_death",
     "player_advancement", "player_gamemode", "server_started", "server_stopping",
+    "server_broadcast", "player_command",
 })
 _FIELDS = frozenset({
     "player", "server", "message", "death_message", "game_mode", "title", "label",
@@ -35,9 +37,25 @@ _EVENT_TEMPLATES = {
     "player_gamemode": "**{player} 切換遊戲模式為 {game_mode}**",
     "server_started": "**{server} 已啟動**",
     "server_stopping": "**{server} 即將關閉**",
+    "server_broadcast": "**[{server}] {player}: {message}**",
+    "player_command": "**[{server}] {player}：{message}**",
 }
+_ENGLISH_EVENT_TEMPLATES = {
+    "player_join": "**{player} joined {server}**",
+    "player_quit": "**{player} left {server}**",
+    "player_death": "**{death_message}**",
+    "player_advancement": "**{player} made the advancement [{title}]**",
+    "player_gamemode": "**{player} changed game mode to {game_mode}**",
+    "server_started": "**{server} started**",
+    "server_stopping": "**{server} is stopping**",
+    "server_broadcast": "**[{server}] {player}: {message}**",
+    "player_command": "**[{server}] {player} executed {message}**",
+}
+_LOCALES = frozenset({"zh_TW", "en_US"})
 _DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_PLAYER_NAME = re.compile(r"^[A-Za-z0-9_]{3,16}$")
+_AVATAR_HOSTS = frozenset({"mc-heads.net", "crafatar.com", "cdn.discordapp.com", "media.discordapp.net"})
 
 
 class PresentationError(ValueError):
@@ -50,6 +68,7 @@ class RouteConfig:
     channel_id: str | None = None
     webhook_url: str | None = field(default=None, repr=False, compare=False)
     username: str | None = None
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +80,7 @@ class ServerPresentation:
     event_channels: Mapping[str, str]
     templates: Mapping[str, str]
     disabled_events: frozenset[str]
+    locale: str = "zh_TW"
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +111,11 @@ class PresentationSettings:
                 raise PresentationError("presentation server_id must be text")
             if not isinstance(item, Mapping):
                 raise PresentationError("presentation server entry must be an object")
-            if set(item) - {"label", "chat", "events", "event_routes", "event_channels", "templates", "disabled_events"}:
+            if set(item) - {"label", "chat", "events", "event_routes", "event_channels", "templates", "disabled_events", "locale"}:
                 raise PresentationError("unknown presentation server option")
+            locale = item.get("locale", "zh_TW")
+            if not isinstance(locale, str) or locale not in _LOCALES:
+                raise PresentationError("presentation.locale must be zh_TW or en_US")
             label = item.get("label", server_id)
             if not isinstance(label, str) or not label.strip() or len(label) > 80:
                 raise PresentationError("presentation.label must be non-empty and at most 80 characters")
@@ -134,7 +157,7 @@ class PresentationSettings:
             result[server_id] = ServerPresentation(
                 label.strip(), chat, events,
                 MappingProxyType(routes), MappingProxyType(channels), MappingProxyType(templates),
-                frozenset(raw_disabled),
+                frozenset(raw_disabled), locale,
             )
         return cls(MappingProxyType(result))
 
@@ -196,10 +219,31 @@ def _validate_webhook_url(url: str) -> None:
         raise PresentationError("webhook_url_env must resolve to a Discord HTTPS webhook URL")
 
 
+def _avatar_template(raw: object) -> str:
+    if not isinstance(raw, str) or not 1 <= len(raw) <= 400:
+        raise PresentationError("avatar_url must be a short HTTPS URL")
+    try:
+        parsed = urlsplit(raw)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in _AVATAR_HOSTS
+            or parsed.username is not None or parsed.password is not None
+            or parsed.port is not None or parsed.query or parsed.fragment
+            or not parsed.path.startswith("/")
+        ):
+            raise PresentationError("avatar_url must point to an approved HTTPS avatar host")
+        for _, field, spec, conversion in Formatter().parse(parsed.path):
+            if field is not None and (field not in {"player", "minecraft_uuid"} or spec or conversion):
+                raise PresentationError("avatar_url contains an unsupported placeholder")
+    except ValueError as exc:
+        raise PresentationError("invalid avatar_url format") from exc
+    return raw
+
+
 def _route(raw: object, environ: Mapping[str, str], label: str) -> RouteConfig:
     if not isinstance(raw, Mapping):
         raise PresentationError(f"{label} must be an object")
-    if set(raw) - {"mode", "channel_id", "webhook_url_env", "username"}:
+    if set(raw) - {"mode", "channel_id", "webhook_url_env", "username", "avatar_url"}:
         raise PresentationError(f"{label} has unknown options")
     mode = raw.get("mode", "bot")
     if mode not in {"bot", "webhook"}:
@@ -223,7 +267,12 @@ def _route(raw: object, environ: Mapping[str, str], label: str) -> RouteConfig:
         _validate_webhook_url(url)
     elif secret_env is not None:
         raise PresentationError(f"{label}.webhook_url_env requires webhook mode")
-    return RouteConfig(mode, channel_id, url, username)
+    avatar_url = raw.get("avatar_url")
+    if avatar_url is not None:
+        if mode != "webhook":
+            raise PresentationError(f"{label}.avatar_url requires Webhook mode")
+        avatar_url = _avatar_template(avatar_url)
+    return RouteConfig(mode, channel_id, url, username, avatar_url)
 
 
 def render_message(
@@ -242,10 +291,11 @@ def render_message(
     player = data.get("player_name")
     needs_player = event.type in {
         "player_chat", "player_join", "player_quit", "player_gamemode", "player_advancement",
+        "player_command",
     }
     if needs_player and (not isinstance(player, str) or not player.strip()):
         return None
-    if event.type == "player_chat":
+    if event.type in {"player_chat", "server_broadcast", "player_command"}:
         message = data.get("message")
         if not isinstance(message, str) or not message.strip():
             return None
@@ -262,9 +312,15 @@ def render_message(
         if not isinstance(game_mode, str) or not game_mode.strip():
             return None
 
+    sanitized_command = None
+    if event.type == "player_command":
+        sanitized_command = sanitize_public_player_command(data.get("message"))
+        if sanitized_command is None:
+            return None
+
     values = {
-        "server": profile.label, "player": player.strip() if isinstance(player, str) else "",
-        "message": str(data.get("message", "")).strip(),
+        "server": profile.label, "player": player.strip() if isinstance(player, str) else "Server",
+        "message": sanitized_command if sanitized_command is not None else str(data.get("message", "")).strip(),
         "death_message": str(data.get("death_message", "")).strip(),
         "title": str(data.get("title", "")).strip(),
         "game_mode": str(data.get("game_mode", "")).strip(),
@@ -277,7 +333,8 @@ def render_message(
         )
         content = template.format_map(values)
     else:
-        content = profile.templates.get(event.type, _EVENT_TEMPLATES[event.type]).format_map(values)
+        defaults = _ENGLISH_EVENT_TEMPLATES if profile.locale == "en_US" else _EVENT_TEMPLATES
+        content = profile.templates.get(event.type, defaults[event.type]).format_map(values)
     content = content.strip()[:1950]
     if not content:
         return None
@@ -289,8 +346,20 @@ def render_message(
         )
         username = name_pattern.format_map(values)[:80]
         uuid = data.get("minecraft_uuid")
-        if event.type == "player_chat" and isinstance(uuid, str) and _UUID.fullmatch(uuid):
-            avatar_url = f"https://mc-heads.net/avatar/{uuid}/64"
+        valid_uuid = uuid if isinstance(uuid, str) and _UUID.fullmatch(uuid) else None
+        valid_player = values["player"] if _PLAYER_NAME.fullmatch(values["player"]) else None
+        if route.avatar_url is not None:
+            if "{minecraft_uuid}" not in route.avatar_url or valid_uuid is not None:
+                if "{player}" not in route.avatar_url or valid_player is not None:
+                    avatar_url = route.avatar_url.format_map({
+                        "minecraft_uuid": valid_uuid or "",
+                        "player": valid_player or "",
+                    })
+        elif event.type == "player_chat":
+            if valid_uuid is not None:
+                avatar_url = f"https://mc-heads.net/avatar/{valid_uuid}/64"
+            elif valid_player is not None:
+                avatar_url = f"https://mc-heads.net/avatar/{valid_player}/64"
     return OutboundDiscordMessage(
         channel_id=channel_id,
         content=content,

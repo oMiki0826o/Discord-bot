@@ -51,6 +51,7 @@ class MonitorTarget:
     status_voice_channel_id: str | None
     mspt_threshold: float = 45.0
     mspt_recovery: float = 40.0
+    player_count_voice_channel_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +89,7 @@ class MonitoringConfig:
             if name not in server_ids or not isinstance(options, Mapping):
                 raise ValueError("unknown monitoring server_id or malformed server config")
             fields = {"label", "alert_channel_id", "topic_channel_id", "status_voice_channel_id",
-                      "mspt_threshold", "mspt_recovery"}
+                      "player_count_voice_channel_id", "mspt_threshold", "mspt_recovery"}
             if set(options) - fields:
                 raise ValueError("unknown monitor target option")
             label = options.get("label", name)
@@ -101,7 +102,7 @@ class MonitoringConfig:
             results[name] = MonitorTarget(
                 label.strip(), _channel(options.get("alert_channel_id")),
                 _channel(options.get("topic_channel_id")), _channel(options.get("status_voice_channel_id")),
-                threshold, recovery,
+                threshold, recovery, _channel(options.get("player_count_voice_channel_id")),
             )
         return cls(enabled, presence, interval, stale, duration, alert_cooldown, channel_cooldown, results)
 
@@ -197,9 +198,17 @@ class MonitoringService:
             voice = f"{target.label} · {online_status}"
             await self._edit_channel(target.topic_channel_id, "topic", topic[:1024])
             await self._edit_channel(target.status_voice_channel_id, "name", voice[:100])
+            count_text = (
+                f"{metrics.online_players}/{metrics.max_players}"
+                if metrics is not None else "—/—"
+            )
+            await self._edit_channel(
+                target.player_count_voice_channel_id, "name",
+                f"{target.label} · Players: {count_text}"[:100],
+            )
         if self.config.presence and hasattr(self._bot, "set_presence_override"):
             activity = f"Minecraft | {online_total} 人在線"
-            status = "online" if active else "dnd"
+            status = "online" if online_total > 0 else ("idle" if active else "dnd")
             if self._last_presence != (activity, status):
                 if self._bot.set_presence_override("dmcc", activity, status):
                     self._last_presence = (activity, status)
