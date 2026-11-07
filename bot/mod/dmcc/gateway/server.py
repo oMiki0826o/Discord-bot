@@ -80,10 +80,13 @@ class Gateway:
                 heartbeat_task = None
         if server is not None:
             server.close()
-            await server.wait_closed()
+        # Python 3.13's wait_closed() correctly waits for active client
+        # handlers. Close peers first or shutdown can deadlock indefinitely.
         peers = tuple(self._peers)
         await asyncio.gather(*(peer.close() for peer in peers), return_exceptions=True)
         self._peers.clear()
+        if server is not None:
+            await server.wait_closed()
 
     async def _heartbeat_loop(self) -> None:
         """監看閒置 Peer，並對已認證 Bridge 維持 Protocol 層 liveness。"""
