@@ -16,6 +16,18 @@ class PublicTellrawPolicyTest {
     }
 
     @Test
+    void onlyForwardsIdenticalMessagesForAllResolvedRecipients() {
+        assertEquals(java.util.Optional.of("All players"),
+            PublicTellrawPolicy.consensus(java.util.List.of("All players", "All players")));
+        assertEquals(java.util.Optional.empty(),
+            PublicTellrawPolicy.consensus(java.util.List.of("hello Steve", "hello Alex")));
+        assertEquals(java.util.Optional.empty(),
+            PublicTellrawPolicy.consensus(java.util.List.of()));
+        assertEquals(java.util.Optional.empty(),
+            PublicTellrawPolicy.consensus(java.util.Collections.nCopies(65, "large audience")));
+    }
+
+    @Test
     void boundsPublicMessageAndStripsDangerousPings() {
         assertEquals("hello", PublicTellrawPolicy.sanitize("hello"));
         assertEquals("[everyone]", PublicTellrawPolicy.sanitize("@everyone"));
