@@ -26,7 +26,10 @@ async def _send(writer, kind, data, request_id=None):
 async def _receive(reader):
     header = await asyncio.wait_for(reader.readexactly(4), timeout=3)
     size = struct.unpack(">I", header)[0]
-    return decode_frame(await asyncio.wait_for(reader.readexactly(size), timeout=3))
+    return decode_frame(
+        await asyncio.wait_for(reader.readexactly(size), timeout=3),
+        max_frame_bytes=262_144,
+    )
 
 
 def test_real_gateway_probe_requires_confirmed_command_and_public_event(tmp_path):
