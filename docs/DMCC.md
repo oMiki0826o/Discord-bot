@@ -372,4 +372,37 @@ overwrite_native_messages=false
 
 ### CI 真實整合測試邊界
 
-Fabric 1.21.8 與 1.21.9 在 GitHub Actions 啟動真實專用伺服器，Bridge 連接到**本機 Python 模擬 Gateway**，完成 Protocol v1 HMAC 驗證，並要求收到 `server_started`、`server_info_response`、Minecraft `/say` 命令執行回覆與 `server_broadcast`。另以 Python 單元測試驗證 Gateway 協定測試器。這是**真正的 Fabric Java ↔ TCP Gateway** 驗收，而不是「僅編譯」；仍不等於使用正式 Discord Token 驗證 Webhook 權限、反向貼文或真實 Minecraft 客戶端的顯示效果。僅有外部 Bot 連線後才能對這些邊界做完整端對端驗收。
+Fabric 1.21.8 與 1.21.9 在 GitHub Actions 啟動真實專用伺服器，Bridge 連接到專案原本的**真正 Python Gateway**，完成 Protocol v1 HMAC 驗證，並要求收到 `server_started`、`server_info_response`、Minecraft `/say` 命令執行回覆與 `server_broadcast`。另以 Python 單元測試驗證 Gateway 協定及模擬 Java Peer。這是**真正的 Fabric Java ↔ TCP Gateway** 驗收，而不是「僅編譯」；仍不等於使用正式 Discord Token 驗證 Webhook 權限、反向貼文或真實 Minecraft 客戶端的顯示效果。僅有外部 Bot 連線後才能對這些邊界做完整端對端驗收。
+
+## Fabric v3 額外強化：官方語言資源與權限／事件防護
+
+### 取得 Mojang 官方語言資源（離線快取）
+
+新增 `tools/fetch_minecraft_languages.py`，透過 Mojang 官方版本資訊與資源索引，按**明確指定的 Minecraft 版本**取得語言檔。工具只接受官方 HTTPS 網域，驗證版本資源索引與語言資源 SHA-1，限制傳輸大小並以原子寫入方式建立快取。下載失敗不會覆寫既有資料。
+
+```bash
+python3 -m tools.fetch_minecraft_languages \
+  --minecraft-version 1.21.8 \
+  --locale zh_tw \
+  --directory /path/to/minecraft/config/minecraft-bridge/lang
+```
+
+結果放在 `lang/mojang/1.21.8/zh_tw.json`，不覆蓋自訂 `lang/zh_tw.json`。Minecraft Fabric 伺服器會依當前版本載入對應快取。優先順序為：自訂語言檔 → 已安裝 Mod 語言 → 版本相符的 Mojang 官方快取 → 英文備援。沒有對應快取或翻譯鍵時，使用原有後備語言與未翻譯鍵。
+
+**此工具是需由管理員或外部排程啟動的下載命令，不會於 Minecraft 主 Tick 自動連網。** 未驗證的 Java 自動連網更新與所謂「讀取已啟用資料包 Client Resource」不計入功能完成，後者仍需對應伺服器資源管理器及實機驗證。
+
+### 公開指令及 /tellraw 安全性
+
+- 公開 `/say` 由原生指令 Mixin 觀察，不再依賴泛用 Fabric `COMMAND_MESSAGE`／`ALLOW_COMMAND_MESSAGE` 將不同收件者的訊息混為公開廣播；尤其不得把 `/msg`、`/tell` 或登入／註冊內容送入 Discord。
+- `/tellraw @a` 只在全部收件者解析後內容一致、且收件人數不超過 64 時才向 Discord 鏡像，避免選擇器／NBT／計分板內容因收件者不同而被誤轉送。原版 Minecraft 命令仍正常執行。
+- `overwrite_native_messages=true` 會將 **玩家原生聊天** 與特定公開 `/say` 廣播轉成系統訊息，會改變 Minecraft 簽章／檢舉語意，**預設仍為 false**；沒有聲稱覆寫所有私訊或所有模組自行註冊的命令。
+
+### 模板欄位擴充
+
+Discord 端的事件 `presentation` 模板除 `{player}`、`{server}`、`{message}` 等欄位外，現在也接受 `{description}`、`{advancement_type}`、`{minecraft_uuid}`、`{minecraft_version}`、`{motd}`、`{online_players}`、`{max_players}`。只能使用列出的**純變數名稱**，不接受 Python 物件屬性、索引、格式指定或任意程式碼。
+
+### 整合測試／故障注入
+
+CI Fabric 分支採用實際 `bot.mod.dmcc.gateway.server.Gateway`，與真實 Fabric 專用伺服器進行 HMAC 交換、`server_started`、伺服器資訊、公開 `/say` 執行與 `server_broadcast` 回傳；不再只靠模擬 Gateway。另有 Python 250 則聊天事件突發測試、重複伺服器 ID 拒絕、斷線重連與未完成 Request 取消回歸測試。
+
+**仍需外部設備／服務才能驗證**：真正 Discord API Bot/Webhook 權限與速率限制、真實 Minecraft 客戶端的簽章／Hover／點擊顯示、長時間大流量壓力及跨主機環境。GitHub Actions 通過不能等同完成正式服務端到端驗收。
