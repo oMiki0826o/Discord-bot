@@ -116,6 +116,20 @@ public final class BridgeMod implements ModInitializer {
             relayPlayerChat(sender, message.signedContent());
             return false;
         });
+        // Fabric API calls COMMAND_MESSAGE only for broadcasts addressed to
+        // all players (e.g. /say and /me); recipient-scoped /msg is excluded.
+        ServerMessageEvents.ALLOW_COMMAND_MESSAGE.register((message, source, params) -> {
+            if (!overwriteNativeMessages) return true;
+            source.getServer().getPlayerList().broadcastSystemMessage(
+                NativeMessageFormatter.publicCommand(source.getTextName(), message.signedContent()),
+                false
+            );
+            relayPublicCommand(source.getTextName(), message.signedContent());
+            return false;
+        });
+        ServerMessageEvents.COMMAND_MESSAGE.register((message, source, params) ->
+            relayPublicCommand(source.getTextName(), message.signedContent())
+        );
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             relayPlayerChat(sender, message.signedContent())
         );
@@ -471,22 +485,6 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
-    /**
-     * Called by the exact /say command execution hook, not the generic Fabric
-     * COMMAND_MESSAGE event (which can include recipient-specific messages).
-     * Suppress only /say's vanilla broadcast when replacing source messages.
-     */
-    public static boolean relayPublicSay(CommandSourceStack source, String content) {
-        BridgeMod mod = activeInstance;
-        if (mod == null || source == null || content == null || content.isBlank()) return false;
-        mod.relayPublicCommand(source.getTextName(), content);
-        if (!mod.overwriteNativeMessages) return false;
-        source.getServer().getPlayerList().broadcastSystemMessage(
-            NativeMessageFormatter.publicCommand(source.getTextName(), content), false
-        );
-        return true;
-    }
-
     /** Observe an explicitly public /tellraw command without changing vanilla delivery. */
     public static boolean isPublicTellrawCommand(String command) {
         return PublicTellrawPolicy.isPublicBroadcast(command);
@@ -502,10 +500,12 @@ public final class BridgeMod implements ModInitializer {
     private void relayPublicCommand(String sender, String content) {
         BridgeRuntime active = runtime;
         if (active == null || serverId == null || content == null || content.isBlank()) return;
+        String safe = PublicTellrawPolicy.sanitize(content);
+        if (safe.isBlank()) return;
         String senderName = sender == null || sender.isBlank() ? "Server" : sender;
         if (active.publishEvent(new ProtocolEnvelope(1, "server_broadcast", serverId, null, Map.of(
             "player_name", senderName,
-            "message", content
+            "message", safe
         )))) {
             commandEchoes.mark(senderName, content);
         }

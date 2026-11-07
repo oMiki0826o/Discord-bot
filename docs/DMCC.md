@@ -393,7 +393,7 @@ python3 -m tools.fetch_minecraft_languages \
 
 ### 公開指令及 /tellraw 安全性
 
-- 公開 `/say` 由原生指令 Mixin 觀察，不再依賴泛用 Fabric `COMMAND_MESSAGE`／`ALLOW_COMMAND_MESSAGE` 將不同收件者的訊息混為公開廣播；尤其不得把 `/msg`、`/tell` 或登入／註冊內容送入 Discord。
+- 公開 `/say`、`/me` 由 Fabric API 的 `COMMAND_MESSAGE`／`ALLOW_COMMAND_MESSAGE` 廣播專用事件觀察。依官方 Fabric API 定義，這些事件只在廣播給全體玩家時觸發，收件者限定的 `/msg` 不會觸發；避免使用不穩定的匿名 lambda Mixin。
 - `/tellraw @a` 只在全部收件者解析後內容一致、且收件人數不超過 64 時才向 Discord 鏡像，避免選擇器／NBT／計分板內容因收件者不同而被誤轉送。原版 Minecraft 命令仍正常執行。
 - `overwrite_native_messages=true` 會將 **玩家原生聊天** 與特定公開 `/say` 廣播轉成系統訊息，會改變 Minecraft 簽章／檢舉語意，**預設仍為 false**；沒有聲稱覆寫所有私訊或所有模組自行註冊的命令。
 

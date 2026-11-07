@@ -8,7 +8,6 @@
     "PlayerCommandMixin",
     "GameModeCommandMixin",
     "TellRawCommandMixin",
-    "SayCommandMixin",
     "PlayerAdvancementsMixin",
     "ServerPlayerMixin"
   ],
