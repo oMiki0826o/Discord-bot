@@ -43,15 +43,30 @@ final class MinecraftTranslations {
     }
 
     static MinecraftTranslations load(Path directory, String rawLocale, Iterable<Path> roots) throws IOException {
+        return load(directory, rawLocale, roots, null);
+    }
+
+    static MinecraftTranslations load(
+        Path directory, String rawLocale, Iterable<Path> roots, String minecraftVersion
+    ) throws IOException {
         if (directory == null) throw new IllegalArgumentException("missing language directory");
         String locale = rawLocale == null ? "en_us" : rawLocale.toLowerCase(Locale.ROOT);
         if (!LOCALE.matcher(locale).matches()) throw new IllegalArgumentException("invalid locale");
+        if (minecraftVersion != null && !minecraftVersion.matches("[0-9]{1,3}\\.[0-9]{1,3}(\\.[0-9]{1,3})?")) {
+            throw new IllegalArgumentException("invalid Minecraft version for cached language");
+        }
         Map<String, String> result = new HashMap<>();
         readLanguage(directory.resolve(locale + ".json"), result);
         readModRoots(roots, locale, result);
+        if (minecraftVersion != null) {
+            readLanguage(directory.resolve("mojang").resolve(minecraftVersion).resolve(locale + ".json"), result);
+        }
         if (!locale.equals("en_us")) {
             readLanguage(directory.resolve("en_us.json"), result);
             readModRoots(roots, "en_us", result);
+            if (minecraftVersion != null) {
+                readLanguage(directory.resolve("mojang").resolve(minecraftVersion).resolve("en_us.json"), result);
+            }
         }
         return new MinecraftTranslations(result);
     }

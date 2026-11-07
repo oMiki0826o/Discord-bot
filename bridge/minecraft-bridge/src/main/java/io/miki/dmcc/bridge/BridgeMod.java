@@ -77,6 +77,7 @@ public final class BridgeMod implements ModInitializer {
     private volatile MinecraftTranslations translations = MinecraftTranslations.empty();
     private volatile Path translationDirectory;
     private volatile String translationLocale = "en_us";
+    private volatile String translationVersion;
     private volatile List<Path> translationRoots = List.of();
     private final OpSyncApplier opSyncApplier = new OpSyncApplier();
     private final FreezeRegistry frozenPlayers = new FreezeRegistry(
@@ -181,6 +182,7 @@ public final class BridgeMod implements ModInitializer {
             relayPlayerCommands = settings.relayPlayerCommands();
             overwriteNativeMessages = settings.overwriteNativeMessages();
             translationLocale = settings.translationLocale();
+            translationVersion = server.getServerVersion();
             translationDirectory = configPath.resolveSibling("minecraft-bridge").resolve("lang");
             translationRoots = FabricLoader.getInstance().getAllMods().stream()
                 .flatMap(mod -> mod.getRootPaths().stream())
@@ -534,7 +536,9 @@ public final class BridgeMod implements ModInitializer {
         Path directory = translationDirectory;
         if (directory == null) return;
         try {
-            translations = MinecraftTranslations.load(directory, translationLocale, translationRoots);
+            translations = MinecraftTranslations.load(
+                directory, translationLocale, translationRoots, translationVersion
+            );
         } catch (IOException | IllegalArgumentException invalid) {
             LOGGER.warn("DMCC language catalogs unavailable; preserving previous snapshot: {}",
                 invalid.toString());
@@ -880,6 +884,7 @@ public final class BridgeMod implements ModInitializer {
         opSyncApplier.clear();
         translations = MinecraftTranslations.empty();
         translationDirectory = null;
+        translationVersion = null;
         translationRoots = List.of();
         loginGate.clearAll();
         freezeChecks.clearAll();
