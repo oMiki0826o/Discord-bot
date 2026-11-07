@@ -25,12 +25,20 @@ final class TellRawCommandMixin {
         CommandContext<CommandSourceStack> context, CallbackInfoReturnable<Integer> callback
     ) throws CommandSyntaxException {
         if (!BridgeMod.isPublicTellrawCommand(context.getInput())) return;
-        ServerPlayer recipient = EntityArgument.getPlayers(context, "targets")
-            .stream().findFirst().orElse(null);
-        if (recipient == null) return;
-        Component message = ComponentArgument.getResolvedComponent(context, "message", recipient);
-        BridgeMod.relayTellrawCommand(
-            context.getSource().getTextName(), message
-        );
+        var recipients = EntityArgument.getPlayers(context, "targets");
+        if (recipients.isEmpty() || recipients.size() > 64) return;
+        java.util.List<String> rendered = new java.util.ArrayList<>();
+        Component first = null;
+        for (ServerPlayer recipient : recipients) {
+            Component message = ComponentArgument.getResolvedComponent(
+                context, "message", recipient
+            );
+            if (first == null) first = message;
+            rendered.add(message.getString());
+        }
+        // Selector / score / NBT components may differ per recipient. A
+        // recipient-specific result must not be presented as a public message.
+        if (io.miki.dmcc.bridge.PublicTellrawPolicy.consensus(rendered).isEmpty()) return;
+        BridgeMod.relayTellrawCommand(context.getSource().getTextName(), first);
     }
 }
