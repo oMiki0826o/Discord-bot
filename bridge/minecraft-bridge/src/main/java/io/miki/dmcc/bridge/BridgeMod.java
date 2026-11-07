@@ -115,22 +115,8 @@ public final class BridgeMod implements ModInitializer {
             relayPlayerChat(sender, message.signedContent());
             return false;
         });
-        ServerMessageEvents.ALLOW_COMMAND_MESSAGE.register((message, source, params) -> {
-            if (!overwriteNativeMessages) return true;
-            source.getServer().getPlayerList().broadcastSystemMessage(
-                NativeMessageFormatter.publicCommand(source.getTextName(), message.signedContent()),
-                false
-            );
-            relayPublicCommand(source.getTextName(), message.signedContent());
-            return false;
-        });
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             relayPlayerChat(sender, message.signedContent())
-        );
-        // Fabric only invokes this for command messages broadcast to the public,
-        // not recipient-scoped private commands such as /msg or /tell.
-        ServerMessageEvents.COMMAND_MESSAGE.register((message, source, params) ->
-            relayPublicCommand(source.getTextName(), message.signedContent())
         );
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             freezeOnJoin(handler.getPlayer());
@@ -481,6 +467,22 @@ public final class BridgeMod implements ModInitializer {
         } catch (IllegalArgumentException invalid) {
             LOGGER.debug("Unable to capture Minecraft server timing: {}", invalid.getMessage());
         }
+    }
+
+    /**
+     * Called by the exact /say command execution hook, not the generic Fabric
+     * COMMAND_MESSAGE event (which can include recipient-specific messages).
+     * Suppress only /say's vanilla broadcast when replacing source messages.
+     */
+    public static boolean relayPublicSay(CommandSourceStack source, String content) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || source == null || content == null || content.isBlank()) return false;
+        mod.relayPublicCommand(source.getTextName(), content);
+        if (!mod.overwriteNativeMessages) return false;
+        source.getServer().getPlayerList().broadcastSystemMessage(
+            NativeMessageFormatter.publicCommand(source.getTextName(), content), false
+        );
+        return true;
     }
 
     /** Observe an explicitly public /tellraw command without changing vanilla delivery. */

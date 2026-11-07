@@ -21,5 +21,8 @@ class PublicPlayerCommandPolicyTest {
         assertEquals("", PublicPlayerCommandPolicy.sanitize("say " + "x".repeat(1900)));
         assertEquals("", PublicPlayerCommandPolicy.sanitize("say hi\n/op Steve"));
         assertEquals("/say [everyone]", PublicPlayerCommandPolicy.sanitize("say @everyone"));
+        assertEquals("", PublicPlayerCommandPolicy.sanitize("msg @a private"));
+        assertEquals("", PublicPlayerCommandPolicy.sanitize("teammsg hidden"));
+        assertEquals("", PublicPlayerCommandPolicy.sanitize("w Steve password"));
     }
 }
