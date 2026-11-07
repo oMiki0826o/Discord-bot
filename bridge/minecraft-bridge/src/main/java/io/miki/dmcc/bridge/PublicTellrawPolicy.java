@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
  * players is eligible for Discord forwarding. No selector filters or
  * execute-wrapped private command can match.
  */
-final class PublicTellrawPolicy {
+public final class PublicTellrawPolicy {
     private static final Pattern BROADCAST = Pattern.compile(
         "^/?tellraw\\s+@a\\s+\\S[\\s\\S]*$", Pattern.CASE_INSENSITIVE
     );
@@ -18,7 +18,7 @@ final class PublicTellrawPolicy {
         return input != null && input.length() <= 32_768 && BROADCAST.matcher(input.trim()).matches();
     }
 
-    static java.util.Optional<String> consensus(java.util.List<String> rendered) {
+    public static java.util.Optional<String> consensus(java.util.List<String> rendered) {
         if (rendered == null || rendered.isEmpty() || rendered.size() > 64) {
             return java.util.Optional.empty();
         }
