@@ -196,7 +196,8 @@ jobs:
           fi
           if ! test -s run/dmcc-gateway-verified.json; then
             cat run/gateway-smoke.log
-            echo "Fabric Bridge never authenticated to the loopback Gateway" >&2
+            tail -n 120 run/smoke.log
+            echo "Fabric Bridge failed the real Gateway command and event smoke" >&2
             exit 1
           fi
           wait "$gateway_pid"

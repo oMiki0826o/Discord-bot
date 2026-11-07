@@ -57,19 +57,25 @@ async def run_real_gateway_probe(
         ready.set()
     try:
         async with asyncio.timeout(timeout):
+            print("DMCC smoke: waiting for server_started", flush=True)
             await started.wait()
+            print("DMCC smoke: server_started accepted", flush=True)
             info = await gateway.requests.request(
                 "survival", "server_info_request", {},
             )
+            print("DMCC smoke: server_info_response received", flush=True)
             if not isinstance(info.get("online_players"), (int, float)):
                 raise AssertionError("server_info_response missing player count")
             reply = await gateway.requests.request(
                 "survival", "command_request",
                 {"command": "say DMCC_GATEWAY_SMOKE", "op_level": 4},
             )
+            print("DMCC smoke: command_response received", flush=True)
             if not isinstance(reply.get("result"), (int, float)):
                 raise AssertionError("command_response missing result")
+            print("DMCC smoke: waiting for server_broadcast", flush=True)
             await public_message.wait()
+            print("DMCC smoke: server_broadcast observed", flush=True)
             result = {
                 "authenticated": True,
                 "minecraft_version": minecraft_version,
