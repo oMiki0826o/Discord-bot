@@ -68,6 +68,28 @@ class MinecraftTranslationsTest {
     }
 
     @Test
+    void versionSpecificVerifiedMojangCacheLoadsWithoutOverridingCustomLanguage() throws Exception {
+        Path languageFolder = directory.resolve("lang");
+        Path mojang = languageFolder.resolve("mojang").resolve("1.21.8");
+        Files.createDirectories(mojang);
+        Files.writeString(mojang.resolve("zh_tw.json"), """
+            {"death.attack.arrow":"官方翻譯", "other.key":"Mojang only"}
+            """);
+        Files.writeString(languageFolder.resolve("zh_tw.json"), """
+            {"death.attack.arrow":"管理員覆寫"}
+            """);
+        var translations = MinecraftTranslations.load(
+            languageFolder, "zh_tw", java.util.List.of(), "1.21.8"
+        );
+        assertEquals("管理員覆寫", translations.translateKey("death.attack.arrow"));
+        assertEquals("Mojang only", translations.translateKey("other.key"));
+        var wrongVersion = MinecraftTranslations.load(
+            languageFolder, "zh_tw", java.util.List.of(), "1.21.9"
+        );
+        assertEquals("other.key", wrongVersion.translateKey("other.key"));
+    }
+
+    @Test
     void formattingIsBoundedAndDoesNotExecuteUnexpectedPlaceholders() throws Exception {
         Path folder = directory.resolve("lang");
         Files.createDirectories(folder);
