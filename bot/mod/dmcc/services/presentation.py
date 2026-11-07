@@ -28,6 +28,8 @@ EVENT_TYPES = frozenset({
 })
 _FIELDS = frozenset({
     "player", "server", "message", "death_message", "game_mode", "title", "label",
+    "description", "advancement_type", "minecraft_uuid", "minecraft_version",
+    "motd", "online_players", "max_players",
 })
 _EVENT_TEMPLATES = {
     "player_join": "**{player} 加入了 {server}**",
@@ -325,6 +327,13 @@ def render_message(
         "title": str(data.get("title", "")).strip(),
         "game_mode": str(data.get("game_mode", "")).strip(),
         "label": str(data.get("advancement_type", "")).strip(),
+        "description": str(data.get("description", "")).strip(),
+        "advancement_type": str(data.get("advancement_type", "")).strip(),
+        "minecraft_uuid": str(data.get("minecraft_uuid", "")).strip(),
+        "minecraft_version": str(data.get("minecraft_version", "")).strip(),
+        "motd": str(data.get("motd", "")).strip(),
+        "online_players": str(data.get("online_players", "")).strip(),
+        "max_players": str(data.get("max_players", "")).strip(),
     }
     if event.type == "player_chat":
         template = profile.templates.get(
