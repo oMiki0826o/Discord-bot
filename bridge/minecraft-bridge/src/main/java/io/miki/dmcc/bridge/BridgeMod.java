@@ -79,6 +79,8 @@ public final class BridgeMod implements ModInitializer {
     private volatile String translationLocale = "en_us";
     private volatile String translationVersion;
     private volatile List<Path> translationRoots = List.of();
+    private volatile MinecraftPackTranslations.Snapshot selectedPackTranslations =
+        MinecraftPackTranslations.Snapshot.empty();
     private final OpSyncApplier opSyncApplier = new OpSyncApplier();
     private final FreezeRegistry frozenPlayers = new FreezeRegistry(
         System::nanoTime, TimeUnit.MINUTES.toNanos(5)
@@ -101,6 +103,14 @@ public final class BridgeMod implements ModInitializer {
     public void onInitialize() {
         activeInstance = this;
         ServerLifecycleEvents.SERVER_STARTED.register(this::startRuntime);
+        ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, manager, success) -> {
+            if (success) {
+                selectedPackTranslations = MinecraftPackTranslations.snapshot(
+                    server, translationLocale
+                );
+                refreshTranslations();
+            }
+        });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stopRuntime());
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             checkFrozenPlayers(server);
@@ -201,6 +211,7 @@ public final class BridgeMod implements ModInitializer {
             translationRoots = FabricLoader.getInstance().getAllMods().stream()
                 .flatMap(mod -> mod.getRootPaths().stream())
                 .limit(256).toList();
+            selectedPackTranslations = MinecraftPackTranslations.snapshot(server, translationLocale);
             refreshTranslations();
             statsWorker.scheduleAtFixedRate(this::refreshTranslations, 300, 300, TimeUnit.SECONDS);
             if (opSyncEnabled) {
@@ -537,7 +548,8 @@ public final class BridgeMod implements ModInitializer {
         if (directory == null) return;
         try {
             translations = MinecraftTranslations.load(
-                directory, translationLocale, translationRoots, translationVersion
+                directory, translationLocale, translationRoots, translationVersion,
+                selectedPackTranslations
             );
         } catch (IOException | IllegalArgumentException invalid) {
             LOGGER.warn("DMCC language catalogs unavailable; preserving previous snapshot: {}",
@@ -886,6 +898,7 @@ public final class BridgeMod implements ModInitializer {
         translationDirectory = null;
         translationVersion = null;
         translationRoots = List.of();
+        selectedPackTranslations = MinecraftPackTranslations.Snapshot.empty();
         loginGate.clearAll();
         freezeChecks.clearAll();
         frozenPlayers.clearAll();

@@ -90,6 +90,24 @@ class MinecraftTranslationsTest {
     }
 
     @Test
+    void selectedDatapacksAreMergedAfterModsBeforeOfficialAssetCache() throws Exception {
+        Path folder = directory.resolve("lang");
+        Path official = folder.resolve("mojang").resolve("1.21.8");
+        Files.createDirectories(official);
+        Files.writeString(official.resolve("zh_tw.json"), """
+            {"test.one":"Official", "test.two":"Official 2"}
+            """);
+        var packs = new MinecraftPackTranslations.Snapshot(
+            java.util.Map.of("test.one", "Selected data pack"),
+            java.util.Map.of()
+        );
+        var catalog = MinecraftTranslations.load(folder, "zh_tw", java.util.List.of(),
+            "1.21.8", packs);
+        assertEquals("Selected data pack", catalog.translateKey("test.one"));
+        assertEquals("Official 2", catalog.translateKey("test.two"));
+    }
+
+    @Test
     void formattingIsBoundedAndDoesNotExecuteUnexpectedPlaceholders() throws Exception {
         Path folder = directory.resolve("lang");
         Files.createDirectories(folder);
