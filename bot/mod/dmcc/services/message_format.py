@@ -88,6 +88,7 @@ def render_extras(
     stickers: Sequence[str] = (),
     embeds: Sequence[tuple[str, str]] = (),
     poll: tuple[str, Sequence[str]] | None = None,
+    components: Sequence[str] = (),
 ) -> str:
     """Bounded readable metadata; never fetch remote media or run HTML."""
     parts: list[str] = []
@@ -103,6 +104,10 @@ def render_extras(
         name, link = _clean(title, 90), _safe_url(url)
         if name or link:
             parts.append(f"Embed: {name or 'embed'}" + (f" — {link}" if link else ""))
+    for component in tuple(components)[:8]:
+        label = _clean(component, 70)
+        if label:
+            parts.append(f"Component: {label}")
     if poll is not None:
         question, options = poll
         q = _clean(question, 150)

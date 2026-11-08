@@ -18,7 +18,10 @@ PARSING_FLAGS: dict[str, tuple[str, ...]] = {
         "custom_emojis", "mentions", "hyperlinks", "embeds", "components",
         "timestamps", "ansi_code_blocks", "polls",
     ),
-    "minecraft_to_discord": ("custom_emojis", "mentions"),
+    "minecraft_to_discord": (
+        "custom_emojis", "unicode_emojis", "mentions", "markdown",
+        "hyperlinks", "timestamps",
+    ),
     "minecraft_to_minecraft": (
         "markdown", "unicode_emojis", "custom_emojis",
         "mentions", "hyperlinks", "timestamps",
@@ -63,6 +66,7 @@ class V3FeatureConfig:
     minecraft_mention_ids: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    private_messages: bool = False
     templates: Mapping[str, tuple[Mapping[str, object], ...]] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -72,7 +76,8 @@ class V3FeatureConfig:
         if not isinstance(value, Mapping):
             raise ValueError("v3_features must be a mapping")
         if set(value) - {"enabled", "message_parsing", "source_events", "templates",
-                          "minecraft_emoji_aliases", "minecraft_mention_ids"}:
+                          "minecraft_emoji_aliases", "minecraft_mention_ids",
+                          "private_messages"}:
             raise ValueError("unknown v3_features options")
         enabled = value.get("enabled", False)
         if type(enabled) is not bool:
@@ -84,12 +89,15 @@ class V3FeatureConfig:
             direction: _flags(parsing.get(direction, {}), names, default=True)
             for direction, names in PARSING_FLAGS.items()
         })
+        private_messages = value.get("private_messages", False)
+        if type(private_messages) is not bool:
+            raise ValueError("private_messages must be a boolean")
         raw_sources = value.get("source_events", {})
         sources = _flags(raw_sources, tuple(sorted(SOURCE_EVENTS)), default=True)
         # "msg" is never broadcast to Discord by the public-message pipeline:
         # it is kept as a schema option for a future private, consent-based route.
         allowed_sources = dict(sources)
-        allowed_sources["msg"] = False
+        allowed_sources["msg"] = private_messages and bool(sources["msg"])
         raw_templates = value.get("templates", {})
         if not isinstance(raw_templates, Mapping) or set(raw_templates) - TEMPLATE_EVENTS:
             raise ValueError("invalid v3 templates")
@@ -102,7 +110,15 @@ class V3FeatureConfig:
         })
         emoji = cls._mappings(value.get("minecraft_emoji_aliases", {}), emoji=True)
         mentions = cls._mappings(value.get("minecraft_mention_ids", {}), emoji=False)
-        return cls(enabled, parser, MappingProxyType(allowed_sources), emoji, mentions, templates)
+        return cls(
+            enabled=enabled,
+            parsing=parser,
+            source_events=MappingProxyType(allowed_sources),
+            minecraft_emoji_aliases=emoji,
+            minecraft_mention_ids=mentions,
+            private_messages=private_messages,
+            templates=templates,
+        )
 
     @staticmethod
     def _mappings(raw: object, *, emoji: bool) -> Mapping[str, str]:

@@ -14,6 +14,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Protocol, Mapping, Sequence
+import re
+import unicodedata
 
 from ..repositories.state import JsonStateRepository
 from .message_format import format_discord_content, render_extras
@@ -93,6 +95,7 @@ class DiscordRelayService:
         sticker_names: tuple[str, ...] = (),
         embed_summaries: tuple[tuple[str, str], ...] = (),
         poll_summary: tuple[str, Sequence[str]] | None = None,
+        component_summaries: tuple[str, ...] = (),
         mention_names: Mapping[str, str] | None = None,
         author_color: str | None = None,
     ) -> bool:
@@ -116,6 +119,7 @@ class DiscordRelayService:
             stickers=sticker_names if not self._features.enabled or flags["stickers"] else (),
             embeds=embed_summaries if not self._features.enabled or flags["embeds"] else (),
             poll=poll_summary if not self._features.enabled or flags["polls"] else None,
+            components=component_summaries if self._features.enabled and flags["components"] else (),
         )
         if not rendered and not extras:
             return False
@@ -126,11 +130,17 @@ class DiscordRelayService:
             lines.append(f"<{author_name.strip()[:64]}> {rendered}")
         if extras:
             lines.append(extras)
+        is_reply = bool(isinstance(reply_preview, str) and reply_preview.strip())
+        template_body = (
+            ("↪ " + format_discord_content(reply_preview, limit=300) + "\n" if is_reply else "")
+            + rendered
+        )
         delivered = await self._forward(
             channel_id, "\n".join(lines),
             author_prefix=f"<{author_name.strip()[:64]}> " if rendered else None,
             author_color=author_color,
-            template_kind="user_message", template_body=rendered,
+            template_kind="response" if is_reply and self._features.template("response") else "user_message",
+            template_body=template_body,
             template_values={"effective_name": author_name.strip()[:64], "role_color": author_color or "white"},
         )
         if delivered:
@@ -217,7 +227,15 @@ class DiscordRelayService:
                 flags = self._features.parsing["discord_to_minecraft"]
                 def parse(text: str) -> list[dict[str, object]]:
                     if self._features.enabled and not flags["markdown"]:
-                        return [{"text": text[:1800], "color": "white"}]
+                        clean = re.sub(r"[\\x00-\\x1f\\x7f]", " ", text)
+                        return [{"text": clean[:1800], "color": "white"}]
+                    if self._features.enabled and not flags["ansi_code_blocks"]:
+                        text = re.sub(r"```ansi[^\\n]*\\n", "```text\\n", text, flags=re.I)
+                    if self._features.enabled and not flags["unicode_emojis"]:
+                        text = "".join(
+                            "[emoji]" if unicodedata.category(ch) == "So" and ord(ch) >= 0x2600
+                            else ch for ch in text
+                        )
                     return parse_discord_markdown(text)
                 segments = parse(message)
                 if self._features.enabled and not flags["hyperlinks"]:

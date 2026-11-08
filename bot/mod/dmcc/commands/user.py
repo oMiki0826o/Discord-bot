@@ -351,6 +351,7 @@ class DmccUserCog(commands.Cog):
                 for embed in tuple(getattr(message, "embeds", ()) or ())
             ),
             poll_summary=poll_summary,
+            component_summaries=self._component_summaries(message),
             mention_names=mentioned_names,
             author_color=self._discord_role_color(author),
         )
@@ -437,6 +438,23 @@ class DmccUserCog(commands.Cog):
             discord_user_name=getattr(user, "name", None),
             role_names=(str(getattr(role, "name", "")) for role in roles),
         )
+
+    @staticmethod
+    def _component_summaries(message: Any) -> tuple[str, ...]:
+        """Only text labels are mirrored; custom IDs, URLs and interaction tokens never are."""
+        result: list[str] = []
+        for row in tuple(getattr(message, "components", ()) or ())[:5]:
+            nested = getattr(row, "children", None)
+            components = tuple(nested or (row,))
+            for item in components[:5]:
+                label = getattr(item, "label", None)
+                if not isinstance(label, str) or not label.strip():
+                    label = getattr(item, "placeholder", None)
+                if isinstance(label, str) and label.strip():
+                    result.append(label.strip()[:70])
+                    if len(result) >= 8:
+                        return tuple(result)
+        return tuple(result)
 
     @staticmethod
     def _discord_role_color(author: Any) -> str | None:
