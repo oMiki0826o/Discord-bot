@@ -40,6 +40,15 @@ class MinecraftDiscordRelayService:
         self._presentation = presentation or PresentationSettings.empty()
         self._features = features or V3FeatureConfig()
 
+    def apply_preview_features(
+        self, features: V3FeatureConfig,
+        presentation: PresentationSettings | None = None,
+    ) -> None:
+        """Swap display-only snapshots; keep Gateway connections untouched."""
+        self._features = features
+        if presentation is not None:
+            self._presentation = presentation
+
     async def forward(self, event: MinecraftEvent) -> bool:
         if self._features.enabled and event.type in {"player_chat", "server_broadcast"}:
             raw = event.data.get("message")

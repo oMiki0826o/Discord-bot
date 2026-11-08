@@ -123,3 +123,19 @@ class DmccOwnerCog(commands.Cog):
             if reloaded
             else "DMCC module reload failed; inspect the Bot log."
         )
+
+
+    @dmcc_group.command(name="preview-refresh")
+    @commands.is_owner()
+    async def refresh_preview(self, ctx: commands.Context) -> None:
+        """Reload only DMCC v3 message parsing and template snapshots."""
+        refresh = getattr(self.bot, "dmcc_refresh_preview", None)
+        if not callable(refresh):
+            await ctx.send("DMCC preview reload is unavailable.")
+            return
+        ok = await refresh()
+        await ctx.send(
+            "DMCC preview rendering settings refreshed without reconnecting Bridge."
+            if ok else
+            "DMCC preview reload failed; active settings are unchanged."
+        )

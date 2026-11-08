@@ -173,3 +173,17 @@ def test_v3_minecraft_event_relay_applies_explicit_aliases(tmp_path):
         "player_chat", "survival", {"player_name": "Steve", "message": "hello :bee:"}
     )))
     assert "<:bee:123456789012345678>" in sender.sent[0][1]
+
+
+def test_v3_preview_snapshot_can_be_swapped_without_recreating_relay(tmp_path):
+    from bot.mod.dmcc.repositories.state import JsonStateRepository
+    from bot.mod.dmcc.services.minecraft_discord_relay import MinecraftDiscordRelayService
+
+    state = JsonStateRepository(tmp_path / "state.json")
+    state.initialize()
+    class Sender:
+        pass
+    relay = MinecraftDiscordRelayService(state, Sender())
+    features = V3FeatureConfig.from_mapping({"enabled": True})
+    relay.apply_preview_features(features)
+    assert relay._features.enabled

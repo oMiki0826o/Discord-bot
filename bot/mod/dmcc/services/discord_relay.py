@@ -62,8 +62,14 @@ class DiscordRelayService:
         self._gateway = gateway
         self._history_limit = history_limit
         self._features = features or V3FeatureConfig()
+        self._base_rich_chat = rich_chat
         self._rich_chat = rich_chat or self._features.enabled
         self._messages: OrderedDict[str, _RelayedMessage] = OrderedDict()
+
+    def apply_preview_features(self, features: V3FeatureConfig) -> None:
+        """Atomically replace only the optional display/parser feature snapshot."""
+        self._features = features
+        self._rich_chat = self._base_rich_chat or features.enabled
 
     async def forward_discord_message(
         self,

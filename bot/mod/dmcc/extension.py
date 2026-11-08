@@ -119,6 +119,8 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     nicknames: NicknameSyncService | None = None
     release_updates: ReleaseUpdateService | None = None
     op_sync: OpSyncService | None = None
+    preview_user_relay = None
+    preview_inbound_relay = None
     try:
         await gateway.start()
         linking = LinkingService(link_store=links, max_accounts=settings.max_linked_accounts)
@@ -180,9 +182,12 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 nicknames,
                 release_updates,
             )
-            discord_queue = DiscordEventQueue(
-                MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation, features=settings.v3_features)
+            preview_user_relay = user_cog._relay
+            preview_inbound_relay = MinecraftDiscordRelayService(
+                state, DiscordDeliveryAdapter(bot), settings.presentation,
+                features=settings.v3_features,
             )
+            discord_queue = DiscordEventQueue(preview_inbound_relay)
             discord_queue.start()
             gateway.relay.subscribe(discord_queue.publish)
             for cog in (user_cog, owner_cog):
@@ -210,6 +215,26 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
         raise
     _loaded_modules[bot] = _Runtime(gateway, tuple(added_cogs), panel_clients, discord_queue, monitor, updates, console, nicknames, release_updates, op_sync)
     setattr(bot, "dmcc_gateway", gateway)
+
+    async def refresh_preview_features() -> bool:
+        # This operation only updates display/parser policy; sockets, credentials
+        # and operator permissions keep their existing validated settings.
+        load_settings = getattr(settings_registry, "load", None)
+        if not callable(load_settings):
+            return False
+        try:
+            fresh = DmccSettings.from_mapping(load_settings(SETTINGS_NAME))
+        except (RuntimeError, ValueError, OSError):
+            return False
+        if preview_user_relay is not None:
+            preview_user_relay.apply_preview_features(fresh.v3_features)
+        if preview_inbound_relay is not None:
+            preview_inbound_relay.apply_preview_features(
+                fresh.v3_features, fresh.presentation,
+            )
+        return True
+
+    setattr(bot, "dmcc_refresh_preview", refresh_preview_features)
 
 
 async def teardown(bot) -> None:
@@ -240,6 +265,8 @@ async def teardown(bot) -> None:
             await client.close()
         if hasattr(bot, "dmcc_gateway"):
             delattr(bot, "dmcc_gateway")
+        if hasattr(bot, "dmcc_refresh_preview"):
+            delattr(bot, "dmcc_refresh_preview")
 
 
 def _build_cogs(
