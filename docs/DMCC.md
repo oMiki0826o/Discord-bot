@@ -406,3 +406,10 @@ Discord 端的事件 `presentation` 模板除 `{player}`、`{server}`、`{messag
 CI Fabric 分支採用實際 `bot.mod.dmcc.gateway.server.Gateway`，與真實 Fabric 專用伺服器進行 HMAC 交換、`server_started`、伺服器資訊、公開 `/say` 執行與 `server_broadcast` 回傳；不再只靠模擬 Gateway。另有 Python 250 則聊天事件突發測試、重複伺服器 ID 拒絕、斷線重連與未完成 Request 取消回歸測試。
 
 **仍需外部設備／服務才能驗證**：真正 Discord API Bot/Webhook 權限與速率限制、真實 Minecraft 客戶端的簽章／Hover／點擊顯示、長時間大流量壓力及跨主機環境。GitHub Actions 通過不能等同完成正式服務端到端驗收。
+
+
+## Fabric DMCC v3 開發預覽：新功能入口
+
+完整說明與範例請參閱 [DMCC-FABRIC-V3-PREVIEW.md](DMCC-FABRIC-V3-PREVIEW.md) 和 [dmcc-v3-preview.json](examples/dmcc-v3-preview.json)。
+
+預覽新增：Discord ↔ Minecraft 受同意控制的私訊（`/dmcc pm`、`/dmcc dm-consent`、`/dmcc whisper`）、受權限保護的 `/dmcc broadcast`、系統／編輯／回覆模板、跨服 Minecraft 富文字、原生 NativeFormatPolicy、`/dmcc refresh` 顯示設定更新、背景官方 Mojang 語言快取。功能預設不覆寫正式 Relay，私訊與原生簽章聊天替換需明確啟用。請先在隔離測試伺服器使用。

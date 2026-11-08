@@ -19,7 +19,11 @@
       },
       "minecraft_to_discord": {
         "custom_emojis": true,
-        "mentions": true
+        "unicode_emojis": true,
+        "mentions": true,
+        "markdown": true,
+        "hyperlinks": true,
+        "timestamps": true
       },
       "minecraft_to_minecraft": {
         "markdown": true,
@@ -42,37 +46,88 @@
     "minecraft_mention_ids": {},
     "templates": {
       "user_message": [
-        {"text": "[{server}] ", "color": "{server_color}", "bold": true},
-        {"text": "<{effective_name}> ", "color": "{role_color}"},
-        {"text": "{message}", "color": "gray"}
+        {
+          "text": "[{server}] ",
+          "color": "{server_color}",
+          "bold": true
+        },
+        {
+          "text": "<{effective_name}> ",
+          "color": "{role_color}"
+        },
+        {
+          "text": "{message}",
+          "color": "gray"
+        }
       ],
       "system_message": [
-        {"text": "[{server}] ", "color": "aqua", "bold": true},
-        {"text": "{message}", "color": "gray"}
+        {
+          "text": "[{server}] ",
+          "color": "aqua",
+          "bold": true
+        },
+        {
+          "text": "{message}",
+          "color": "gray"
+        }
       ],
       "response": [
-        {"text": "↪ <{effective_name}> ", "color": "{role_color}"},
-        {"text": "{message}", "color": "dark_gray"}
+        {
+          "text": "↪ <{effective_name}> ",
+          "color": "{role_color}"
+        },
+        {
+          "text": "{message}",
+          "color": "dark_gray"
+        }
       ],
       "command": [
-        {"text": "[Discord] {effective_name} ", "color": "blue"},
-        {"text": "{message}", "color": "gray"}
+        {
+          "text": "[Discord] {effective_name} ",
+          "color": "blue"
+        },
+        {
+          "text": "{message}",
+          "color": "gray"
+        }
       ],
       "reaction": [
-        {"text": "{effective_name} reacted: ", "color": "yellow"},
-        {"text": "{message}", "color": "gray"}
+        {
+          "text": "{effective_name} reacted: ",
+          "color": "yellow"
+        },
+        {
+          "text": "{message}",
+          "color": "gray"
+        }
       ],
       "edit": [
-        {"text": "{effective_name} edited: ", "color": "aqua"},
-        {"text": "{message}", "color": "gray"}
+        {
+          "text": "{effective_name} edited: ",
+          "color": "aqua"
+        },
+        {
+          "text": "{message}",
+          "color": "gray"
+        }
       ],
       "edited_message": [
-        {"text": "{effective_name}: ", "color": "aqua"},
-        {"text": "{message}", "color": "gray"}
+        {
+          "text": "{effective_name}: ",
+          "color": "aqua"
+        },
+        {
+          "text": "{message}",
+          "color": "gray"
+        }
       ],
       "delete": [
-        {"text": "{effective_name} deleted a message", "color": "red"}
+        {
+          "text": "{effective_name} deleted a message",
+          "color": "red"
+        }
       ]
-    }
+    },
+    "private_messages": false
   }
 }

@@ -76,3 +76,60 @@ Discord API / Webhook
 ## 開發與驗收邊界
 
 這份是**所有主要能力有位置、有設定、有初步程式路徑的架構版**，不是 DMCC v3 上游 100% 行為對等證明。未完成的細節與真實 Discord／客戶端交互由實機測試暴露後再修復。此檔為公開的使用者功能說明，**私人協作文件與 Superpowers 工作筆記不得提交到 Git**。
+
+
+## 第二批初版功能：實際路由、私訊與自動語言更新
+
+本節是**已寫入開發分支的預覽實作介面**，並非 CI 或玩家實機驗證報告。
+
+### 雙向私訊（不進公開頻道）
+
+Discord `data/settings/dmcc.json`：在 `v3_features` 中設定 `"private_messages": true` 且 `"enabled": true`。既有帳號綁定仍為權限來源。
+
+- 玩家在 Minecraft 使用 `/dmcc pm <玩家名稱> <訊息>`，訊息只在當前伺服器送給指定線上玩家以及發送者。Bridge 另外送 `player_private_message` 到 Gateway，**只有**收件者的 Minecraft UUID 已綁定 Discord，而且收件者同意接受私訊時，才會發送 Discord DM。
+- 收件者先在 Discord 執行 `/dmcc dm-consent enabled:true`；取消則使用 `false`。同意設定儲存於 Bot 的私有 `data/dmcc/private_consent.json`（依 Bot 的資料庫根目錄配置），不向公共 Discord 發表。
+- Discord 端可使用 `/dmcc whisper <server_id> <player_name> <message>`，發送者須綁定 Minecraft，收件者須已同意、綁定且為目標伺服器線上玩家。Bridge 以對應 UUID 將文字顯示給單一玩家，並回傳 `minecraft_private_response` 表示是否已送達。
+- 原版 `/msg` 的所有攔截及與其他模組的私訊相容性**仍不是這個預覽版的能力**；目前提供明確的 `/dmcc pm` 與 Discord Slash 私訊替代路徑。無法直接把伺服器公開廣播視為私訊。
+
+### 公開 Discord 系統／指令訊息
+
+- `/dmcc broadcast` 是具權限門檻的公開發話指令，使用 `v3_features.templates.command`，不執行 Minecraft 任意指令。
+- Discord 系統訊息的可讀摘要透過 `templates.system_message`。一般留言、回覆、編輯、刪除、表情反應與指令可對應 `user_message`、`response`、`edit`／`edited_message`、`delete`、`reaction`、`command` 等富文字片段。
+- Discord Components 僅轉為可讀文字標籤，不傳送 Custom ID 或提交回應，也不嘗試觸發 Discord 的按鈕或選單互動。
+
+### Minecraft ↔ Minecraft 跨服聊天格式
+
+若啟用 `cross_server_relay=true` 與 `v3_features.enabled=true`，跨服 Relay 使用 `v3_features.message_parsing.minecraft_to_minecraft` 控制 Markdown、連結、時間戳、表情和顯示型提及格式。已啟用 Markdown 時可透過既有 `minecraft_components` 封包送安全的 Component 片段；禁用則退回純文字。只轉送允許的事件，不回寫來源伺服器以免循環。
+
+### Fabric 原生聊天格式與熱重載
+
+`config/minecraft-bridge.properties` 另有下列設定（初版預設為 `true`，但只有 `overwrite_native_messages=true` 時才替換原生簽章聊天）：
+
+```properties
+overwrite_native_messages=false
+native_markdown=true
+native_hyperlinks=true
+native_timestamps=true
+native_unicode_emojis=true
+native_custom_emojis=true
+native_mentions=true
+# emoji.heart=♥
+# emoji.bee=🐝
+```
+
+在 Minecraft OP 等級足夠的情況下執行 `/dmcc refresh`，即可重讀**顯示格式開關和語言**，而不重新建立 Gateway/TCP、授權及 OP 同步。Discord Bot 管理員的 `dmcc preview-refresh` 只更新預覽解析、模板及直接私訊選項；更改 Bot Gateway 埠、服務帳密或權限時，仍須使用既有模組重載流程。
+
+### Mojang 官方語言自動更新
+
+預設仍為手動下載。若管理員啟用：
+
+```properties
+translation_locale=zh_tw
+language_auto_download=true
+```
+
+Fabric 會使用背景 Worker 在啟動後及約每 12 小時向**限定的 Mojang 官方 HTTPS 網域**取得與目前 Minecraft 版本相符的語言資源，確認資源索引及 SHA-1，原子更新 `config/minecraft-bridge/lang/mojang/<版本>/<語言>.json`。失敗時保留前一版。正式伺服器應評估網路權限與跨主機網路條件；不會在 Tick Thread 同步下載。
+
+### 完成狀態與邊界
+
+所有上述主要入口與程式路徑已提交到開發分支供直接測試。此批依使用者要求**沒有等待新 CI 驗收**，所有新功能均為實驗性；部分 Minecraft 1.21.8／1.21.9 映射 API、Discord 實際權限、Client UI 以及長時間壓力仍需要在你的環境校正。**請不要把「已提交原型」解讀成已驗證 DMCC v3 的 100% 行為對等。**
