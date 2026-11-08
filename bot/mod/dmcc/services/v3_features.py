@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections.abc import Mapping
 from types import MappingProxyType
+import re
 
 PARSING_FLAGS: dict[str, tuple[str, ...]] = {
     "discord_to_minecraft": (
@@ -23,6 +24,10 @@ PARSING_FLAGS: dict[str, tuple[str, ...]] = {
         "mentions", "hyperlinks", "timestamps",
     ),
 }
+_ALIAS = re.compile(r"^[A-Za-z0-9_]{1,32}$")
+_SNOWFLAKE = re.compile(r"^[0-9]{15,20}$")
+_EMOJI_TOKEN = re.compile(r"^<a?:[A-Za-z0-9_]{1,32}:[0-9]{15,20}>$")
+
 SOURCE_EVENTS = frozenset(("say", "tell_raw", "me", "msg", "player_command"))
 TEMPLATE_EVENTS = frozenset((
     "user_message", "system_message", "response", "command",
@@ -52,6 +57,12 @@ class V3FeatureConfig:
     source_events: Mapping[str, bool] = field(default_factory=lambda: MappingProxyType({
         name: name != "msg" for name in SOURCE_EVENTS
     }))
+    minecraft_emoji_aliases: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    minecraft_mention_ids: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     templates: Mapping[str, tuple[Mapping[str, object], ...]] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -60,7 +71,8 @@ class V3FeatureConfig:
     def from_mapping(cls, value: object) -> "V3FeatureConfig":
         if not isinstance(value, Mapping):
             raise ValueError("v3_features must be a mapping")
-        if set(value) - {"enabled", "message_parsing", "source_events", "templates"}:
+        if set(value) - {"enabled", "message_parsing", "source_events", "templates",
+                          "minecraft_emoji_aliases", "minecraft_mention_ids"}:
             raise ValueError("unknown v3_features options")
         enabled = value.get("enabled", False)
         if type(enabled) is not bool:
@@ -88,7 +100,24 @@ class V3FeatureConfig:
             key: validate_segments(segment_list)
             for key, segment_list in raw_templates.items()
         })
-        return cls(enabled, parser, MappingProxyType(allowed_sources), templates)
+        emoji = cls._mappings(value.get("minecraft_emoji_aliases", {}), emoji=True)
+        mentions = cls._mappings(value.get("minecraft_mention_ids", {}), emoji=False)
+        return cls(enabled, parser, MappingProxyType(allowed_sources), emoji, mentions, templates)
+
+    @staticmethod
+    def _mappings(raw: object, *, emoji: bool) -> Mapping[str, str]:
+        if not isinstance(raw, Mapping) or len(raw) > 256:
+            raise ValueError("invalid v3 alias mappings")
+        mapped: dict[str, str] = {}
+        for key, value in raw.items():
+            if not isinstance(key, str) or not _ALIAS.fullmatch(key):
+                raise ValueError("invalid v3 alias name")
+            if not isinstance(value, str) or not (
+                _EMOJI_TOKEN.fullmatch(value) if emoji else _SNOWFLAKE.fullmatch(value)
+            ):
+                raise ValueError("invalid v3 alias target")
+            mapped[key.casefold()] = value
+        return MappingProxyType(mapped)
 
     def allows(self, direction: str, flag: str) -> bool:
         return self.enabled and bool(self.parsing.get(direction, {}).get(flag, False))

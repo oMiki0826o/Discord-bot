@@ -117,3 +117,59 @@ def test_discord_content_flags_keep_raw_markup_when_explicitly_disabled():
     assert "<t:0:R>" in format_discord_content(
         source, custom_emojis=False, timestamps=False,
     )
+
+
+def test_minecraft_to_discord_aliases_and_pings_are_explicit():
+    from bot.mod.dmcc.services.v3_minecraft import format_minecraft_message
+    converted = format_minecraft_message(
+        "Hello @Steve :firefly: @everyone @here",
+        emoji_aliases={"firefly": "<:firefly:123456789012345678>"},
+        mention_ids={"steve": "234567890123456789"},
+    )
+    assert "<@234567890123456789>" in converted
+    assert "<:firefly:123456789012345678>" in converted
+    assert "@everyone" not in converted and "@here" not in converted
+    assert ":firefly:" in format_minecraft_message(":firefly:", custom_emojis=False)
+
+
+def test_v3_config_validates_minecraft_alias_mappings():
+    active = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "minecraft_emoji_aliases": {"heart": "<:heart:123456789012345678>"},
+        "minecraft_mention_ids": {"Steve": "234567890123456789"},
+    })
+    assert active.minecraft_mention_ids["steve"] == "234567890123456789"
+    for broken in [
+        {"minecraft_mention_ids": {"Steve": "<@123456789012345678>"}},
+        {"minecraft_emoji_aliases": {"heart": "https://external.invalid/emoji.png"}},
+        {"minecraft_emoji_aliases": {"..": "<:heart:123456789012345678>"}},
+    ]:
+        with pytest.raises(ValueError):
+            V3FeatureConfig.from_mapping(broken)
+
+
+def test_v3_minecraft_event_relay_applies_explicit_aliases(tmp_path):
+    import asyncio
+    from bot.mod.dmcc.events import MinecraftEvent
+    from bot.mod.dmcc.repositories.state import JsonStateRepository
+    from bot.mod.dmcc.services.minecraft_discord_relay import MinecraftDiscordRelayService
+
+    class Sender:
+        def __init__(self):
+            self.sent = []
+        async def send_discord_message(self, channel_id, content):
+            self.sent.append((channel_id, content))
+
+    state = JsonStateRepository(tmp_path / "state.json")
+    state.initialize()
+    state.set_channel_mapping("survival", "123456789012345678")
+    sender = Sender()
+    features = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "minecraft_emoji_aliases": {"bee": "<:bee:123456789012345678>"},
+    })
+    relay = MinecraftDiscordRelayService(state, sender, features=features)
+    assert asyncio.run(relay.forward(MinecraftEvent(
+        "player_chat", "survival", {"player_name": "Steve", "message": "hello :bee:"}
+    )))
+    assert "<:bee:123456789012345678>" in sender.sent[0][1]

@@ -17,6 +17,8 @@ from ..events import MinecraftEvent
 from ..repositories.state import JsonStateRepository
 from .presentation import OutboundDiscordMessage, PresentationSettings, render_message
 from .public_commands import sanitize_public_player_command
+from .v3_features import V3FeatureConfig
+from .v3_minecraft import format_minecraft_message
 
 
 class DiscordMessageSender(Protocol):
@@ -31,12 +33,28 @@ class MinecraftDiscordRelayService:
         state: JsonStateRepository,
         sender: DiscordMessageSender,
         presentation: PresentationSettings | None = None,
+        *, features: V3FeatureConfig | None = None,
     ) -> None:
         self._state = state
         self._sender = sender
         self._presentation = presentation or PresentationSettings.empty()
+        self._features = features or V3FeatureConfig()
 
     async def forward(self, event: MinecraftEvent) -> bool:
+        if self._features.enabled and event.type in {"player_chat", "server_broadcast"}:
+            raw = event.data.get("message")
+            if isinstance(raw, str):
+                flags = self._features.parsing["minecraft_to_discord"]
+                event = MinecraftEvent(
+                    event.type, event.server_id,
+                    {**event.data, "message": format_minecraft_message(
+                        raw,
+                        emoji_aliases=self._features.minecraft_emoji_aliases,
+                        mention_ids=self._features.minecraft_mention_ids,
+                        custom_emojis=flags["custom_emojis"],
+                        mentions=flags["mentions"],
+                    )},
+                )
         channel_id = self._state.channel_for_server(event.server_id)
         profile = self._presentation.servers.get(event.server_id)
         if profile is not None:
