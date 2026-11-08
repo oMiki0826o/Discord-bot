@@ -37,24 +37,18 @@ final class MinecraftPackTranslations {
             int scanned = 0;
             for (var pack : server.getPackRepository().getSelectedPacks()) {
                 if (++scanned > 128) break;
-                try {
-                    pack.open().forEach(resource -> {
-                        try (resource) {
-                            Set<String> namespaces = resource.getNamespaces(PackType.CLIENT_RESOURCES);
-                            int namespaceCount = 0;
-                            for (String namespace : namespaces) {
-                                if (++namespaceCount > 128) break;
-                                read(resource, namespace, locale, target);
-                                if (!locale.equals("en_us")) {
-                                    read(resource, namespace, "en_us", english);
-                                }
-                            }
-                        } catch (Exception ignored) {
-                            // A single unreadable selected pack cannot halt server start.
+                try (var resource = pack.open()) {
+                    Set<String> namespaces = resource.getNamespaces(PackType.CLIENT_RESOURCES);
+                    int namespaceCount = 0;
+                    for (String namespace : namespaces) {
+                        if (++namespaceCount > 128) break;
+                        read(resource, namespace, locale, target);
+                        if (!locale.equals("en_us")) {
+                            read(resource, namespace, "en_us", english);
                         }
-                    });
-                } catch (RuntimeException ignored) {
-                    // Safely skip a disabled/corrupted resource pack.
+                    }
+                } catch (Exception ignored) {
+                    // Safely skip an unreadable selected pack.
                 }
             }
         } catch (RuntimeException ignored) {

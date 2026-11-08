@@ -182,7 +182,8 @@ def test_v3_preview_snapshot_can_be_swapped_without_recreating_relay(tmp_path):
     state = JsonStateRepository(tmp_path / "state.json")
     state.initialize()
     class Sender:
-        pass
+        def __init__(self):
+            self.sent = []
     relay = MinecraftDiscordRelayService(state, Sender())
     features = V3FeatureConfig.from_mapping({"enabled": True})
     relay.apply_preview_features(features)
