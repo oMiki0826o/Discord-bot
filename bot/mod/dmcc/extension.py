@@ -122,6 +122,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     op_sync: OpSyncService | None = None
     preview_user_relay = None
     preview_inbound_relay = None
+    preview_cross_server_relay = None
     private_relay = DmPrivateMessageService(
         bot, gateway, links,
         PrivateMessageConsent(state_path.parent / "private_consent.json"),
@@ -148,17 +149,17 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
         if settings.release_check.enabled:
             release_updates.start()
         if settings.cross_server_relay:
-            gateway.relay.subscribe(
-                CrossServerRelayService(
-                    gateway,
-                    lambda: tuple(
-                        connection.server_id
-                        for connection in gateway.manager.all()
-                        if connection.server_id is not None
-                    ),
-                    event_types=settings.cross_server_events,
-                ).forward
+            preview_cross_server_relay = CrossServerRelayService(
+                gateway,
+                lambda: tuple(
+                    connection.server_id
+                    for connection in gateway.manager.all()
+                    if connection.server_id is not None
+                ),
+                event_types=settings.cross_server_events,
+                features=settings.v3_features,
             )
+            gateway.relay.subscribe(preview_cross_server_relay.forward)
         if settings.monitoring.enabled:
             monitor = MonitoringService(bot, gateway.manager, settings.monitoring)
             gateway.relay.subscribe(monitor.on_event)
@@ -235,6 +236,8 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
         except (RuntimeError, ValueError, OSError):
             return False
         private_relay.refresh(fresh.v3_features)
+        if preview_cross_server_relay is not None:
+            preview_cross_server_relay.apply_preview_features(fresh.v3_features)
         if preview_user_relay is not None:
             preview_user_relay.apply_preview_features(fresh.v3_features)
         if preview_inbound_relay is not None:
