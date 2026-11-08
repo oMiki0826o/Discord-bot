@@ -22,6 +22,7 @@ from ..services.linking import LinkingService
 from ..services.nickname_sync import NicknameSyncService
 from ..services.mentions import MinecraftMentionService, collect_role_mention_users
 from ..services.release_updates import ReleaseUpdateService
+from ..services.private_messages import DmPrivateMessageService
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -73,6 +74,7 @@ class DmccUserCog(commands.Cog):
         nicknames: NicknameSyncService | None = None,
         mentions: MinecraftMentionService | None = None,
         release_updates: ReleaseUpdateService | None = None,
+        private_messages: DmPrivateMessageService | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -85,6 +87,7 @@ class DmccUserCog(commands.Cog):
         self._nicknames = nicknames
         self._mentions = mentions
         self._release_updates = release_updates
+        self._private_messages = private_messages
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -93,6 +96,39 @@ class DmccUserCog(commands.Cog):
         names = self._info.help_for(self._op_level(interaction))
         await interaction.response.send_message(
             "DMCC commands: " + ", ".join(f"`{name}`" for name in names),
+            ephemeral=True,
+        )
+
+    @dmcc_slash.command(name="dm-consent", description="Allow linked-player private Minecraft messages to reach your Discord DMs")
+    async def slash_dm_consent(self, interaction, enabled: bool) -> None:
+        if self._private_messages is None:
+            await interaction.response.send_message("DMCC private messages are unavailable.", ephemeral=True)
+            return
+        try:
+            self._private_messages.opt_in(str(interaction.user.id), enabled)
+        except (ValueError, OSError) as exc:
+            await interaction.response.send_message(f"DMCC consent rejected: {exc}", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Private Minecraft DMs enabled for your linked account."
+            if enabled else "Private Minecraft DMs disabled for your account.",
+            ephemeral=True,
+        )
+
+    @dmcc_slash.command(name="whisper", description="Send a private message to a consenting linked Minecraft player")
+    async def slash_whisper(
+        self, interaction, server_id: str, player_name: str, message: str,
+    ) -> None:
+        if self._private_messages is None:
+            await interaction.response.send_message("DMCC private messaging is unavailable.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        delivered = await self._private_messages.from_discord(
+            str(interaction.user.id), server_id, player_name, message,
+        )
+        await interaction.followup.send(
+            "Private Minecraft message delivered." if delivered
+            else "Private message could not be delivered (offline, no consent, or not linked).",
             ephemeral=True,
         )
 

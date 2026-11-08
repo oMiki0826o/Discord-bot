@@ -214,12 +214,13 @@ class Gateway:
             "log_response",
             "stats_response",
             "op_sync_response",
+            "minecraft_private_response",
         }:
             if not self.requests.resolve(envelope):
                 await connection.close()
             return
         if envelope.type in {
-            "server_started", "server_stopping", "server_metrics", "server_broadcast", "player_chat", "player_command", "player_join", "player_quit", "player_death", "player_advancement", "player_gamemode", "link_request", "unlink_request", "link_status_request",
+            "server_started", "server_stopping", "server_metrics", "server_broadcast", "player_chat", "player_private_message", "player_command", "player_join", "player_quit", "player_death", "player_advancement", "player_gamemode", "link_request", "unlink_request", "link_status_request",
         }:
             event_data = dict(envelope.data)
             if envelope.request_id is not None:

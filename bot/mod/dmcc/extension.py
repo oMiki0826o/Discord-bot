@@ -46,6 +46,7 @@ from .services.nickname_sync import NicknameSyncService
 from .services.release_updates import ReleaseUpdateService
 from .services.mentions import MinecraftMentionService
 from .services.op_sync import OpSyncService
+from .services.private_messages import DmPrivateMessageService, PrivateMessageConsent
 
 
 MODULE_VERSION = "0.3.0"
@@ -121,6 +122,11 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     op_sync: OpSyncService | None = None
     preview_user_relay = None
     preview_inbound_relay = None
+    private_relay = DmPrivateMessageService(
+        bot, gateway, links,
+        PrivateMessageConsent(state_path.parent / "private_consent.json"),
+        settings.v3_features,
+    )
     try:
         await gateway.start()
         linking = LinkingService(link_store=links, max_accounts=settings.max_linked_accounts)
@@ -132,6 +138,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
             )
             op_sync.start()
         gateway.relay.subscribe(LinkRequestHandler(linking, gateway).handle)
+        gateway.relay.subscribe(private_relay.from_minecraft)
         if settings.nickname_sync.enabled:
             nicknames = NicknameSyncService(bot, links, settings.nickname_sync)
             nicknames.start()
@@ -181,6 +188,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 controls,
                 nicknames,
                 release_updates,
+                private_relay,
             )
             preview_user_relay = user_cog._relay
             preview_inbound_relay = MinecraftDiscordRelayService(
@@ -226,6 +234,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
             fresh = DmccSettings.from_mapping(load_settings(SETTINGS_NAME))
         except (RuntimeError, ValueError, OSError):
             return False
+        private_relay.refresh(fresh.v3_features)
         if preview_user_relay is not None:
             preview_user_relay.apply_preview_features(fresh.v3_features)
         if preview_inbound_relay is not None:
@@ -280,6 +289,7 @@ def _build_cogs(
     controls,
     nicknames: NicknameSyncService | None = None,
     release_updates: ReleaseUpdateService | None = None,
+    private_relay: DmPrivateMessageService | None = None,
 ) -> tuple[DmccUserCog, DmccOwnerCog]:
     catalog = CommandCatalog(DmccMode(settings.mode))
     servers = ServerRegistry(settings.servers)
@@ -300,6 +310,7 @@ def _build_cogs(
         nicknames=nicknames,
         mentions=MinecraftMentionService(settings.mentions, state, links, gateway),
         release_updates=release_updates,
+        private_messages=private_relay,
     )
     owner = DmccOwnerCog(
         bot,
