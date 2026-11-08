@@ -68,12 +68,16 @@ class ConsoleStreamConfig:
     enabled: bool = False
     poll_seconds: float = 5.0
     servers: Mapping[str, str] = field(default_factory=dict)
+    execute_from_channel: bool = False
 
     @classmethod
     def from_mapping(cls, raw: object, server_ids: set[str]) -> "ConsoleStreamConfig":
-        if not isinstance(raw, Mapping) or set(raw) - {"enabled", "poll_seconds", "servers"}:
+        if not isinstance(raw, Mapping) or set(raw) - {"enabled", "poll_seconds", "servers", "execute_from_channel"}:
             raise ValueError("console_stream must be an object with documented options")
         enabled = raw.get("enabled", False)
+        execute = raw.get("execute_from_channel", False)
+        if type(execute) is not bool:
+            raise ValueError("console_stream.execute_from_channel must be boolean")
         poll = raw.get("poll_seconds", 5)
         if type(enabled) is not bool:
             raise ValueError("console_stream.enabled must be a boolean")
@@ -90,7 +94,7 @@ class ConsoleStreamConfig:
             if not isinstance(channel, str) or not channel.isascii() or not channel.isdecimal() or not 15 <= len(channel) <= 20:
                 raise ValueError("console_stream channel_id must be a Discord ID")
             result[server_id] = channel
-        return cls(enabled, float(poll), result)
+        return cls(enabled, float(poll), result, execute)
 
 
 class ConsoleStreamService:

@@ -314,6 +314,7 @@ def _build_cogs(
         mentions=MinecraftMentionService(settings.mentions, state, links, gateway),
         release_updates=release_updates,
         private_messages=private_relay,
+        console_config=settings.console_stream,
     )
     owner = DmccOwnerCog(
         bot,

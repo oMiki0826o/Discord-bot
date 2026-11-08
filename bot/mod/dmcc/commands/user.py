@@ -23,6 +23,7 @@ from ..services.nickname_sync import NicknameSyncService
 from ..services.mentions import MinecraftMentionService, collect_role_mention_users
 from ..services.release_updates import ReleaseUpdateService
 from ..services.private_messages import DmPrivateMessageService
+from ..services.console_stream import ConsoleStreamConfig, redact_console_line
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -75,6 +76,7 @@ class DmccUserCog(commands.Cog):
         mentions: MinecraftMentionService | None = None,
         release_updates: ReleaseUpdateService | None = None,
         private_messages: DmPrivateMessageService | None = None,
+        console_config: ConsoleStreamConfig | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -88,6 +90,7 @@ class DmccUserCog(commands.Cog):
         self._mentions = mentions
         self._release_updates = release_updates
         self._private_messages = private_messages
+        self._console_config = console_config or ConsoleStreamConfig()
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -377,6 +380,9 @@ class DmccUserCog(commands.Cog):
         author = getattr(message, "author", None)
         if channel_id is None or author is None:
             return
+        if self._console_config.enabled and str(channel_id) in self._console_config.servers.values():
+            await self._handle_console_channel(message, str(channel_id), author)
+            return
         poll = getattr(message, "poll", None)
         question = getattr(getattr(poll, "question", None), "text", None)
         answers = getattr(poll, "answers", ()) if poll is not None else ()
@@ -432,6 +438,34 @@ class DmccUserCog(commands.Cog):
                 str(channel_id), str(getattr(author, "display_name", author)),
                 str(getattr(message, "content", "")), mentioned,
             )
+
+    async def _handle_console_channel(self, message: Any, channel_id: str, author: Any) -> None:
+        """Only explicit, high-privilege console channels may execute commands."""
+        if not self._console_config.execute_from_channel:
+            return
+        import re
+        command = getattr(message, "content", None)
+        if not isinstance(command, str) or not command.strip() or len(command) > 1024:
+            return
+        if re.search(r"[\x00-\x1f\x7f]", command):
+            return
+        from types import SimpleNamespace
+        for server_id, configured_id in self._console_config.servers.items():
+            if configured_id != channel_id:
+                continue
+            level = self._op_level(SimpleNamespace(user=author), server_id)
+            if level < 4 or self._catalog.validate("console", level, (command,)) is not None:
+                continue
+            try:
+                output = await self._bridge.execute(server_id, command.strip(), 4)
+            except _REQUEST_ERRORS as exc:
+                output = "Console request failed: " + type(exc).__name__
+            if isinstance(output, str):
+                safe = redact_console_line(output)[:1650]
+                channel = getattr(message, "channel", None)
+                if channel is not None and hasattr(channel, "send"):
+                    await channel.send(safe or "Command completed.", allowed_mentions=AllowedMentions.none())
+            return
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: Any) -> None:
