@@ -21,7 +21,7 @@ final class NativeMessageFormatter {
         String content = sanitize(message, 1500);
         String merged = prefix + content;
         if (merged.length() > 1500) merged = merged.substring(0, 1500);
-        return Component.literal(merged);
+        return NativeRichText.format(prefix, content);
     }
 
     private static String sanitize(String raw, int limit) {

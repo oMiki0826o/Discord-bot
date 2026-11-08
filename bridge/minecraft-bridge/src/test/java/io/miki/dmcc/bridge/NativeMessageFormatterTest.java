@@ -5,6 +5,20 @@ import org.junit.jupiter.api.Test;
 
 final class NativeMessageFormatterTest {
     @Test
+    void previewNativeMarkdownAndLinksRemainBoundedAndDisplayable() {
+        var formatted = NativeMessageFormatter.playerChat(
+            "Steve", "Hello **bold** and `code` [docs](https://example.org/path)"
+        );
+        assertEquals("<Steve> Hello bold and code docs", formatted.getString());
+        assertTrue(formatted.getSiblings().stream().anyMatch(
+            part -> part.getStyle().isBold()
+        ));
+        assertTrue(formatted.getSiblings().stream().anyMatch(
+            part -> part.getStyle().getClickEvent() != null
+        ));
+    }
+
+    @Test
     void buildsBoundedNonInteractivePlayerChatReplacement() {
         var replacement = NativeMessageFormatter.playerChat("Steve", "Hello @everyone");
         assertEquals("<Steve> Hello [everyone]", replacement.getString());
