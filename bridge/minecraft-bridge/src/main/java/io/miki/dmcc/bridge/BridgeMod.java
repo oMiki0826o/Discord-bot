@@ -225,6 +225,19 @@ public final class BridgeMod implements ModInitializer {
             selectedPackTranslations = MinecraftPackTranslations.snapshot(server, translationLocale);
             refreshTranslations();
             statsWorker.scheduleAtFixedRate(this::refreshTranslations, 300, 300, TimeUnit.SECONDS);
+            if (OfficialLanguageUpdater.enabled(configPath)) {
+                OfficialLanguageUpdater updater = new OfficialLanguageUpdater();
+                statsWorker.scheduleWithFixedDelay(() -> {
+                    try {
+                        if (updater.update(translationDirectory, translationVersion, translationLocale)) {
+                            refreshTranslations();
+                            LOGGER.info("DMCC official Minecraft language cache refreshed");
+                        }
+                    } catch (IOException invalid) {
+                        LOGGER.warn("DMCC official language update skipped: {}", invalid.toString());
+                    }
+                }, 5, 43_200, TimeUnit.SECONDS);
+            }
             if (opSyncEnabled) {
                 try {
                     opSyncApplier.configure(configPath.resolveSibling("minecraft-bridge-managed-ops.properties"));

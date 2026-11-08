@@ -40,3 +40,8 @@ native_mentions=true
 # Alias examples (safe display-only substitution):
 # emoji.heart=♥
 # emoji.bee=🐝
+
+# Optional Mojang language downloads (checked asynchronously at startup and
+# every 12 hours). Uses HTTPS and official resource SHA-1 verification.
+# No network fetches are performed on the Minecraft tick thread.
+language_auto_download=false
