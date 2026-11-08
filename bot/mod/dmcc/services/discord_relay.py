@@ -18,6 +18,8 @@ from typing import Protocol, Mapping, Sequence
 from ..repositories.state import JsonStateRepository
 from .message_format import format_discord_content, render_extras
 from .rich_text import parse_discord_markdown, colorize_author_prefix
+from .v3_features import V3FeatureConfig
+from .v3_templates import render_segments
 
 
 # ── Gateway Contract ──────────────────────
@@ -52,13 +54,15 @@ class DiscordRelayService:
         *,
         history_limit: int = 1_000,
         rich_chat: bool = False,
+        features: V3FeatureConfig | None = None,
     ) -> None:
         if history_limit < 1:
             raise ValueError("history_limit must be positive")
         self._repository = repository
         self._gateway = gateway
         self._history_limit = history_limit
-        self._rich_chat = rich_chat
+        self._features = features or V3FeatureConfig()
+        self._rich_chat = rich_chat or self._features.enabled
         self._messages: OrderedDict[str, _RelayedMessage] = OrderedDict()
 
     async def forward_discord_message(
@@ -94,12 +98,18 @@ class DiscordRelayService:
             return False
         normalized_content = content.strip() if isinstance(content, str) else ""
         attachments = tuple((url.rsplit("/", 1)[-1][:80], url) for url in attachment_urls if isinstance(url, str))
-        rendered = format_discord_content(normalized_content, mentions=mention_names)
+        flags = self._features.parsing["discord_to_minecraft"]
+        rendered = format_discord_content(
+            normalized_content,
+            mentions=mention_names if not self._features.enabled or flags["mentions"] else {},
+            custom_emojis=not self._features.enabled or flags["custom_emojis"],
+            timestamps=not self._features.enabled or flags["timestamps"],
+        )
         extras = render_extras(
-            attachments=attachments,
-            stickers=sticker_names,
-            embeds=embed_summaries,
-            poll=poll_summary,
+            attachments=attachments if not self._features.enabled or flags["attachments"] else (),
+            stickers=sticker_names if not self._features.enabled or flags["stickers"] else (),
+            embeds=embed_summaries if not self._features.enabled or flags["embeds"] else (),
+            poll=poll_summary if not self._features.enabled or flags["polls"] else None,
         )
         if not rendered and not extras:
             return False
@@ -114,6 +124,8 @@ class DiscordRelayService:
             channel_id, "\n".join(lines),
             author_prefix=f"<{author_name.strip()[:64]}> " if rendered else None,
             author_color=author_color,
+            template_kind="user_message", template_body=rendered,
+            template_values={"effective_name": author_name.strip()[:64], "role_color": author_color or "white"},
         )
         if delivered:
             self._remember(message_id, _RelayedMessage(
@@ -136,6 +148,8 @@ class DiscordRelayService:
         return await self._send_to_server(
             previous.server_id,
             f"* {reactor_name.strip()[:64]} reacted {rendered} to {previous.author_name[:64]}'s message",
+            template_kind="reaction", template_body=rendered,
+            template_values={"effective_name": reactor_name.strip()[:64]},
         )
 
     async def forward_edit(self, message_id: str, updated_content: str) -> bool:
@@ -148,6 +162,8 @@ class DiscordRelayService:
         delivered = await self._send_to_server(
             previous.server_id,
             f"* {previous.author_name} edited: {previous.content[:500]} → {normalized[:500]}",
+            template_kind="edit", template_body=normalized,
+            template_values={"effective_name": previous.author_name[:64]},
         )
         if delivered:
             self._remember(message_id, _RelayedMessage(previous.server_id, previous.author_name, normalized))
@@ -159,11 +175,17 @@ class DiscordRelayService:
         previous = self._messages.pop(message_id, None)
         if previous is None:
             return False
-        return await self._send_to_server(previous.server_id, f"* {previous.author_name} deleted a Discord message")
+        return await self._send_to_server(
+            previous.server_id, f"* {previous.author_name} deleted a Discord message",
+            template_kind="delete", template_body="",
+            template_values={"effective_name": previous.author_name[:64]},
+        )
 
     async def _forward(
         self, channel_id: str, message: str, *,
         author_prefix: str | None = None, author_color: str | None = None,
+        template_kind: str | None = None, template_body: str | None = None,
+        template_values: Mapping[str, str] | None = None,
     ) -> bool:
         if not isinstance(message, str) or not message.strip():
             return False
@@ -172,18 +194,41 @@ class DiscordRelayService:
             return False
         return await self._send_to_server(
             server_id, message, author_prefix=author_prefix, author_color=author_color,
+            template_kind=template_kind, template_body=template_body,
+            template_values=template_values,
         )
 
     async def _send_to_server(
         self, server_id: str, message: str, *,
         author_prefix: str | None = None, author_color: str | None = None,
+        template_kind: str | None = None, template_body: str | None = None,
+        template_values: Mapping[str, str] | None = None,
     ) -> bool:
         if not server_id:
             return False
         try:
             if self._rich_chat and hasattr(self._gateway, "send_minecraft_segments"):
-                segments = parse_discord_markdown(message)
-                if author_prefix and author_color:
+                flags = self._features.parsing["discord_to_minecraft"]
+                def parse(text: str) -> list[dict[str, object]]:
+                    if self._features.enabled and not flags["markdown"]:
+                        return [{"text": text[:1800], "color": "white"}]
+                    return parse_discord_markdown(text)
+                segments = parse(message)
+                if self._features.enabled and not flags["hyperlinks"]:
+                    segments = [
+                        {key: val for key, val in item.items()
+                         if key not in {"click_url", "hover_text"}}
+                        for item in segments
+                    ]
+                if self._features.enabled and template_kind:
+                    template = self._features.template(template_kind)
+                    if template:
+                        values = {
+                            "server": server_id, "server_color": "white",
+                            **(template_values or {}),
+                        }
+                        segments = render_segments(template, values, parse(template_body or ""))
+                if author_prefix and author_color and template_kind is None:
                     segments = colorize_author_prefix(segments, author_prefix, author_color)
                 await self._gateway.send_minecraft_segments(server_id, segments)
             else:

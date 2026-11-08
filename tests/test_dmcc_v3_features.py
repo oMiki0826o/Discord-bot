@@ -53,3 +53,56 @@ def test_rich_template_keeps_message_formatting_and_clip_limits():
     clipped = render_segments([{"text": "{message}"}], {},
         [{"text": "🦋" * 2000, "color": "white"}])
     assert sum(len(str(p["text"]).encode("utf-16-le")) // 2 for p in clipped) <= 1800
+
+
+
+def test_config_wires_v3_feature_matrix_and_requires_opt_in():
+    from bot.mod.dmcc.config import DEFAULT_SETTINGS, DmccSettings, SettingsError
+    defaults = DmccSettings.from_mapping(DEFAULT_SETTINGS)
+    assert not defaults.v3_features.enabled
+    custom = DmccSettings.from_mapping({
+        **DEFAULT_SETTINGS,
+        "v3_features": {
+            "enabled": True,
+            "message_parsing": {"discord_to_minecraft": {"attachments": False}},
+            "templates": {"user_message": [
+                {"text": "[{server}] "},
+                {"text": "{message}", "color": "gray"},
+            ]},
+        },
+    })
+    assert custom.v3_features.enabled
+    assert not custom.v3_features.allows("discord_to_minecraft", "attachments")
+    with pytest.raises(SettingsError):
+        DmccSettings.from_mapping({**DEFAULT_SETTINGS, "v3_features": {"enabled": "yes"}})
+
+
+def test_discord_relay_uses_v3_user_message_template(tmp_path):
+    import asyncio
+    from bot.mod.dmcc.repositories.state import JsonStateRepository
+    from bot.mod.dmcc.services.discord_relay import DiscordRelayService
+
+    class Gateway:
+        def __init__(self):
+            self.sent = []
+        async def send_minecraft_segments(self, server_id, segments):
+            self.sent.append((server_id, segments))
+    state = JsonStateRepository(tmp_path / "state.json")
+    state.initialize()
+    state.set_channel_mapping("survival", "123456789012345678")
+    features = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "templates": {"user_message": [
+            {"text": "[{server}] ", "color": "gold"},
+            {"text": "<{effective_name}> ", "color": "{role_color}"},
+            {"text": "{message}", "color": "gray"},
+        ]},
+    })
+    gateway = Gateway()
+    relay = DiscordRelayService(state, gateway, features=features)
+    assert asyncio.run(relay.forward_message(
+        "121", "123456789012345678", "Alex", "Hello **Steve**", author_color="#AA55CC"
+    ))
+    segs = gateway.sent[0][1]
+    assert "".join(str(s["text"]) for s in segs) == "[survival] <Alex> Hello Steve"
+    assert any(p.get("bold") and p.get("text") == "Steve" for p in segs)

@@ -181,7 +181,7 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
                 release_updates,
             )
             discord_queue = DiscordEventQueue(
-                MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation)
+                MinecraftDiscordRelayService(state, DiscordDeliveryAdapter(bot), settings.presentation, features=settings.v3_features)
             )
             discord_queue.start()
             gateway.relay.subscribe(discord_queue.publish)
@@ -260,7 +260,10 @@ def _build_cogs(
     bridge = BridgeRequestService(gateway.requests)
     user = DmccUserCog(
         bot,
-        relay=DiscordRelayService(state, gateway, rich_chat=settings.rich_chat),
+        relay=DiscordRelayService(
+            state, gateway, rich_chat=settings.rich_chat,
+            features=settings.v3_features,
+        ),
         linking=linking,
         info=info,
         catalog=catalog,

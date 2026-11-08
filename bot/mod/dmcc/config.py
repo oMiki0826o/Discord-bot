@@ -23,6 +23,7 @@ from .services.nickname_sync import NicknameSyncConfig
 from .services.release_updates import ReleaseCheckConfig
 from .services.mentions import MentionConfig
 from .services.op_sync import OpSyncConfig
+from .services.v3_features import V3FeatureConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -48,6 +49,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "mentions": {"enabled": False},
     "rich_chat": False,
     "op_sync": {"enabled": False},
+    "v3_features": {"enabled": False},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -76,6 +78,7 @@ def build_settings_schema(rule_type):
         "mentions": rule_type(dict),
         "rich_chat": rule_type(bool),
         "op_sync": rule_type(dict),
+        "v3_features": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -122,6 +125,7 @@ class DmccSettings:
     mentions: MentionConfig = field(default_factory=MentionConfig)
     rich_chat: bool = False
     op_sync: OpSyncConfig = field(default_factory=OpSyncConfig)
+    v3_features: V3FeatureConfig = field(default_factory=V3FeatureConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -212,6 +216,10 @@ class DmccSettings:
             op_sync = OpSyncConfig.from_mapping(raw.get("op_sync", {}))
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
+        try:
+            v3_features = V3FeatureConfig.from_mapping(raw.get("v3_features", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -236,6 +244,7 @@ class DmccSettings:
             mentions=mentions,
             rich_chat=rich_chat,
             op_sync=op_sync,
+            v3_features=v3_features,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 
