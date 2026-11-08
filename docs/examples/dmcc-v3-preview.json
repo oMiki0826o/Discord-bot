@@ -1,0 +1,77 @@
+{
+  "rich_chat": true,
+  "v3_features": {
+    "enabled": true,
+    "message_parsing": {
+      "discord_to_minecraft": {
+        "markdown": true,
+        "attachments": true,
+        "stickers": true,
+        "unicode_emojis": true,
+        "custom_emojis": true,
+        "mentions": true,
+        "hyperlinks": true,
+        "embeds": true,
+        "components": true,
+        "timestamps": true,
+        "ansi_code_blocks": true,
+        "polls": true
+      },
+      "minecraft_to_discord": {
+        "custom_emojis": true,
+        "mentions": true
+      },
+      "minecraft_to_minecraft": {
+        "markdown": true,
+        "unicode_emojis": true,
+        "custom_emojis": true,
+        "mentions": true,
+        "hyperlinks": true,
+        "timestamps": true
+      }
+    },
+    "source_events": {
+      "say": true,
+      "me": true,
+      "tell_raw": true,
+      "player_command": true,
+      "msg": false
+    },
+    "minecraft_emoji_aliases": {},
+    "minecraft_mention_ids": {},
+    "templates": {
+      "user_message": [
+        {"text": "[{server}] ", "color": "{server_color}", "bold": true},
+        {"text": "<{effective_name}> ", "color": "{role_color}"},
+        {"text": "{message}", "color": "gray"}
+      ],
+      "system_message": [
+        {"text": "[{server}] ", "color": "aqua", "bold": true},
+        {"text": "{message}", "color": "gray"}
+      ],
+      "response": [
+        {"text": "↪ <{effective_name}> ", "color": "{role_color}"},
+        {"text": "{message}", "color": "dark_gray"}
+      ],
+      "command": [
+        {"text": "[Discord] {effective_name} ", "color": "blue"},
+        {"text": "{message}", "color": "gray"}
+      ],
+      "reaction": [
+        {"text": "{effective_name} reacted: ", "color": "yellow"},
+        {"text": "{message}", "color": "gray"}
+      ],
+      "edit": [
+        {"text": "{effective_name} edited: ", "color": "aqua"},
+        {"text": "{message}", "color": "gray"}
+      ],
+      "edited_message": [
+        {"text": "{effective_name}: ", "color": "aqua"},
+        {"text": "{message}", "color": "gray"}
+      ],
+      "delete": [
+        {"text": "{effective_name} deleted a message", "color": "red"}
+      ]
+    }
+  }
+}
