@@ -215,6 +215,7 @@ public final class BridgeMod implements ModInitializer {
             opSyncEnabled = settings.opSyncEnabled();
             relayPlayerCommands = settings.relayPlayerCommands();
             overwriteNativeMessages = settings.overwriteNativeMessages();
+            NativeMessageFormatter.configure(NativeFormatPolicy.load(configPath));
             translationLocale = settings.translationLocale();
             translationVersion = server.getServerVersion();
             translationDirectory = configPath.resolveSibling("minecraft-bridge").resolve("lang");
@@ -994,6 +995,7 @@ public final class BridgeMod implements ModInitializer {
         opSyncEnabled = false;
         relayPlayerCommands = false;
         overwriteNativeMessages = false;
+        NativeMessageFormatter.configure(NativeFormatPolicy.defaults());
         opSyncApplier.clear();
         translations = MinecraftTranslations.empty();
         translationDirectory = null;

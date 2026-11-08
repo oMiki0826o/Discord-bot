@@ -4,6 +4,11 @@ import net.minecraft.network.chat.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 /**
  * Optional native Minecraft-to-Minecraft message formatting, parsed with the
@@ -13,11 +18,24 @@ import java.util.Map;
 final class NativeRichText {
     private static final int MAX_BODY = 1400;
     private static final int MAX_PARTS = 110;
+    private static final Pattern TIMESTAMP = Pattern.compile("<t:(-?[0-9]{1,12})(?::[tTdDfFRsS])?>");
+    private static final Pattern EMOJI = Pattern.compile(":([A-Za-z0-9_]{1,32}):");
+    private static final Pattern USER = Pattern.compile("@([A-Za-z0-9_]{3,16})");
+    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'")
+        .withZone(ZoneOffset.UTC);
 
     private NativeRichText() { }
 
     static Component format(String prefix, String content) {
+        return format(prefix, content, NativeFormatPolicy.defaults());
+    }
+
+    static Component format(String prefix, String content, NativeFormatPolicy policy) {
+        if (policy == null) policy = NativeFormatPolicy.defaults();
         String body = normalize(content, MAX_BODY);
+        if (policy.timestamps()) body = renderTimestamps(body);
+        if (policy.customEmojis()) body = renderEmojis(body, policy.emojiAliases());
+        if (!policy.unicodeEmojis()) body = muteUnicodeEmoji(body);
         List<Map<String, Object>> segments = new ArrayList<>();
         add(segments, prefix, "white", "");
         StringBuilder plain = new StringBuilder();
@@ -25,12 +43,14 @@ final class NativeRichText {
         for (int i = 0; i < body.length() && segments.size() < MAX_PARTS; ) {
             String symbol = null;
             String style = null;
-            if (body.startsWith("**", i)) { symbol = "**"; style = "bold"; }
-            else if (body.startsWith("__", i)) { symbol = "__"; style = "underlined"; }
-            else if (body.startsWith("~~", i)) { symbol = "~~"; style = "strikethrough"; }
-            else if (body.startsWith("||", i)) { symbol = "||"; style = "obfuscated"; }
-            else if (body.startsWith("`", i)) { symbol = "`"; style = "code"; }
-            else if (body.startsWith("*", i)) { symbol = "*"; style = "italic"; }
+            if (policy.markdown()) {
+                if (body.startsWith("**", i)) { symbol = "**"; style = "bold"; }
+                else if (body.startsWith("__", i)) { symbol = "__"; style = "underlined"; }
+                else if (body.startsWith("~~", i)) { symbol = "~~"; style = "strikethrough"; }
+                else if (body.startsWith("||", i)) { symbol = "||"; style = "obfuscated"; }
+                else if (body.startsWith("`", i)) { symbol = "`"; style = "code"; }
+                else if (body.startsWith("*", i)) { symbol = "*"; style = "italic"; }
+            }
             if (symbol != null) {
                 int end = body.indexOf(symbol, i + symbol.length());
                 if (end >= i + symbol.length() && end - i <= 520) {
@@ -41,7 +61,7 @@ final class NativeRichText {
                     continue;
                 }
             }
-            if (body.startsWith("[", i)) {
+            if (policy.hyperlinks() && body.startsWith("[", i)) {
                 int middle = body.indexOf("](", i + 1);
                 if (middle > i && middle - i < 122) {
                     int end = body.indexOf(')', middle + 2);
@@ -60,6 +80,16 @@ final class NativeRichText {
                     }
                 }
             }
+            if (policy.mentions() && body.charAt(i) == '@') {
+                Matcher matched = USER.matcher(body);
+                matched.region(i, body.length());
+                if (matched.lookingAt()) {
+                    flush(segments, plain);
+                    add(segments, matched.group(), "yellow", "");
+                    i = matched.end();
+                    continue;
+                }
+            }
             plain.append(body.charAt(i++));
         }
         flush(segments, plain);
@@ -67,6 +97,47 @@ final class NativeRichText {
         return RichTextComponents.parse(Map.of("segments", segments))
             .map(component -> (Component) component)
             .orElseGet(() -> Component.literal(prefix + body));
+    }
+
+    private static String renderTimestamps(String text) {
+        Matcher matcher = TIMESTAMP.matcher(text);
+        StringBuffer output = new StringBuffer();
+        while (matcher.find()) {
+            String rendered;
+            try {
+                rendered = DATE.format(Instant.ofEpochSecond(Long.parseLong(matcher.group(1))));
+            } catch (RuntimeException invalid) {
+                rendered = "[timestamp]";
+            }
+            matcher.appendReplacement(output, Matcher.quoteReplacement(rendered));
+        }
+        matcher.appendTail(output);
+        return output.toString();
+    }
+
+    private static String renderEmojis(String text, Map<String, String> aliases) {
+        Matcher matcher = EMOJI.matcher(text);
+        StringBuffer output = new StringBuffer();
+        while (matcher.find()) {
+            String replacement = aliases.getOrDefault(
+                matcher.group(1).toLowerCase(java.util.Locale.ROOT), matcher.group()
+            );
+            matcher.appendReplacement(output, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(output);
+        return output.toString();
+    }
+
+    private static String muteUnicodeEmoji(String text) {
+        StringBuilder output = new StringBuilder();
+        text.codePoints().forEach(code -> {
+            if (code >= 0x2600 && Character.getType(code) == Character.OTHER_SYMBOL) {
+                output.append("[emoji]");
+            } else {
+                output.appendCodePoint(code);
+            }
+        });
+        return output.toString();
     }
 
     private static String normalize(String source, int length) {
