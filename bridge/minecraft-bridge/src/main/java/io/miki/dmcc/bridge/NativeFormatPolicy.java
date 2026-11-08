@@ -19,10 +19,12 @@ record NativeFormatPolicy(
     boolean unicodeEmojis,
     boolean customEmojis,
     boolean mentions,
+    boolean echoPlayerCommands,
+    boolean echoGameMode,
     Map<String, String> emojiAliases
 ) {
     static NativeFormatPolicy defaults() {
-        return new NativeFormatPolicy(true, true, true, true, true, true, Map.of());
+        return new NativeFormatPolicy(true, true, true, true, true, true, false, false, Map.of());
     }
 
     static NativeFormatPolicy load(Path file) throws IOException {
@@ -47,6 +49,8 @@ record NativeFormatPolicy(
             flag(properties, "native_unicode_emojis"),
             flag(properties, "native_custom_emojis"),
             flag(properties, "native_mentions"),
+            "true".equals(properties.getProperty("echo_player_command_to_source", "false")),
+            "true".equals(properties.getProperty("echo_player_game_mode_to_source", "false")),
             Map.copyOf(aliases)
         );
     }

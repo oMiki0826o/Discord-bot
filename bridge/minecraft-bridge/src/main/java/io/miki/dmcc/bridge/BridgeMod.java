@@ -76,6 +76,8 @@ public final class BridgeMod implements ModInitializer {
     private volatile boolean opSyncEnabled;
     private volatile boolean relayPlayerCommands;
     private volatile boolean overwriteNativeMessages;
+    private volatile boolean echoPlayerCommands;
+    private volatile boolean echoGameMode;
     private volatile MinecraftTranslations translations = MinecraftTranslations.empty();
     private volatile Path translationDirectory;
     private volatile String translationLocale = "en_us";
@@ -196,11 +198,14 @@ public final class BridgeMod implements ModInitializer {
         if (mod == null || !mod.relayPlayerCommands || player == null) return;
         String visible = PublicPlayerCommandPolicy.sanitize(command);
         if (visible.isEmpty() || mod.runtime == null || mod.serverId == null) return;
-        mod.runtime.publishEvent(new ProtocolEnvelope(
+        boolean emitted = mod.runtime.publishEvent(new ProtocolEnvelope(
             1, "player_command", mod.serverId, null,
             Map.of("minecraft_uuid", player.getStringUUID(),
                 "player_name", player.getName().getString(), "message", visible)
         ));
+        if (emitted && mod.echoPlayerCommands) {
+            player.sendSystemMessage(Component.literal("[DMCC command] " + visible));
+        }
     }
 
     /** Called only by the player-death Mixin while the original death message remains available. */
@@ -224,7 +229,10 @@ public final class BridgeMod implements ModInitializer {
             opSyncEnabled = settings.opSyncEnabled();
             relayPlayerCommands = settings.relayPlayerCommands();
             overwriteNativeMessages = settings.overwriteNativeMessages();
-            NativeMessageFormatter.configure(NativeFormatPolicy.load(configPath));
+            NativeFormatPolicy nativePreview = NativeFormatPolicy.load(configPath);
+            NativeMessageFormatter.configure(nativePreview);
+            echoPlayerCommands = nativePreview.echoPlayerCommands();
+            echoGameMode = nativePreview.echoGameMode();
             translationLocale = settings.translationLocale();
             translationVersion = server.getServerVersion();
             translationDirectory = configPath.resolveSibling("minecraft-bridge").resolve("lang");
@@ -532,6 +540,8 @@ public final class BridgeMod implements ModInitializer {
                 return 0;
             }
             NativeMessageFormatter.configure(nativePolicy);
+            echoPlayerCommands = nativePolicy.echoPlayerCommands();
+            echoGameMode = nativePolicy.echoGameMode();
             overwriteNativeMessages = snapshot.overwriteNativeMessages();
             relayPlayerCommands = snapshot.relayPlayerCommands();
             translationLocale = snapshot.translationLocale();
@@ -717,6 +727,10 @@ public final class BridgeMod implements ModInitializer {
                 "game_mode", translations.translate(gameType.getLongDisplayName())
             )))) {
             LOGGER.debug("DMCC game mode event skipped because the Bridge is offline");
+        } else if (echoGameMode) {
+            player.sendSystemMessage(Component.literal(
+                "[DMCC] Your game mode is now " + translations.translate(gameType.getLongDisplayName())
+            ));
         }
     }
 
@@ -1044,6 +1058,8 @@ public final class BridgeMod implements ModInitializer {
         opSyncEnabled = false;
         relayPlayerCommands = false;
         overwriteNativeMessages = false;
+        echoPlayerCommands = false;
+        echoGameMode = false;
         NativeMessageFormatter.configure(NativeFormatPolicy.defaults());
         opSyncApplier.clear();
         translations = MinecraftTranslations.empty();

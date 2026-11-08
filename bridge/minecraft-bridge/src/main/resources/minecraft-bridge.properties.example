@@ -45,3 +45,7 @@ native_mentions=true
 # every 12 hours). Uses HTTPS and official resource SHA-1 verification.
 # No network fetches are performed on the Minecraft tick thread.
 language_auto_download=false
+
+# Opt-in source-player command/game-mode echoes, independent of Discord relay.
+echo_player_command_to_source=false
+echo_player_game_mode_to_source=false
