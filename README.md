@@ -87,6 +87,9 @@ Knowledge 透過官方 MCP Python SDK 的**本機唯讀**服務搜尋，不提�
 
 ### Minecraft 與備份
 
+> **Fabric DMCC v3 功能初版（開發分支）**：已提供 [預覽架構、功能矩陣、設定與試用說明](docs/DMCC-FABRIC-V3-PREVIEW.md) 和 [範例設定](docs/examples/dmcc-v3-preview.json)。新功能採明確啟用、尚未完整實機驗證；正式版請仍參照 [DMCC 使用文件](docs/DMCC.md)。
+
+
 第一次部署請直接閱讀[從零安裝與啟動指南](docs/INSTALL.md)。其中包含 Linux 套件、Fabric bridge、DMCC、tmux 控制、備份與回檔的完整步驟。Fabric Bridge 在 CI 中針對 Minecraft **1.21.8** 及 **1.21.9** 個別編譯與測試，請安裝**相符版本**的 JAR；其他版本不可視為已驗證。
 
 - [DMCC / Minecraft Bridge 設定](docs/DMCC.md)
@@ -208,6 +211,9 @@ For limited read-only status access, populate `privileged_users` in your local `
 Knowledge search uses a **local read-only** MCP adapter based on the official MCP Python SDK; there is no raw SQL, data-write tool or public MCP HTTP port. See [AI / Agent architecture](docs/AI_AGENT_ARCHITECTURE.md), [AI module](bot/mod/ai/README.md) and [Agent module](bot/mod/agent/README.md). Private collaboration notes, `data/`, `.env` and `settings/*.json` are local-only and must never be committed.
 
 ### Minecraft and backups
+
+> **Fabric DMCC v3 preview (development branch)**: See the [architecture, feature matrix and manual testing notes](docs/DMCC-FABRIC-V3-PREVIEW.md) and [configuration example](docs/examples/dmcc-v3-preview.json). Optional features are experimental, not yet fully verified with live Discord and Minecraft clients.
+
 
 For a first deployment, follow the [step-by-step installation guide](docs/INSTALL.md). Fabric Bridge is built per Minecraft **1.21.8** and **1.21.9** in CI; install only the JAR targeting the server's exact version. Other game versions are unverified. It covers Linux packages, the Fabric bridge, DMCC, tmux control, backup, and restore.
 
