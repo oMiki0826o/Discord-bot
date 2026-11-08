@@ -156,6 +156,8 @@ public final class BridgeMod implements ModInitializer {
                     context.getSource().getServer(), context.getSource().getEntity())))
                 .then(literal("unlink").executes(context -> requestUnlink(
                     context.getSource().getServer(), context.getSource().getEntity())))
+                .then(literal("refresh").requires(source -> source.hasPermission(3))
+                    .executes(context -> refreshLocalPresentation(context.getSource().getServer())))
                 .then(literal("pm")
                     .then(argument("player", StringArgumentType.word())
                         .then(argument("message", StringArgumentType.greedyString())
@@ -507,6 +509,33 @@ public final class BridgeMod implements ModInitializer {
         Object rawMessage = envelope.data().get("message");
         if (!(rawMessage instanceof String message) || message.isBlank()) return;
         server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(message), false));
+    }
+
+    /**
+     * Reload local display, message and language settings without disconnecting
+     * the authenticated transport or changing OP ownership.
+     */
+    private int refreshLocalPresentation(MinecraftServer server) {
+        Path file = FabricLoader.getInstance().getConfigDir().resolve("minecraft-bridge.properties");
+        try (var reader = Files.newBufferedReader(file)) {
+            BridgeSettings snapshot = BridgeSettings.fromReader(reader);
+            NativeFormatPolicy nativePolicy = NativeFormatPolicy.load(file);
+            if (!snapshot.serverId().equals(serverId)) {
+                LOGGER.warn("DMCC display refresh rejected: server_id changed");
+                return 0;
+            }
+            NativeMessageFormatter.configure(nativePolicy);
+            overwriteNativeMessages = snapshot.overwriteNativeMessages();
+            relayPlayerCommands = snapshot.relayPlayerCommands();
+            translationLocale = snapshot.translationLocale();
+            selectedPackTranslations = MinecraftPackTranslations.snapshot(server, translationLocale);
+            statsWorker.execute(this::refreshTranslations);
+            LOGGER.info("DMCC presentation and language settings refreshed");
+            return 1;
+        } catch (IOException | ProtocolException invalid) {
+            LOGGER.warn("DMCC presentation refresh rejected: {}", invalid.toString());
+            return 0;
+        }
     }
 
     private static String normalizePrivateText(Object raw) {
