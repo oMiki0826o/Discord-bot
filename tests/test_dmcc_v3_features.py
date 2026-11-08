@@ -106,3 +106,14 @@ def test_discord_relay_uses_v3_user_message_template(tmp_path):
     segs = gateway.sent[0][1]
     assert "".join(str(s["text"]) for s in segs) == "[survival] <Alex> Hello Steve"
     assert any(p.get("bold") and p.get("text") == "Steve" for p in segs)
+
+
+def test_discord_content_flags_keep_raw_markup_when_explicitly_disabled():
+    from bot.mod.dmcc.services.message_format import format_discord_content
+    source = "Hello <:bee:123456789012345678> <t:0:R>"
+    assert "<:bee:" in format_discord_content(
+        source, custom_emojis=False, timestamps=False,
+    )
+    assert "<t:0:R>" in format_discord_content(
+        source, custom_emojis=False, timestamps=False,
+    )

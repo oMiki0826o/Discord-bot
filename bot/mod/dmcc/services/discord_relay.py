@@ -228,7 +228,7 @@ class DiscordRelayService:
                             **(template_values or {}),
                         }
                         segments = render_segments(template, values, parse(template_body or ""))
-                if author_prefix and author_color and template_kind is None:
+                if author_prefix and author_color and not (template_kind and self._features.template(template_kind)):
                     segments = colorize_author_prefix(segments, author_prefix, author_color)
                 await self._gateway.send_minecraft_segments(server_id, segments)
             else:

@@ -32,6 +32,8 @@ def format_discord_content(
     *,
     mentions: Mapping[str, str] | None = None,
     limit: int = 1600,
+    custom_emojis: bool = True,
+    timestamps: bool = True,
 ) -> str:
     """Render Discord-specific inline tags as readable MC text, not raw IDs.
 
@@ -60,8 +62,10 @@ def format_discord_content(
             return "[timestamp]"
 
     result = _MENTIONS.sub(mention, content)
-    result = _EMOJI.sub(lambda match: f":{match.group(1)}:", result)
-    result = _TIMESTAMP.sub(time_stamp, result)
+    if custom_emojis:
+        result = _EMOJI.sub(lambda match: f":{match.group(1)}:", result)
+    if timestamps:
+        result = _TIMESTAMP.sub(time_stamp, result)
     result = _PINGS.sub(lambda match: f"[{match.group(1).lower()}]", result)
     return _clean(result, min(max(1, limit), 2000))
 
