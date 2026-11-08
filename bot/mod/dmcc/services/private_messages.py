@@ -42,7 +42,7 @@ def safe_private_message(raw: object, *, limit: int = 750) -> str | None:
     content = raw.strip()
     if len(content) > limit:
         return None
-    return content.replace("@everyone", "[everyone]").replace("@here", "[here]")
+    return re.sub(r"@(everyone|here)\b", lambda m: "[" + m.group(1).lower() + "]", content, flags=re.I)
 
 
 class PrivateMessageConsent:

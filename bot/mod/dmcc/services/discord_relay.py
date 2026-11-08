@@ -227,10 +227,10 @@ class DiscordRelayService:
                 flags = self._features.parsing["discord_to_minecraft"]
                 def parse(text: str) -> list[dict[str, object]]:
                     if self._features.enabled and not flags["markdown"]:
-                        clean = re.sub(r"[\\x00-\\x1f\\x7f]", " ", text)
+                        clean = re.sub(r"[\x00-\x1f\x7f]", " ", text)
                         return [{"text": clean[:1800], "color": "white"}]
                     if self._features.enabled and not flags["ansi_code_blocks"]:
-                        text = re.sub(r"```ansi[^\\n]*\\n", "```text\\n", text, flags=re.I)
+                        text = re.sub(r"```ansi[^\n]*\n", "```text\n", text, flags=re.I)
                     if self._features.enabled and not flags["unicode_emojis"]:
                         text = "".join(
                             "[emoji]" if unicodedata.category(ch) == "So" and ord(ch) >= 0x2600
