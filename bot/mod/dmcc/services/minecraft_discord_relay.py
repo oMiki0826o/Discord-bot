@@ -17,7 +17,7 @@ from ..events import MinecraftEvent
 from ..repositories.state import JsonStateRepository
 from .presentation import OutboundDiscordMessage, PresentationSettings, render_message
 from .public_commands import sanitize_public_player_command
-from .v3_features import V3FeatureConfig
+from .v3_features import V3FeatureConfig, SOURCE_EVENTS
 from .v3_minecraft import format_minecraft_message
 
 
@@ -50,6 +50,13 @@ class MinecraftDiscordRelayService:
             self._presentation = presentation
 
     async def forward(self, event: MinecraftEvent) -> bool:
+        if self._features.enabled:
+            if event.type == "player_command" and not self._features.allows_source("player_command"):
+                return False
+            source = event.data.get("source_event")
+            if (event.type == "server_broadcast" and isinstance(source, str)
+                    and source in SOURCE_EVENTS and not self._features.allows_source(source)):
+                return False
         if self._features.enabled and event.type in {"player_chat", "server_broadcast"}:
             raw = event.data.get("message")
             if isinstance(raw, str):

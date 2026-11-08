@@ -505,10 +505,14 @@ public final class BridgeMod implements ModInitializer {
         BridgeMod mod = activeInstance;
         if (mod == null || content == null) return;
         String sanitized = PublicTellrawPolicy.sanitize(mod.translations.translate(content));
-        if (!sanitized.isBlank()) mod.relayPublicCommand(sender, sanitized);
+        if (!sanitized.isBlank()) mod.relayPublicCommand(sender, sanitized, "tell_raw");
     }
 
     private void relayPublicCommand(String sender, String content) {
+        relayPublicCommand(sender, content, "broadcast");
+    }
+
+    private void relayPublicCommand(String sender, String content, String eventSource) {
         BridgeRuntime active = runtime;
         if (active == null || serverId == null || content == null || content.isBlank()) return;
         String safe = PublicTellrawPolicy.sanitize(content);
@@ -516,7 +520,8 @@ public final class BridgeMod implements ModInitializer {
         String senderName = sender == null || sender.isBlank() ? "Server" : sender;
         if (active.publishEvent(new ProtocolEnvelope(1, "server_broadcast", serverId, null, Map.of(
             "player_name", senderName,
-            "message", safe
+            "message", safe,
+            "source_event", eventSource
         )))) {
             commandEchoes.mark(senderName, content);
         }

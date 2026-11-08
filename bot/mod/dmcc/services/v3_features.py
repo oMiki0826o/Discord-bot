@@ -28,7 +28,7 @@ _ALIAS = re.compile(r"^[A-Za-z0-9_]{1,32}$")
 _SNOWFLAKE = re.compile(r"^[0-9]{15,20}$")
 _EMOJI_TOKEN = re.compile(r"^<a?:[A-Za-z0-9_]{1,32}:[0-9]{15,20}>$")
 
-SOURCE_EVENTS = frozenset(("say", "tell_raw", "me", "msg", "player_command"))
+SOURCE_EVENTS = frozenset(("broadcast", "say", "tell_raw", "me", "msg", "player_command"))
 TEMPLATE_EVENTS = frozenset((
     "user_message", "system_message", "response", "command",
     "reaction", "edit", "edited_message", "delete",
@@ -85,7 +85,7 @@ class V3FeatureConfig:
             for direction, names in PARSING_FLAGS.items()
         })
         raw_sources = value.get("source_events", {})
-        sources = _flags(raw_sources, tuple(sorted(SOURCE_EVENTS)), default=False)
+        sources = _flags(raw_sources, tuple(sorted(SOURCE_EVENTS)), default=True)
         # "msg" is never broadcast to Discord by the public-message pipeline:
         # it is kept as a schema option for a future private, consent-based route.
         allowed_sources = dict(sources)

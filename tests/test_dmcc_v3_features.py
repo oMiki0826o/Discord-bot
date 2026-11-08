@@ -188,3 +188,13 @@ def test_v3_preview_snapshot_can_be_swapped_without_recreating_relay(tmp_path):
     features = V3FeatureConfig.from_mapping({"enabled": True})
     relay.apply_preview_features(features)
     assert relay._features.enabled
+
+
+def test_v3_source_event_gating_is_public_only_and_explicit():
+    enabled = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "source_events": {"tell_raw": False, "msg": True},
+    })
+    assert enabled.allows_source("broadcast")
+    assert not enabled.allows_source("tell_raw")
+    assert not enabled.allows_source("msg")
