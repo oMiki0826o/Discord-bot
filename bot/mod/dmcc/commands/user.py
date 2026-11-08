@@ -132,6 +132,25 @@ class DmccUserCog(commands.Cog):
             ephemeral=True,
         )
 
+    @dmcc_slash.command(name="broadcast", description="Send an authorized public Discord announcement into Minecraft")
+    async def slash_broadcast(
+        self, interaction, server_id: str, message: str,
+    ) -> None:
+        if self._op_level(interaction, server_id) < 2:
+            await interaction.response.send_message(
+                "DMCC broadcast requires a trusted bridge operator.", ephemeral=True
+            )
+            return
+        success = await self._relay.forward_command(
+            server_id, str(getattr(interaction.user, "display_name", interaction.user)),
+            message,
+        )
+        await interaction.response.send_message(
+            "Announcement delivered to Minecraft." if success
+            else "Announcement rejected or the server is offline.",
+            ephemeral=True,
+        )
+
     @dmcc_slash.command(name="update", description="Check for a newer Discord Minecraft Bridge release")
     async def slash_update(self, interaction) -> None:
         if self._release_updates is None:
@@ -348,6 +367,13 @@ class DmccUserCog(commands.Cog):
         if bool(getattr(getattr(message, "author", None), "bot", False)):
             return
         channel_id = getattr(getattr(message, "channel", None), "id", None)
+        system_checker = getattr(message, "is_system", None)
+        if channel_id is not None and callable(system_checker) and system_checker():
+            text = getattr(message, "system_content", None)
+            await self._relay.forward_system_message(
+                str(channel_id), text if isinstance(text, str) else "",
+            )
+            return
         author = getattr(message, "author", None)
         if channel_id is None or author is None:
             return

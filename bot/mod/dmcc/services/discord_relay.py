@@ -73,6 +73,32 @@ class DiscordRelayService:
         self._features = features
         self._rich_chat = self._base_rich_chat or features.enabled
 
+    async def forward_system_message(self, channel_id: str, content: str) -> bool:
+        """Mirror Discord-generated system notices without forwarding raw component IDs."""
+        if not isinstance(content, str) or not content.strip():
+            return False
+        safe = re.sub(r"[\x00-\x1f\x7f]", " ", content.strip())[:900]
+        return await self._forward(
+            channel_id, "* " + safe,
+            template_kind="system_message", template_body=safe,
+        )
+
+    async def forward_command(
+        self, server_id: str, actor: str, content: str,
+    ) -> bool:
+        """Explicit authorized slash broadcast, not a Minecraft command executor."""
+        if not isinstance(content, str) or not content.strip() or len(content) > 1000:
+            return False
+        if re.search(r"[\x00-\x1f\x7f]", content):
+            return False
+        safe = re.sub(r"@(everyone|here)\b", r"[\1]", content, flags=re.I)
+        return await self._send_to_server(
+            server_id,
+            f"[Discord] {actor[:48]}: {safe}",
+            template_kind="command", template_body=safe,
+            template_values={"effective_name": actor[:48]},
+        )
+
     async def forward_discord_message(
         self,
         channel_id: str,
@@ -178,7 +204,9 @@ class DiscordRelayService:
         delivered = await self._send_to_server(
             previous.server_id,
             f"* {previous.author_name} edited: {previous.content[:500]} → {normalized[:500]}",
-            template_kind="edit", template_body=normalized,
+            template_kind=(
+                "edited_message" if self._features.template("edited_message") else "edit"
+            ), template_body=normalized,
             template_values={"effective_name": previous.author_name[:64]},
         )
         if delivered:
