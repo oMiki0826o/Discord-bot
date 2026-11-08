@@ -95,11 +95,15 @@ public final class BridgeMod implements ModInitializer {
     private final Map<String, PendingPlayer> pendingUnlinkPlayers = new ConcurrentHashMap<>();
     private volatile long pendingRequestTtlMillis = 120_000;
     private volatile int gracefulShutdownTimeoutMillis = 1_500;
-    private final ScheduledExecutorService statsWorker = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "dmcc-bridge-stats");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private ScheduledExecutorService statsWorker = createStatsWorker();
+
+    private static ScheduledExecutorService createStatsWorker() {
+        return Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "dmcc-bridge-stats");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
 
     @Override
     public void onInitialize() {
@@ -206,6 +210,9 @@ public final class BridgeMod implements ModInitializer {
     }
 
     private void startRuntime(MinecraftServer server) {
+        if (statsWorker.isShutdown()) {
+            statsWorker = createStatsWorker();
+        }
         Path configPath = FabricLoader.getInstance().getConfigDir().resolve("minecraft-bridge.properties");
         try (var reader = Files.newBufferedReader(configPath)) {
             BridgeSettings settings = BridgeSettings.fromReader(reader);
