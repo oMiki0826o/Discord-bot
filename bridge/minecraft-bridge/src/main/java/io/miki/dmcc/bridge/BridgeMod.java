@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.network.Connection;
 import net.minecraft.server.network.ServerLoginPacketListenerImpl;
@@ -49,6 +50,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static net.minecraft.commands.Commands.literal;
+import static net.minecraft.commands.Commands.argument;
 
 /**
  * Fabric server entrypoint for the staged DMCC Bridge.
@@ -154,6 +156,14 @@ public final class BridgeMod implements ModInitializer {
                     context.getSource().getServer(), context.getSource().getEntity())))
                 .then(literal("unlink").executes(context -> requestUnlink(
                     context.getSource().getServer(), context.getSource().getEntity())))
+                .then(literal("pm")
+                    .then(argument("player", StringArgumentType.word())
+                        .then(argument("message", StringArgumentType.greedyString())
+                            .executes(context -> sendPrivateFromMinecraft(
+                                context.getSource(),
+                                StringArgumentType.getString(context, "player"),
+                                StringArgumentType.getString(context, "message")
+                            )))))
         ));
         LOGGER.info("Minecraft Bridge initialized; waiting for server lifecycle.");
     }
@@ -430,6 +440,10 @@ public final class BridgeMod implements ModInitializer {
             });
             return;
         }
+        if (envelope.type().equals("minecraft_private_message")) {
+            handlePrivateFromDiscord(server, envelope);
+            return;
+        }
         if (envelope.type().equals("server_info_request")) {
             handleServerInfoRequest(server, client, envelope);
             return;
@@ -479,6 +493,88 @@ public final class BridgeMod implements ModInitializer {
         Object rawMessage = envelope.data().get("message");
         if (!(rawMessage instanceof String message) || message.isBlank()) return;
         server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(message), false));
+    }
+
+    private static String normalizePrivateText(Object raw) {
+        if (!(raw instanceof String text) || text.isBlank() || text.length() > 750) return null;
+        if (text.chars().anyMatch(ch -> ch < 32 || ch == 127)) return null;
+        return text.strip().replaceAll("(?i)@everyone", "[everyone]")
+            .replaceAll("(?i)@here", "[here]");
+    }
+
+    /**
+     * Minecraft's own /dmcc pm is explicit and recipient scoped. Never publish
+     * this event to general Minecraft chat or the public Discord relay.
+     */
+    private int sendPrivateFromMinecraft(
+        CommandSourceStack source, String targetName, String raw
+    ) throws CommandSyntaxException {
+        ServerPlayer sender = source.getPlayerOrException();
+        if (targetName == null || !targetName.matches("[A-Za-z0-9_]{3,16}")) return 0;
+        String message = normalizePrivateText(raw);
+        if (message == null) return 0;
+        ServerPlayer recipient = source.getServer().getPlayerList().getPlayerByName(targetName);
+        if (recipient == null) {
+            sender.sendSystemMessage(Component.literal("DMCC private: player is offline."));
+            return 0;
+        }
+        recipient.sendSystemMessage(Component.literal(
+            "[DMCC private] <" + sender.getName().getString() + "> " + message
+        ));
+        sender.sendSystemMessage(Component.literal(
+            "[DMCC private → " + recipient.getName().getString() + "] " + message
+        ));
+        BridgeRuntime active = runtime;
+        if (active != null && serverId != null) {
+            active.publishEvent(new ProtocolEnvelope(
+                1, "player_private_message", serverId, null, Map.of(
+                    "sender_uuid", sender.getStringUUID(),
+                    "sender_name", sender.getName().getString(),
+                    "recipient_uuid", recipient.getStringUUID(),
+                    "message", message
+                )
+            ));
+        }
+        return 1;
+    }
+
+    private void handlePrivateFromDiscord(MinecraftServer server, ProtocolEnvelope envelope) {
+        Object rawUuid = envelope.data().get("recipient_uuid");
+        Object rawSender = envelope.data().get("sender_name");
+        String message = normalizePrivateText(envelope.data().get("message"));
+        if (!(rawUuid instanceof String uuidText)
+            || !uuidText.matches("[a-fA-F0-9-]{36}")
+            || !(rawSender instanceof String senderName)
+            || !senderName.matches("[A-Za-z0-9_]{3,16}")
+            || message == null) {
+            sendPrivateResult(envelope, false);
+            return;
+        }
+        final UUID uuid;
+        try {
+            uuid = UUID.fromString(uuidText);
+        } catch (IllegalArgumentException invalid) {
+            sendPrivateResult(envelope, false);
+            return;
+        }
+        server.execute(() -> {
+            ServerPlayer recipient = server.getPlayerList().getPlayer(uuid);
+            boolean delivered = recipient != null;
+            if (delivered) {
+                recipient.sendSystemMessage(Component.literal(
+                    "[DMCC private Discord] <" + senderName + "> " + message
+                ));
+            }
+            sendPrivateResult(envelope, delivered);
+        });
+    }
+
+    private void sendPrivateResult(ProtocolEnvelope request, boolean ok) {
+        if (request.requestId() == null) return;
+        sendRequired(new ProtocolEnvelope(
+            1, "minecraft_private_response", request.serverId(), request.requestId(),
+            Map.of("ok", ok)
+        ), "private message delivery status");
     }
 
     /** Sample cached game-server timing only once per 300 ticks, never perform network I/O here. */
