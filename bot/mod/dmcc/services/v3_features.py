@@ -150,7 +150,7 @@ class V3FeatureConfig:
                 raise ValueError("invalid Minecraft font glyph name")
             if (not isinstance(glyph, str) or not 1 <= len(glyph) <= 8
                     or any(ord(ch) < 32 or ord(ch) == 127 for ch in glyph)
-                    or "@everyone" in glyph.casefold() or "@here" in glyph.casefold()):
+                    or "\\" in glyph or "@everyone" in glyph.casefold() or "@here" in glyph.casefold()):
                 raise ValueError("invalid Minecraft font glyph value")
             result[key.casefold()] = glyph
         return MappingProxyType(result)

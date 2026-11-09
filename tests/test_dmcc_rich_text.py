@@ -74,10 +74,11 @@ def test_unpaired_double_delimiter_remains_literal():
     assert rendered == original
 
 
-def test_discord_spoiler_is_obfuscated_not_exposed_as_raw_markup():
+def test_discord_spoiler_is_hover_only_not_exposed_in_visible_chat():
     segments = parse_discord_markdown("Welcome ||secret|| user")
-    assert "".join(str(s["text"]) for s in segments) == "Welcome secret user"
-    assert any(s["text"] == "secret" and s["obfuscated"] for s in segments)
+    assert "".join(str(s["text"]) for s in segments) == "Welcome [spoiler] user"
+    assert any(s["text"] == "[spoiler]" and s.get("hover_text") == "secret"
+               and not s.get("obfuscated", False) for s in segments)
 
 
 def test_code_backticks_do_not_parse_nested_bold_tokens():
