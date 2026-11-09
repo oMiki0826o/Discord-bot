@@ -99,6 +99,7 @@ public final class BridgeMod implements ModInitializer {
     private volatile long pendingRequestTtlMillis = 120_000;
     private volatile int gracefulShutdownTimeoutMillis = 1_500;
     private ScheduledExecutorService statsWorker = createStatsWorker();
+    private java.util.concurrent.ScheduledFuture<?> officialLanguageTask;
 
     private static ScheduledExecutorService createStatsWorker() {
         return Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -244,19 +245,7 @@ public final class BridgeMod implements ModInitializer {
             selectedPackTranslations = MinecraftPackTranslations.snapshot(server, translationLocale);
             refreshTranslations();
             statsWorker.scheduleAtFixedRate(this::refreshTranslations, 300, 300, TimeUnit.SECONDS);
-            if (OfficialLanguageUpdater.enabled(configPath)) {
-                OfficialLanguageUpdater updater = new OfficialLanguageUpdater();
-                statsWorker.scheduleWithFixedDelay(() -> {
-                    try {
-                        if (updater.update(translationDirectory, translationVersion, translationLocale)) {
-                            refreshTranslations();
-                            LOGGER.info("DMCC official Minecraft language cache refreshed");
-                        }
-                    } catch (IOException invalid) {
-                        LOGGER.warn("DMCC official language update skipped: {}", invalid.toString());
-                    }
-                }, 5, 43_200, TimeUnit.SECONDS);
-            }
+            configureOfficialLanguageTask(configPath);
             if (opSyncEnabled) {
                 try {
                     opSyncApplier.configure(configPath.resolveSibling("minecraft-bridge-managed-ops.properties"));
@@ -532,6 +521,28 @@ public final class BridgeMod implements ModInitializer {
      * Reload local display, message and language settings without disconnecting
      * the authenticated transport or changing OP ownership.
      */
+    private void configureOfficialLanguageTask(Path configPath) {
+        java.util.concurrent.ScheduledFuture<?> prior = officialLanguageTask;
+        if (prior != null) prior.cancel(false);
+        officialLanguageTask = null;
+        if (!OfficialLanguageUpdater.enabled(configPath) || statsWorker.isShutdown()) return;
+        OfficialLanguageUpdater updater = new OfficialLanguageUpdater();
+        officialLanguageTask = statsWorker.scheduleWithFixedDelay(() -> {
+            Path directory = translationDirectory;
+            String version = translationVersion;
+            String locale = translationLocale;
+            if (directory == null || version == null || locale == null) return;
+            try {
+                if (updater.update(directory, version, locale)) {
+                    refreshTranslations();
+                    LOGGER.info("DMCC official Minecraft language cache refreshed");
+                }
+            } catch (IOException invalid) {
+                LOGGER.warn("DMCC official language update skipped: {}", invalid.toString());
+            }
+        }, 5, 43_200, TimeUnit.SECONDS);
+    }
+
     private int refreshLocalPresentation(MinecraftServer server) {
         Path file = FabricLoader.getInstance().getConfigDir().resolve("minecraft-bridge.properties");
         try (var reader = Files.newBufferedReader(file)) {
@@ -549,7 +560,8 @@ public final class BridgeMod implements ModInitializer {
             translationLocale = snapshot.translationLocale();
             selectedPackTranslations = MinecraftPackTranslations.snapshot(server, translationLocale);
             statsWorker.execute(this::refreshTranslations);
-            LOGGER.info("DMCC presentation and language settings refreshed");
+            configureOfficialLanguageTask(file);
+            LOGGER.info("DMCC native presentation and language update scheduling refreshed");
             return 1;
         } catch (IOException | ProtocolException invalid) {
             LOGGER.warn("DMCC presentation refresh rejected: {}", invalid.toString());
@@ -1118,6 +1130,8 @@ public final class BridgeMod implements ModInitializer {
         pendingLinkPlayers.clear();
         pendingUnlinkPlayers.clear();
         sourceCommands.clear();
+        if (officialLanguageTask != null) officialLanguageTask.cancel(true);
+        officialLanguageTask = null;
         statsWorker.shutdownNow();
     }
 
