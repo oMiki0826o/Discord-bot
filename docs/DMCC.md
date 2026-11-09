@@ -413,3 +413,6 @@ CI Fabric 分支採用實際 `bot.mod.dmcc.gateway.server.Gateway`，與真實 F
 完整說明與範例請參閱 [DMCC-FABRIC-V3-PREVIEW.md](DMCC-FABRIC-V3-PREVIEW.md) 和 [dmcc-v3-preview.json](examples/dmcc-v3-preview.json)。
 
 預覽新增：Discord ↔ Minecraft 受同意控制的私訊（`/dmcc pm`、`/dmcc dm-consent`、`/dmcc whisper`）、受權限保護的 `/dmcc broadcast`、系統／編輯／回覆模板、跨服 Minecraft 富文字、原生 NativeFormatPolicy、`/dmcc refresh` 顯示設定更新、背景官方 Mojang 語言快取。功能預設不覆寫正式 Relay，私訊與原生簽章聊天替換需明確啟用。請先在隔離測試伺服器使用。
+
+
+初版延伸：原生 `/msg`、`/tell`、`/w` 單人私訊透過雙方 Discord 同意才允許跨平台發送，純 `@a` 作為公開 source_msg；支援來源訊息模板、Requester-only Discord 操作面板、外部安全 Link Button、Minecraft Font Glyph Aliases、Hover Spoiler 及反應移除同步。參閱 [Fabric v3 功能說明](DMCC-FABRIC-V3-PREVIEW.md)。

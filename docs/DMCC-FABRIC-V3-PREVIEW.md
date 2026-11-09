@@ -133,3 +133,49 @@ Fabric 會使用背景 Worker 在啟動後及約每 12 小時向**限定的 Moja
 ### 完成狀態與邊界
 
 所有上述主要入口與程式路徑已提交到開發分支供直接測試。此批依使用者要求**沒有等待新 CI 驗收**，所有新功能均為實驗性；部分 Minecraft 1.21.8／1.21.9 映射 API、Discord 實際權限、Client UI 以及長時間壓力仍需要在你的環境校正。**請不要把「已提交原型」解讀成已驗證 DMCC v3 的 100% 行為對等。**
+
+## Fabric v3 功能補全：原生指令、互動操作與來源路由（2026-11-09）
+
+### 原版 /msg、/tell、/w
+
+額外加入 `MsgCommandMixin`，觀察 Vanilla 的三種私訊別名，而非把指令原文送往公開 Discord。
+
+- 對單一玩家的原版私訊：只送至 `player_private_message` 私有 Gateway 事件；**發送者與收件者皆須 Discord 身分綁定及啟用 DM consent**，否則只保留 Minecraft 原生私訊。
+- 不帶任何條件的 `/msg @a`、`/tell @a`、`/w @a`：才可能成為公開 `source_msg`，標記 `public_broadcast=true`。帶條件的 `@a[...]`、`@p`、指定玩家與隊伍私訊都不能被當成公開廣播。
+- 指令原生處理不被取消或攔截後替換；這樣不會改變玩家對 Minecraft 私訊是否送達的認知。玩家自己的 `/dmcc pm` 仍可使用。
+
+原生 Mixin 是此版新增部分，請優先驗證 1.21.8 與 1.21.9 的注入名稱。
+
+### Discord 自己的互動控制面板與連結按鈕
+
+`/dmcc info` 與 `/dmcc server-info` 現提供原發起者才能操作的 Discord 私有「重新整理」按鈕和伺服器選單，回呼只允許取得狀態，不執行任意指令。
+
+Discord 訊息中的 **URL Link Button** 現會轉成 Minecraft 安全的 OpenUrl 文字片段，並再次在 Java 端過濾網址。其餘第三方 Discord Component 的 Custom ID 仍僅顯示標籤；Discord API 不允許 Bridge 直接假冒其他使用者觸發第三方按鈕，此項不應宣稱為任意 Bot 互動等價。
+
+### 完整來源事件與模板
+
+`presentation.servers.<server_id>.event_channels`、`event_routes`、`templates` 新增：
+
+- `source_say`、`source_me`：公開指令來源，只有能與玩家命令內容及短時序對上的事件才會標記；其餘仍為 `server_broadcast`。
+- `source_tell_raw`：帶全體收件者相同內容的公開 `/tellraw @a`。
+- `source_msg`：只限原生 `/msg @a` 類廣播；不存在 `public_broadcast=true` 時一律拒絕公開路由。
+
+Minecraft 端亦新增 `SourceCommandTracker`，不記錄私人指令內容，也不重放相同的公開指令事件。Discord 高層與 raw edit/delete 事件都有接線，對同一則訊息採既有的 transient ID 去重；另外處理 Reaction Remove。
+
+### Emoji／Font、巢狀富文字與 Spoiler
+
+`v3_features.minecraft_glyph_aliases` 允許明確配置表情代碼與 Minecraft 實際字型字元，例如 `"bee": "🐝"` 或資源包自訂的 PUA 字元（需要客戶端安裝對應 Font Resource Pack），用於 Discord → Minecraft 和 Minecraft → Minecraft。
+
+`minecraft_emoji_aliases` 則保留 Minecraft → Discord 自訂 Discord Emoji 的對應，兩者不可混為一談。
+
+Minecraft 原生覆寫解析器現在包含巢狀粗體／斜體／底線、刪除線、Code、可點擊的外部安全連結、Hover Spoiler 與顯示型提及。Discord Spoiler `||內容||` 僅顯示 `[spoiler]` 並在 Hover 中展示原文，不在公開文字直接揭露內文。
+
+### 設定重新載入
+
+- Discord 的 `dmcc preview-refresh` 仍能在不斷開 Gateway 的情況下更新預覽解析、模板、Discord 展示路由、Emoji mapping 和私訊選項。
+- `dmcc reload` 使用 Bot 原本的 Module Loader 重新建構整個 DMCC 模組，適合連線、權限或生命週期設定變更，會短暫中斷 Bridge 連線。
+- Minecraft 的 `/dmcc refresh` 在權限檢查後更新原生格式、語言及 Mojang 官方語言自動下載排程。
+
+### 運作與測試界線
+
+這份是開發分支實作，不是保證完全等價的正式版。Minecraft 原生簽章聊天覆寫，其他 Discord Bot 的非公開互動流程、真實 Emoji 字型及 mod/datapack 語言資源優先順序仍需要在實機檢查。維持 Draft PR，不自動合併 main。
