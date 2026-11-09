@@ -195,9 +195,10 @@ class DmccUserCog(commands.Cog):
             return f"DMCC online servers: {online}\nChannel mappings: {report.channel_mappings}"
 
         report = self._info.report()
-        servers = tuple(dict.fromkeys((*report.online_server_ids, *( 
-            [selected] if selected else []
-        ))))
+        ids = list(report.online_server_ids)
+        if selected and selected not in ids:
+            ids.append(selected)
+        servers = tuple(dict.fromkeys(ids))
         return DmccDashboardView(
             interaction.user.id, servers, summary, fetch_server, selected=selected
         )
