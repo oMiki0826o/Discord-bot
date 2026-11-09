@@ -129,7 +129,7 @@ final class NativeRichText {
         flush(pieces, buffer, bold, italic, underlined, strike, code);
         if (pieces.isEmpty()) return Component.literal("");
         return RichTextComponents.parse(Map.of("segments", pieces))
-            .orElseGet(() -> Component.literal(normalize(prefix, 90) + body));
+            .orElse(Component.literal(normalize(prefix, 90) + body));
     }
 
     private static boolean safeExternalUrl(String text) {
