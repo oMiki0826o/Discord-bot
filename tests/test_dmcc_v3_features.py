@@ -214,3 +214,14 @@ def test_custom_minecraft_font_glyph_aliases_are_validated():
     ]:
         with pytest.raises(ValueError):
             V3FeatureConfig.from_mapping({"enabled": True, **invalid})
+
+
+def test_discord_link_buttons_become_safe_minecraft_openurl_labels():
+    from types import SimpleNamespace
+    from bot.mod.dmcc.commands.user import DmccUserCog
+    safe = SimpleNamespace(label="Docs", url="https://example.org/docs", custom_id="secret")
+    dangerous = SimpleNamespace(label="Login", url="http://127.0.0.1/admin", custom_id="private")
+    view = SimpleNamespace(components=[SimpleNamespace(children=[safe, dangerous])])
+    extracted = DmccUserCog._component_summaries(view)
+    assert extracted == ("[Docs](https://example.org/docs)", "Login")
+    assert all("secret" not in x and "private" not in x for x in extracted)

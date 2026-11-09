@@ -26,6 +26,7 @@ from ..services.release_updates import ReleaseUpdateService
 from ..services.private_messages import DmPrivateMessageService
 from ..services.console_stream import ConsoleStreamConfig, redact_console_line
 from ..services.dashboard import DmccDashboardView
+from ..services.rich_text import _safe_click_url
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -578,7 +579,14 @@ class DmccUserCog(commands.Cog):
                 if not isinstance(label, str) or not label.strip():
                     label = getattr(item, "placeholder", None)
                 if isinstance(label, str) and label.strip():
-                    result.append(label.strip()[:70])
+                    safe_label = label.strip()[:70].replace("[", "").replace("]", "")
+                    # Only Discord link buttons may become Minecraft OpenUrl
+                    # components. Never forward arbitrary custom_id interactions.
+                    url = getattr(item, "url", None)
+                    if isinstance(url, str) and _safe_click_url(url):
+                        result.append(f"[{safe_label}]({url})")
+                    else:
+                        result.append(safe_label)
                     if len(result) >= 8:
                         return tuple(result)
         return tuple(result)
