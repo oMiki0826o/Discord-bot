@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
 import unicodedata
 import re
 
