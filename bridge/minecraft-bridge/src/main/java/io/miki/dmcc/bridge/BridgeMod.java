@@ -68,6 +68,7 @@ public final class BridgeMod implements ModInitializer {
     private long metricTickCounter;
     private final Map<String, PendingPlayer> pendingLinkPlayers = new ConcurrentHashMap<>();
     private final CommandEchoSuppressor commandEchoes = new CommandEchoSuppressor();
+    private final SourceCommandTracker sourceCommands = new SourceCommandTracker();
     private final LinkGateRegistry loginGate = new LinkGateRegistry(
         System::nanoTime, TimeUnit.SECONDS.toNanos(5)
     );
@@ -198,6 +199,7 @@ public final class BridgeMod implements ModInitializer {
         if (mod == null || !mod.relayPlayerCommands || player == null) return;
         String visible = PublicPlayerCommandPolicy.sanitize(command);
         if (visible.isEmpty() || mod.runtime == null || mod.serverId == null) return;
+        mod.sourceCommands.observe(player.getName().getString(), command);
         boolean emitted = mod.runtime.publishEvent(new ProtocolEnvelope(
             1, "player_command", mod.serverId, null,
             Map.of("minecraft_uuid", player.getStringUUID(),
@@ -706,7 +708,7 @@ public final class BridgeMod implements ModInitializer {
     }
 
     private void relayPublicCommand(String sender, String content) {
-        relayPublicCommand(sender, content, "broadcast");
+        relayPublicCommand(sender, content, sourceCommands.consume(sender, content));
     }
 
     private void relayPublicCommand(String sender, String content, String eventSource) {
@@ -1115,6 +1117,7 @@ public final class BridgeMod implements ModInitializer {
         freezeCorrectedAt.clear();
         pendingLinkPlayers.clear();
         pendingUnlinkPlayers.clear();
+        sourceCommands.clear();
         statsWorker.shutdownNow();
     }
 
