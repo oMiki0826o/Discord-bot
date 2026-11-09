@@ -85,6 +85,23 @@ def _parse_plain_markdown(message: str) -> list[dict[str, object]]:
 
     pos = 0
     while pos < len(clean):
+        if not state["code"] and clean.startswith("||", pos):
+            close = clean.find("||", pos + 2)
+            if close > pos + 2:
+                reveal = clean[pos + 2:close]
+                flush()
+                pieces.append({
+                    "text": "[spoiler]", "bold": False, "italic": False,
+                    "underlined": True, "strikethrough": False,
+                    "obfuscated": False, "color": "gray",
+                    "hover_text": _truncate_utf16(reveal, 480),
+                })
+                pos = close + 2
+                continue
+            # An unclosed || is displayed literally.
+            buf.append("||")
+            pos += 2
+            continue
         if not state["code"]:
             link = _LINK_RE.match(clean, pos)
             bare = _RAW_URL_RE.match(clean, pos) if link is None else None

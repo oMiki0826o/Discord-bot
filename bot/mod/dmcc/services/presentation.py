@@ -25,6 +25,7 @@ EVENT_TYPES = frozenset({
     "player_chat", "player_join", "player_quit", "player_death",
     "player_advancement", "player_gamemode", "server_started", "server_stopping",
     "server_broadcast", "player_command",
+    "source_say", "source_me", "source_msg", "source_tell_raw",
 })
 _FIELDS = frozenset({
     "player", "server", "message", "death_message", "game_mode", "title", "label",
@@ -41,6 +42,10 @@ _EVENT_TEMPLATES = {
     "server_stopping": "**{server} 即將關閉**",
     "server_broadcast": "**[{server}] {player}: {message}**",
     "player_command": "**[{server}] {player}：{message}**",
+    "source_say": "**[{server}] {player}：{message}**",
+    "source_me": "**[{server}] *{player} {message}***",
+    "source_tell_raw": "**[{server}] {player}：{message}**",
+    "source_msg": "**[{server}] {player}：{message}**",
 }
 _ENGLISH_EVENT_TEMPLATES = {
     "player_join": "**{player} joined {server}**",
@@ -52,6 +57,10 @@ _ENGLISH_EVENT_TEMPLATES = {
     "server_stopping": "**{server} is stopping**",
     "server_broadcast": "**[{server}] {player}: {message}**",
     "player_command": "**[{server}] {player} executed {message}**",
+    "source_say": "**[{server}] {player} said {message}**",
+    "source_me": "**[{server}] *{player} {message}***",
+    "source_tell_raw": "**[{server}] {player} broadcast {message}**",
+    "source_msg": "**[{server}] {player} broadcast {message}**",
 }
 _LOCALES = frozenset({"zh_TW", "en_US"})
 _DISCORD_WEBHOOK_PATH = re.compile(r"^/api/webhooks/[0-9]{15,20}/[^/\s]+$")
@@ -285,11 +294,22 @@ def render_message(
     """Build one safe, bounded message without contacting Discord or Minecraft."""
     if event.type not in EVENT_TYPES or event.type in profile.disabled_events:
         return None
-    route = profile.chat if event.type == "player_chat" else profile.event_routes.get(event.type, profile.events)
-    channel_id = profile.event_channels.get(event.type) or route.channel_id or default_channel
+    # Allow upstream-style source-specific routing while retaining the
+    # original server_broadcast wire event for backward-compatible peers.
+    data = event.data
+    kind = event.type
+    if kind == "server_broadcast":
+        source = data.get("source_event")
+        if source in {"say", "me", "msg", "tell_raw"}:
+            if source == "msg" and data.get("public_broadcast") is not True:
+                return None  # Never expose recipient-scoped /msg in a public channel.
+            kind = "source_" + str(source)
+    if kind in profile.disabled_events or event.type in profile.disabled_events:
+        return None
+    route = profile.chat if kind == "player_chat" else profile.event_routes.get(kind, profile.events)
+    channel_id = profile.event_channels.get(kind) or route.channel_id or default_channel
     if channel_id is None:
         return None
-    data = event.data
     player = data.get("player_name")
     needs_player = event.type in {
         "player_chat", "player_join", "player_quit", "player_gamemode", "player_advancement",
@@ -343,7 +363,7 @@ def render_message(
         content = template.format_map(values)
     else:
         defaults = _ENGLISH_EVENT_TEMPLATES if profile.locale == "en_US" else _EVENT_TEMPLATES
-        content = profile.templates.get(event.type, defaults[event.type]).format_map(values)
+        content = profile.templates.get(kind, defaults[kind]).format_map(values)
     content = content.strip()[:1950]
     if not content:
         return None
