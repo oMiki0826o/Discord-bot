@@ -50,6 +50,10 @@ class MinecraftDiscordRelayService:
             self._presentation = presentation
 
     async def forward(self, event: MinecraftEvent) -> bool:
+        if (event.type == "server_broadcast"
+                and event.data.get("source_event") == "msg"
+                and event.data.get("public_broadcast") is not True):
+            return False
         if self._features.enabled:
             if event.type == "player_command" and not self._features.allows_source("player_command"):
                 return False
@@ -69,6 +73,10 @@ class MinecraftDiscordRelayService:
                         mention_ids=self._features.minecraft_mention_ids,
                         custom_emojis=flags["custom_emojis"],
                         mentions=flags["mentions"],
+                        unicode_emojis=flags["unicode_emojis"],
+                        timestamps=flags["timestamps"],
+                        markdown=flags["markdown"],
+                        hyperlinks=flags["hyperlinks"],
                     )},
                 )
         channel_id = self._state.channel_for_server(event.server_id)

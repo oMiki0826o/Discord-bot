@@ -23,7 +23,7 @@ def test_v3_feature_schema_is_opt_in_and_private_messages_remain_private():
     })
     assert active.allows("discord_to_minecraft", "markdown")
     assert active.allows_source("say")
-    assert not active.allows_source("msg")
+    assert active.allows_source("msg")  # only explicit public_broadcast=True may be routed
 
 
 @pytest.mark.parametrize("invalid", [
@@ -197,4 +197,4 @@ def test_v3_source_event_gating_is_public_only_and_explicit():
     })
     assert enabled.allows_source("broadcast")
     assert not enabled.allows_source("tell_raw")
-    assert not enabled.allows_source("msg")
+    assert enabled.allows_source("msg")  # never a private recipient event

@@ -94,10 +94,10 @@ class V3FeatureConfig:
             raise ValueError("private_messages must be a boolean")
         raw_sources = value.get("source_events", {})
         sources = _flags(raw_sources, tuple(sorted(SOURCE_EVENTS)), default=True)
-        # "msg" is never broadcast to Discord by the public-message pipeline:
-        # it is kept as a schema option for a future private, consent-based route.
+        # "msg" source routing is only public when the Bridge explicitly marks
+        # the exact @a recipient selector. Consent-scoped private events are a
+        # separate packet and are never sent through MinecraftDiscordRelay.
         allowed_sources = dict(sources)
-        allowed_sources["msg"] = private_messages and bool(sources["msg"])
         raw_templates = value.get("templates", {})
         if not isinstance(raw_templates, Mapping) or set(raw_templates) - TEMPLATE_EVENTS:
             raise ValueError("invalid v3 templates")
