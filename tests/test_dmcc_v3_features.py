@@ -198,3 +198,19 @@ def test_v3_source_event_gating_is_public_only_and_explicit():
     assert enabled.allows_source("broadcast")
     assert not enabled.allows_source("tell_raw")
     assert enabled.allows_source("msg")  # never a private recipient event
+
+
+def test_custom_minecraft_font_glyph_aliases_are_validated():
+    settings = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "minecraft_glyph_aliases": {"bee": "🐝", "heart": "♥"},
+    })
+    assert settings.minecraft_glyph_aliases["bee"] == "🐝"
+    for invalid in [
+        {"minecraft_glyph_aliases": {"bee": ""}},
+        {"minecraft_glyph_aliases": {"bee": "\\n"}},
+        {"minecraft_glyph_aliases": {"be e": "🐝"}},
+        {"minecraft_glyph_aliases": {"bee": "@everyone"}},
+    ]:
+        with pytest.raises(ValueError):
+            V3FeatureConfig.from_mapping({"enabled": True, **invalid})
