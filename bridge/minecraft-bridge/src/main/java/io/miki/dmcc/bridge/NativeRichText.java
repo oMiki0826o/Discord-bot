@@ -1,19 +1,22 @@
 package io.miki.dmcc.bridge;
 
 import net.minecraft.network.chat.Component;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Optional native Minecraft-to-Minecraft message formatting, parsed with the
- * same constrained component whitelist as authenticated Discord rich messages.
- * Never accepts arbitrary click events or raw JSON from player text.
+ * Bounded nested inline Markdown/hover parser for optional native chat overwrite.
+ * All clickable links are independently validated by RichTextComponents; no
+ * RunCommand, SuggestCommand, external JSON or NBT component is accepted.
  */
 final class NativeRichText {
     private static final int MAX_BODY = 1400;
@@ -21,8 +24,12 @@ final class NativeRichText {
     private static final Pattern TIMESTAMP = Pattern.compile("<t:(-?[0-9]{1,12})(?::[tTdDfFRsS])?>");
     private static final Pattern EMOJI = Pattern.compile(":([A-Za-z0-9_]{1,32}):");
     private static final Pattern USER = Pattern.compile("@([A-Za-z0-9_]{3,16})");
-    private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'")
-        .withZone(ZoneOffset.UTC);
+    private static final Pattern LINK = Pattern.compile(
+        "\\[([^\\]\\r\\n]{1,120})\\]\\((https?://[^\\s<>()]{1,500})\\)"
+    );
+    private static final Pattern RAW_LINK = Pattern.compile("https?://[^\\s<>\\x22\\x27\\x60]{1,500}");
+    private static final DateTimeFormatter DATE = DateTimeFormatter
+        .ofPattern("yyyy-MM-dd HH:mm 'UTC'").withZone(ZoneOffset.UTC);
 
     private NativeRichText() { }
 
@@ -36,72 +43,145 @@ final class NativeRichText {
         if (policy.timestamps()) body = renderTimestamps(body);
         if (policy.customEmojis()) body = renderEmojis(body, policy.emojiAliases());
         if (!policy.unicodeEmojis()) body = muteUnicodeEmoji(body);
-        List<Map<String, Object>> segments = new ArrayList<>();
-        add(segments, prefix, "white", "");
-        StringBuilder plain = new StringBuilder();
-
-        for (int i = 0; i < body.length() && segments.size() < MAX_PARTS; ) {
-            String symbol = null;
-            String style = null;
-            if (policy.markdown()) {
-                if (body.startsWith("**", i)) { symbol = "**"; style = "bold"; }
-                else if (body.startsWith("__", i)) { symbol = "__"; style = "underlined"; }
-                else if (body.startsWith("~~", i)) { symbol = "~~"; style = "strikethrough"; }
-                else if (body.startsWith("||", i)) { symbol = "||"; style = "obfuscated"; }
-                else if (body.startsWith("`", i)) { symbol = "`"; style = "code"; }
-                else if (body.startsWith("*", i)) { symbol = "*"; style = "italic"; }
-            }
-            if (symbol != null) {
-                int end = body.indexOf(symbol, i + symbol.length());
-                if (end >= i + symbol.length() && end - i <= 520) {
-                    flush(segments, plain);
-                    add(segments, body.substring(i + symbol.length(), end),
-                        style.equals("code") ? "gray" : "white", style);
-                    i = end + symbol.length();
+        List<Map<String, Object>> pieces = new ArrayList<>();
+        add(pieces, normalize(prefix, 90), "white", false, false, false, false, null, null);
+        boolean bold = false, italic = false, underlined = false, strike = false, code = false;
+        StringBuilder buffer = new StringBuilder();
+        for (int i = 0; i < body.length() && pieces.size() < MAX_PARTS;) {
+            if (policy.markdown() && !code && body.startsWith("||", i)) {
+                int end = body.indexOf("||", i + 2);
+                if (end > i + 2) {
+                    flush(pieces, buffer, bold, italic, underlined, strike, code);
+                    add(pieces, "[spoiler]", "gray", false, false, true, false,
+                        null, normalize(body.substring(i + 2, end), 480));
+                    i = end + 2;
                     continue;
                 }
             }
-            if (policy.hyperlinks() && body.startsWith("[", i)) {
-                int middle = body.indexOf("](", i + 1);
-                if (middle > i && middle - i < 122) {
-                    int end = body.indexOf(')', middle + 2);
-                    if (end > middle && end - middle < 515) {
-                        String label = body.substring(i + 1, middle);
-                        String url = body.substring(middle + 2, end);
-                        if (url.startsWith("https://") || url.startsWith("http://")) {
-                            flush(segments, plain);
-                            segments.add(Map.of(
-                                "text", label, "color", "#3366CC",
-                                "underlined", true, "click_url", url, "hover_text", url
-                            ));
-                            i = end + 1;
-                            continue;
-                        }
+            if (policy.hyperlinks() && !code) {
+                Matcher link = LINK.matcher(body);
+                link.region(i, body.length());
+                Matcher bare = RAW_LINK.matcher(body);
+                bare.region(i, body.length());
+                if (link.lookingAt() || bare.lookingAt()) {
+                    String label;
+                    // Do not infer interactivity from arbitrary text. Both URL
+                    // forms pass the exact same restricted URL policy.
+                    boolean bracketed = link.lookingAt();
+                    String url = bracketed ? link.group(2) : bare.group();
+                    label = bracketed ? link.group(1) : url.replaceAll("[.,;!?)]+$", "");
+                    if (safeExternalUrl(url)) {
+                        flush(pieces, buffer, bold, italic, underlined, strike, code);
+                        add(pieces, label, "#3366CC", bold, italic, true, strike, url, url);
+                        i += bracketed ? link.group().length() : bare.group().length();
+                        continue;
                     }
                 }
             }
-            if (policy.mentions() && body.charAt(i) == '@') {
-                Matcher matched = USER.matcher(body);
-                matched.region(i, body.length());
-                if (matched.lookingAt()) {
-                    flush(segments, plain);
-                    add(segments, matched.group(), "yellow", "");
-                    i = matched.end();
+            if (policy.markdown() && body.charAt(i) == '\\'
+                && i + 1 < body.length() && "*_~`|\\[]()".indexOf(body.charAt(i + 1)) >= 0) {
+                buffer.append(body.charAt(i + 1));
+                i += 2;
+                continue;
+            }
+            String mark = null;
+            if (policy.markdown()) {
+                if (body.startsWith("`", i)) mark = "`";
+                else if (!code) {
+                    for (String candidate : new String[]{"**", "__", "~~", "*", "_"}) {
+                        if (body.startsWith(candidate, i)) { mark = candidate; break; }
+                    }
+                }
+            }
+            if (mark != null) {
+                boolean active = switch (mark) {
+                    case "**" -> bold;
+                    case "__" -> underlined;
+                    case "~~" -> strike;
+                    case "*", "_" -> italic;
+                    default -> code;
+                };
+                if (active || body.indexOf(mark, i + mark.length()) >= 0) {
+                    flush(pieces, buffer, bold, italic, underlined, strike, code);
+                    switch (mark) {
+                        case "**" -> bold = !bold;
+                        case "__" -> underlined = !underlined;
+                        case "~~" -> strike = !strike;
+                        case "*", "_" -> italic = !italic;
+                        default -> code = !code;
+                    }
+                    i += mark.length();
                     continue;
                 }
             }
-            plain.append(body.charAt(i++));
+            if (policy.mentions() && !code && body.charAt(i) == '@') {
+                Matcher m = USER.matcher(body);
+                m.region(i, body.length());
+                if (m.lookingAt()) {
+                    flush(pieces, buffer, bold, italic, underlined, strike, code);
+                    add(pieces, m.group(), "yellow", bold, italic, underlined, strike, null, null);
+                    i = m.end();
+                    continue;
+                }
+            }
+            buffer.append(body.charAt(i++));
         }
-        flush(segments, plain);
-        if (segments.isEmpty()) return Component.literal(prefix + body);
-        return RichTextComponents.parse(Map.of("segments", segments))
-            .map(component -> (Component) component)
-            .orElseGet(() -> Component.literal(prefix + body));
+        flush(pieces, buffer, bold, italic, underlined, strike, code);
+        if (pieces.isEmpty()) return Component.literal("");
+        return RichTextComponents.parse(Map.of("segments", pieces))
+            .orElseGet(() -> Component.literal(normalize(prefix, 90) + body));
+    }
+
+    private static boolean safeExternalUrl(String text) {
+        try {
+            URI uri = URI.create(text);
+            if (!"http".equalsIgnoreCase(uri.getScheme())
+                && !"https".equalsIgnoreCase(uri.getScheme())) return false;
+            String host = uri.getHost();
+            if (host == null || uri.getUserInfo() != null || uri.getPort() > 65535) return false;
+            host = host.toLowerCase(Locale.ROOT);
+            if (host.equals("localhost") || host.endsWith(".local")
+                || host.endsWith(".localhost") || host.endsWith(".internal")
+                || host.matches("[0-9.]+") || !host.contains(".")) return false;
+            return text.length() <= 512 && text.chars().noneMatch(c -> c < 33 || c > 126);
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
+    }
+
+    private static void flush(
+        List<Map<String, Object>> pieces, StringBuilder buffer,
+        boolean bold, boolean italic, boolean underline, boolean strike, boolean code
+    ) {
+        if (!buffer.isEmpty()) {
+            add(pieces, buffer.toString(), code ? "gray" : "white",
+                !code && bold, !code && italic, !code && underline,
+                !code && strike, null, null);
+            buffer.setLength(0);
+        }
+    }
+
+    private static void add(
+        List<Map<String, Object>> pieces, String value, String color,
+        boolean bold, boolean italic, boolean underline, boolean strike,
+        String click, String hover
+    ) {
+        if (value == null || value.isEmpty() || pieces.size() >= MAX_PARTS) return;
+        Map<String, Object> part = new HashMap<>();
+        part.put("text", value);
+        part.put("color", color);
+        part.put("bold", bold);
+        part.put("italic", italic);
+        part.put("underlined", underline);
+        part.put("strikethrough", strike);
+        if (click != null) part.put("click_url", click);
+        if (hover != null) part.put("hover_text", hover);
+        pieces.add(part);
     }
 
     private static String renderTimestamps(String text) {
         Matcher matcher = TIMESTAMP.matcher(text);
-        StringBuffer output = new StringBuffer();
+        StringBuffer result = new StringBuffer();
         while (matcher.find()) {
             String rendered;
             try {
@@ -109,60 +189,42 @@ final class NativeRichText {
             } catch (RuntimeException invalid) {
                 rendered = "[timestamp]";
             }
-            matcher.appendReplacement(output, Matcher.quoteReplacement(rendered));
+            matcher.appendReplacement(result, Matcher.quoteReplacement(rendered));
         }
-        matcher.appendTail(output);
-        return output.toString();
+        matcher.appendTail(result);
+        return result.toString();
     }
 
     private static String renderEmojis(String text, Map<String, String> aliases) {
         Matcher matcher = EMOJI.matcher(text);
-        StringBuffer output = new StringBuffer();
+        StringBuffer result = new StringBuffer();
         while (matcher.find()) {
             String replacement = aliases.getOrDefault(
-                matcher.group(1).toLowerCase(java.util.Locale.ROOT), matcher.group()
+                matcher.group(1).toLowerCase(Locale.ROOT), matcher.group()
             );
-            matcher.appendReplacement(output, Matcher.quoteReplacement(replacement));
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
-        matcher.appendTail(output);
-        return output.toString();
+        matcher.appendTail(result);
+        return result.toString();
     }
 
     private static String muteUnicodeEmoji(String text) {
-        StringBuilder output = new StringBuilder();
+        StringBuilder out = new StringBuilder();
         text.codePoints().forEach(code -> {
             if (code >= 0x2600 && Character.getType(code) == Character.OTHER_SYMBOL) {
-                output.append("[emoji]");
+                out.append("[emoji]");
             } else {
-                output.appendCodePoint(code);
+                out.appendCodePoint(code);
             }
         });
-        return output.toString();
+        return out.toString();
     }
 
-    private static String normalize(String source, int length) {
+    private static String normalize(String source, int max) {
         if (source == null) return "";
-        String text = source.replaceAll("[\\p{Cntrl}]", " ")
+        String clean = source.replaceAll("[\\p{Cntrl}]", " ")
             .replaceAll("(?i)@everyone", "[everyone]")
             .replaceAll("(?i)@here", "[here]");
-        return text.length() > length ? text.substring(0, length) : text;
-    }
-
-    private static void flush(List<Map<String, Object>> parts, StringBuilder plain) {
-        if (!plain.isEmpty()) {
-            add(parts, plain.toString(), "white", "");
-            plain.setLength(0);
-        }
-    }
-
-    private static void add(
-        List<Map<String, Object>> parts, String text, String color, String style
-    ) {
-        if (text == null || text.isEmpty()) return;
-        Map<String, Object> result = new java.util.HashMap<>();
-        result.put("text", text);
-        result.put("color", color);
-        if (!style.isEmpty() && !style.equals("code")) result.put(style, true);
-        parts.add(result);
+        return clean.length() > max ? clean.substring(0, max) : clean;
     }
 }
