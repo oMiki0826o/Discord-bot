@@ -15,6 +15,11 @@ import java.util.Set;
 
 /** Safe style-only Minecraft component construction, without interactive events or commands. */
 final class RichTextComponents {
+    private static final Set<String> COLORS = Set.of(
+        "black", "dark_blue", "dark_green", "dark_aqua", "dark_red",
+        "dark_purple", "gold", "gray", "dark_gray", "blue", "green",
+        "aqua", "red", "light_purple", "yellow", "white"
+    );
     private static final Set<String> FIELDS = Set.of(
         "text", "bold", "italic", "underlined", "strikethrough", "obfuscated", "color",
         "click_url", "hover_text"
@@ -45,7 +50,7 @@ final class RichTextComponents {
             }
             Object colorRaw = entry.containsKey("color") ? entry.get("color") : "white";
             if (!(colorRaw instanceof String color)
-                || !(color.equals("white") || color.equals("gray") || color.matches("#[0-9a-fA-F]{6}"))) {
+                || !(COLORS.contains(color) || color.matches("#[0-9a-fA-F]{6}"))) {
                 return Optional.empty();
             }
             URI click = null;
@@ -72,7 +77,7 @@ final class RichTextComponents {
                 .withObfuscated(Boolean.TRUE.equals(entry.get("obfuscated")))
                 .withColor(color.startsWith("#")
                     ? TextColor.fromRgb(Integer.parseInt(color.substring(1), 16))
-                    : TextColor.fromLegacyFormat(color.equals("gray") ? ChatFormatting.GRAY : ChatFormatting.WHITE));
+                    : TextColor.fromLegacyFormat(ChatFormatting.valueOf(color.toUpperCase(Locale.ROOT))));
                 if (clickTarget != null) styled = styled.withClickEvent(new ClickEvent.OpenUrl(clickTarget));
                 if (hoverLabel != null) styled = styled.withHoverEvent(
                     new HoverEvent.ShowText(Component.literal(hoverLabel))
