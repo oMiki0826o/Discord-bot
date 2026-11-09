@@ -39,6 +39,16 @@ class BridgeRequestService:
     async def log(self, server_id: str) -> Mapping[str, object]:
         return await self._requests.request(server_id, "log_request", {"name": "latest.log"})
 
+    async def log_chunk(self, server_id: str, offset: int, file_id: str) -> Mapping[str, object]:
+        """Read a bounded append-only log chunk from an authenticated Bridge."""
+        if type(offset) is not int or offset < -1:
+            raise ValueError("invalid log offset")
+        if not isinstance(file_id, str) or len(file_id) > 64:
+            raise ValueError("invalid log file id")
+        return await self._requests.request(server_id, "log_request", {
+            "name": "latest.log", "offset": offset, "file_id": file_id,
+        })
+
     async def stats(
         self,
         server_id: str,

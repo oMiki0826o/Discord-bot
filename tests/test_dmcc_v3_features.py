@@ -1,0 +1,227 @@
+"""tests/test_dmcc_v3_features.py
+
+Modification():
+
+- Validate the preview feature schema, safe rich segment templates and defaults.
+"""
+from __future__ import annotations
+
+import pytest
+
+from bot.mod.dmcc.services.v3_features import V3FeatureConfig
+from bot.mod.dmcc.services.v3_templates import render_segments
+
+
+def test_v3_feature_schema_is_opt_in_and_private_messages_remain_private():
+    default = V3FeatureConfig.from_mapping({})
+    assert not default.enabled
+    assert not default.allows("discord_to_minecraft", "markdown")
+    active = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "source_events": {"say": True, "msg": True},
+        "message_parsing": {"discord_to_minecraft": {"markdown": True}},
+    })
+    assert active.allows("discord_to_minecraft", "markdown")
+    assert active.allows_source("say")
+    assert active.allows_source("msg")  # only explicit public_broadcast=True may be routed
+
+
+@pytest.mark.parametrize("invalid", [
+    {"enabled": "true"},
+    {"message_parsing": {"discord_to_minecraft": {"markdown": "true"}}},
+    {"message_parsing": {"private_data": {}}},
+    {"templates": {"user_message": [{"text": "{player.__class__}"}]}},
+    {"templates": {"user_message": [{"text": "{message}", "color": "run_command"}]}},
+    {"templates": {"user_message": [{"text": "{message}", "click_url": "https://site"}]}},
+])
+def test_v3_rejects_invalid_or_untrusted_settings(invalid):
+    with pytest.raises(ValueError):
+        V3FeatureConfig.from_mapping(invalid)
+
+
+def test_rich_template_keeps_message_formatting_and_clip_limits():
+    segments = render_segments(
+        [{"text": "[{server}] <{effective_name}> ", "bold": True, "color": "{role_color}"},
+         {"text": "{message}", "color": "gray"}],
+        {"server": "SMP", "effective_name": "Alex", "role_color": "#1234AB"},
+        [{"text": "Hi ", "color": "white"},
+         {"text": "World", "bold": True, "color": "white"}],
+    )
+    assert "".join(str(p["text"]) for p in segments) == "[SMP] <Alex> Hi World"
+    assert segments[0]["color"] == "#1234AB"
+    assert segments[-1]["bold"]
+    clipped = render_segments([{"text": "{message}"}], {},
+        [{"text": "🦋" * 2000, "color": "white"}])
+    assert sum(len(str(p["text"]).encode("utf-16-le")) // 2 for p in clipped) <= 1800
+
+
+
+def test_config_wires_v3_feature_matrix_and_requires_opt_in():
+    from bot.mod.dmcc.config import DEFAULT_SETTINGS, DmccSettings, SettingsError
+    defaults = DmccSettings.from_mapping(DEFAULT_SETTINGS)
+    assert not defaults.v3_features.enabled
+    custom = DmccSettings.from_mapping({
+        **DEFAULT_SETTINGS,
+        "v3_features": {
+            "enabled": True,
+            "message_parsing": {"discord_to_minecraft": {"attachments": False}},
+            "templates": {"user_message": [
+                {"text": "[{server}] "},
+                {"text": "{message}", "color": "gray"},
+            ]},
+        },
+    })
+    assert custom.v3_features.enabled
+    assert not custom.v3_features.allows("discord_to_minecraft", "attachments")
+    with pytest.raises(SettingsError):
+        DmccSettings.from_mapping({**DEFAULT_SETTINGS, "v3_features": {"enabled": "yes"}})
+
+
+def test_discord_relay_uses_v3_user_message_template(tmp_path):
+    import asyncio
+    from bot.mod.dmcc.repositories.state import JsonStateRepository
+    from bot.mod.dmcc.services.discord_relay import DiscordRelayService
+
+    class Gateway:
+        def __init__(self):
+            self.sent = []
+        async def send_minecraft_segments(self, server_id, segments):
+            self.sent.append((server_id, segments))
+    state = JsonStateRepository(tmp_path / "state.json")
+    state.initialize()
+    state.set_channel_mapping("survival", "123456789012345678")
+    features = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "templates": {"user_message": [
+            {"text": "[{server}] ", "color": "gold"},
+            {"text": "<{effective_name}> ", "color": "{role_color}"},
+            {"text": "{message}", "color": "gray"},
+        ]},
+    })
+    gateway = Gateway()
+    relay = DiscordRelayService(state, gateway, features=features)
+    assert asyncio.run(relay.forward_message(
+        "121", "123456789012345678", "Alex", "Hello **Steve**", author_color="#AA55CC"
+    ))
+    segs = gateway.sent[0][1]
+    assert "".join(str(s["text"]) for s in segs) == "[survival] <Alex> Hello Steve"
+    assert any(p.get("bold") and p.get("text") == "Steve" for p in segs)
+
+
+def test_discord_content_flags_keep_raw_markup_when_explicitly_disabled():
+    from bot.mod.dmcc.services.message_format import format_discord_content
+    source = "Hello <:bee:123456789012345678> <t:0:R>"
+    assert "<:bee:" in format_discord_content(
+        source, custom_emojis=False, timestamps=False,
+    )
+    assert "<t:0:R>" in format_discord_content(
+        source, custom_emojis=False, timestamps=False,
+    )
+
+
+def test_minecraft_to_discord_aliases_and_pings_are_explicit():
+    from bot.mod.dmcc.services.v3_minecraft import format_minecraft_message
+    converted = format_minecraft_message(
+        "Hello @Steve :firefly: @everyone @here",
+        emoji_aliases={"firefly": "<:firefly:123456789012345678>"},
+        mention_ids={"steve": "234567890123456789"},
+    )
+    assert "<@234567890123456789>" in converted
+    assert "<:firefly:123456789012345678>" in converted
+    assert "@everyone" not in converted and "@here" not in converted
+    assert ":firefly:" in format_minecraft_message(":firefly:", custom_emojis=False)
+
+
+def test_v3_config_validates_minecraft_alias_mappings():
+    active = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "minecraft_emoji_aliases": {"heart": "<:heart:123456789012345678>"},
+        "minecraft_mention_ids": {"Steve": "234567890123456789"},
+    })
+    assert active.minecraft_mention_ids["steve"] == "234567890123456789"
+    for broken in [
+        {"minecraft_mention_ids": {"Steve": "<@123456789012345678>"}},
+        {"minecraft_emoji_aliases": {"heart": "https://external.invalid/emoji.png"}},
+        {"minecraft_emoji_aliases": {"..": "<:heart:123456789012345678>"}},
+    ]:
+        with pytest.raises(ValueError):
+            V3FeatureConfig.from_mapping(broken)
+
+
+def test_v3_minecraft_event_relay_applies_explicit_aliases(tmp_path):
+    import asyncio
+    from bot.mod.dmcc.events import MinecraftEvent
+    from bot.mod.dmcc.repositories.state import JsonStateRepository
+    from bot.mod.dmcc.services.minecraft_discord_relay import MinecraftDiscordRelayService
+
+    class Sender:
+        def __init__(self):
+            self.sent = []
+        async def send_discord_message(self, channel_id, content):
+            self.sent.append((channel_id, content))
+
+    state = JsonStateRepository(tmp_path / "state.json")
+    state.initialize()
+    state.set_channel_mapping("survival", "123456789012345678")
+    sender = Sender()
+    features = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "minecraft_emoji_aliases": {"bee": "<:bee:123456789012345678>"},
+    })
+    relay = MinecraftDiscordRelayService(state, sender, features=features)
+    assert asyncio.run(relay.forward(MinecraftEvent(
+        "player_chat", "survival", {"player_name": "Steve", "message": "hello :bee:"}
+    )))
+    assert "<:bee:123456789012345678>" in sender.sent[0][1]
+
+
+def test_v3_preview_snapshot_can_be_swapped_without_recreating_relay(tmp_path):
+    from bot.mod.dmcc.repositories.state import JsonStateRepository
+    from bot.mod.dmcc.services.minecraft_discord_relay import MinecraftDiscordRelayService
+
+    state = JsonStateRepository(tmp_path / "state.json")
+    state.initialize()
+    class Sender:
+        def __init__(self):
+            self.sent = []
+    relay = MinecraftDiscordRelayService(state, Sender())
+    features = V3FeatureConfig.from_mapping({"enabled": True})
+    relay.apply_preview_features(features)
+    assert relay._features.enabled
+
+
+def test_v3_source_event_gating_is_public_only_and_explicit():
+    enabled = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "source_events": {"tell_raw": False, "msg": True},
+    })
+    assert enabled.allows_source("broadcast")
+    assert not enabled.allows_source("tell_raw")
+    assert enabled.allows_source("msg")  # never a private recipient event
+
+
+def test_custom_minecraft_font_glyph_aliases_are_validated():
+    settings = V3FeatureConfig.from_mapping({
+        "enabled": True,
+        "minecraft_glyph_aliases": {"bee": "🐝", "heart": "♥"},
+    })
+    assert settings.minecraft_glyph_aliases["bee"] == "🐝"
+    for invalid in [
+        {"minecraft_glyph_aliases": {"bee": ""}},
+        {"minecraft_glyph_aliases": {"bee": "\\n"}},
+        {"minecraft_glyph_aliases": {"be e": "🐝"}},
+        {"minecraft_glyph_aliases": {"bee": "@everyone"}},
+    ]:
+        with pytest.raises(ValueError):
+            V3FeatureConfig.from_mapping({"enabled": True, **invalid})
+
+
+def test_discord_link_buttons_become_safe_minecraft_openurl_labels():
+    from types import SimpleNamespace
+    from bot.mod.dmcc.commands.user import DmccUserCog
+    safe = SimpleNamespace(label="Docs", url="https://example.org/docs", custom_id="secret")
+    dangerous = SimpleNamespace(label="Login", url="http://127.0.0.1/admin", custom_id="private")
+    view = SimpleNamespace(components=[SimpleNamespace(children=[safe, dangerous])])
+    extracted = DmccUserCog._component_summaries(view)
+    assert extracted == ("[Docs](https://example.org/docs)", "Login")
+    assert all("secret" not in x and "private" not in x for x in extracted)

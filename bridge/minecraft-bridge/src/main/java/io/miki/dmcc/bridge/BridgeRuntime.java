@@ -88,6 +88,13 @@ public final class BridgeRuntime implements AutoCloseable {
         return lastFailure;
     }
 
+    /** Read-only gateway readiness; never use an unverified socket for login decisions. */
+    public boolean isAuthenticated() {
+        BridgeConnection active = connection;
+        return running && active instanceof BridgeClient client
+            && client.state() == BridgeClient.State.AUTHENTICATED;
+    }
+
     /** Enqueue a best-effort Minecraft event without blocking the server thread. */
     public boolean publishEvent(ProtocolEnvelope envelope) {
         if (!running || !acceptingEvents.get()) return false;

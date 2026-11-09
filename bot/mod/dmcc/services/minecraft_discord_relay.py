@@ -16,6 +16,9 @@ from typing import Protocol
 from ..events import MinecraftEvent
 from ..repositories.state import JsonStateRepository
 from .presentation import OutboundDiscordMessage, PresentationSettings, render_message
+from .public_commands import sanitize_public_player_command
+from .v3_features import V3FeatureConfig, SOURCE_EVENTS
+from .v3_minecraft import format_minecraft_message
 
 
 class DiscordMessageSender(Protocol):
@@ -30,12 +33,52 @@ class MinecraftDiscordRelayService:
         state: JsonStateRepository,
         sender: DiscordMessageSender,
         presentation: PresentationSettings | None = None,
+        *, features: V3FeatureConfig | None = None,
     ) -> None:
         self._state = state
         self._sender = sender
         self._presentation = presentation or PresentationSettings.empty()
+        self._features = features or V3FeatureConfig()
+
+    def apply_preview_features(
+        self, features: V3FeatureConfig,
+        presentation: PresentationSettings | None = None,
+    ) -> None:
+        """Swap display-only snapshots; keep Gateway connections untouched."""
+        self._features = features
+        if presentation is not None:
+            self._presentation = presentation
 
     async def forward(self, event: MinecraftEvent) -> bool:
+        if (event.type == "server_broadcast"
+                and event.data.get("source_event") == "msg"
+                and event.data.get("public_broadcast") is not True):
+            return False
+        if self._features.enabled:
+            if event.type == "player_command" and not self._features.allows_source("player_command"):
+                return False
+            source = event.data.get("source_event")
+            if (event.type == "server_broadcast" and isinstance(source, str)
+                    and source in SOURCE_EVENTS and not self._features.allows_source(source)):
+                return False
+        if self._features.enabled and event.type in {"player_chat", "server_broadcast"}:
+            raw = event.data.get("message")
+            if isinstance(raw, str):
+                flags = self._features.parsing["minecraft_to_discord"]
+                event = MinecraftEvent(
+                    event.type, event.server_id,
+                    {**event.data, "message": format_minecraft_message(
+                        raw,
+                        emoji_aliases=self._features.minecraft_emoji_aliases,
+                        mention_ids=self._features.minecraft_mention_ids,
+                        custom_emojis=flags["custom_emojis"],
+                        mentions=flags["mentions"],
+                        unicode_emojis=flags["unicode_emojis"],
+                        timestamps=flags["timestamps"],
+                        markdown=flags["markdown"],
+                        hyperlinks=flags["hyperlinks"],
+                    )},
+                )
         channel_id = self._state.channel_for_server(event.server_id)
         profile = self._presentation.servers.get(event.server_id)
         if profile is not None:
@@ -65,6 +108,18 @@ class MinecraftDiscordRelayService:
 
 def _legacy_content(event: MinecraftEvent) -> str | None:
     player_name = event.data.get("player_name")
+    if event.type == "player_command":
+        command = sanitize_public_player_command(event.data.get("message"))
+        if not command or not isinstance(player_name, str) or not player_name.strip():
+            return None
+        return f"**[{event.server_id}] {player_name.strip()[:64]} executed {command}**"
+    if event.type == "server_broadcast":
+        raw = event.data.get("message")
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        source = event.data.get("player_name")
+        source = source.strip()[:64] if isinstance(source, str) and source.strip() else "Server"
+        return f"**[{event.server_id}] {source}: {raw.strip()[:1500]}**"
     if event.type == "player_chat":
         message = event.data.get("message")
         if not isinstance(player_name, str) or not player_name.strip() or not isinstance(message, str) or not message.strip():

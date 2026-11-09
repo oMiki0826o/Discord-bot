@@ -5,6 +5,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.authlib.GameProfile;
+import net.minecraft.network.Connection;
+import net.minecraft.server.network.ServerLoginPacketListenerImpl;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -15,6 +19,10 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.AdvancementProgress;
 import net.minecraft.advancements.DisplayInfo;
@@ -42,6 +50,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static net.minecraft.commands.Commands.literal;
+import static net.minecraft.commands.Commands.argument;
 
 /**
  * Fabric server entrypoint for the staged DMCC Bridge.
@@ -58,25 +67,96 @@ public final class BridgeMod implements ModInitializer {
     private String serverId;
     private long metricTickCounter;
     private final Map<String, PendingPlayer> pendingLinkPlayers = new ConcurrentHashMap<>();
+    private final CommandEchoSuppressor commandEchoes = new CommandEchoSuppressor();
+    private final SourceCommandTracker sourceCommands = new SourceCommandTracker();
+    private final LinkGateRegistry loginGate = new LinkGateRegistry(
+        System::nanoTime, TimeUnit.SECONDS.toNanos(5)
+    );
+    private volatile boolean requireLinking;
+    private volatile String unlinkedPlayerAction = "kick";
+    private volatile boolean opSyncEnabled;
+    private volatile boolean relayPlayerCommands;
+    private volatile boolean overwriteNativeMessages;
+    private volatile boolean echoPlayerCommands;
+    private volatile boolean echoGameMode;
+    private volatile MinecraftTranslations translations = MinecraftTranslations.empty();
+    private volatile Path translationDirectory;
+    private volatile String translationLocale = "en_us";
+    private volatile String translationVersion;
+    private volatile List<Path> translationRoots = List.of();
+    private volatile MinecraftPackTranslations.Snapshot selectedPackTranslations =
+        MinecraftPackTranslations.Snapshot.empty();
+    private final OpSyncApplier opSyncApplier = new OpSyncApplier();
+    private final FreezeRegistry frozenPlayers = new FreezeRegistry(
+        System::nanoTime, TimeUnit.MINUTES.toNanos(5)
+    );
+    private final LinkGateRegistry freezeChecks = new LinkGateRegistry(
+        System::nanoTime, TimeUnit.SECONDS.toNanos(5)
+    );
+    private final Map<UUID, FreezeSession> freezeSessions = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> freezeCorrectedAt = new ConcurrentHashMap<>();
     private final Map<String, PendingPlayer> pendingUnlinkPlayers = new ConcurrentHashMap<>();
     private volatile long pendingRequestTtlMillis = 120_000;
     private volatile int gracefulShutdownTimeoutMillis = 1_500;
-    private final ScheduledExecutorService statsWorker = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "dmcc-bridge-stats");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private ScheduledExecutorService statsWorker = createStatsWorker();
+    private java.util.concurrent.ScheduledFuture<?> officialLanguageTask;
+
+    private static ScheduledExecutorService createStatsWorker() {
+        return Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "dmcc-bridge-stats");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
 
     @Override
     public void onInitialize() {
         activeInstance = this;
         ServerLifecycleEvents.SERVER_STARTED.register(this::startRuntime);
+        ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, manager, success) -> {
+            if (success) {
+                selectedPackTranslations = MinecraftPackTranslations.snapshot(
+                    server, translationLocale
+                );
+                refreshTranslations();
+            }
+        });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> stopRuntime());
-        ServerTickEvents.END_SERVER_TICK.register(this::publishMetricsOnTick);
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            checkFrozenPlayers(server);
+            publishMetricsOnTick(server);
+        });
+        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) -> {
+            if (!overwriteNativeMessages) return true;
+            if (sender.level().getServer() == null) return true;
+            sender.level().getServer().getPlayerList().broadcastSystemMessage(
+                NativeMessageFormatter.playerChat(sender.getName().getString(), message.signedContent()),
+                false
+            );
+            relayPlayerChat(sender, message.signedContent());
+            return false;
+        });
+        // Fabric API calls COMMAND_MESSAGE only for broadcasts addressed to
+        // all players (e.g. /say and /me); recipient-scoped /msg is excluded.
+        ServerMessageEvents.ALLOW_COMMAND_MESSAGE.register((message, source, params) -> {
+            if (!overwriteNativeMessages) return true;
+            source.getServer().getPlayerList().broadcastSystemMessage(
+                NativeMessageFormatter.publicCommand(source.getTextName(), message.signedContent()),
+                false
+            );
+            relayPublicCommand(source.getTextName(), message.signedContent());
+            return false;
+        });
+        ServerMessageEvents.COMMAND_MESSAGE.register((message, source, params) ->
+            relayPublicCommand(source.getTextName(), message.signedContent())
+        );
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) ->
             relayPlayerChat(sender, message.signedContent())
         );
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> relayPlayerEvent("player_join", handler.getPlayer()));
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            freezeOnJoin(handler.getPlayer());
+            relayPlayerEvent("player_join", handler.getPlayer());
+        });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> handlePlayerDisconnect(handler.getPlayer()));
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
             literal("dmcc")
@@ -84,6 +164,16 @@ public final class BridgeMod implements ModInitializer {
                     context.getSource().getServer(), context.getSource().getEntity())))
                 .then(literal("unlink").executes(context -> requestUnlink(
                     context.getSource().getServer(), context.getSource().getEntity())))
+                .then(literal("refresh").requires(source -> source.hasPermission(3))
+                    .executes(context -> refreshLocalPresentation(context.getSource().getServer())))
+                .then(literal("pm")
+                    .then(argument("player", StringArgumentType.word())
+                        .then(argument("message", StringArgumentType.greedyString())
+                            .executes(context -> sendPrivateFromMinecraft(
+                                context.getSource(),
+                                StringArgumentType.getString(context, "player"),
+                                StringArgumentType.getString(context, "message")
+                            )))))
         ));
         LOGGER.info("Minecraft Bridge initialized; waiting for server lifecycle.");
     }
@@ -104,6 +194,23 @@ public final class BridgeMod implements ModInitializer {
         if (active != null) active.sendAdvancement(player, advancement, progress);
     }
 
+    /** A strict public-command allowlist is checked before publishing any command. */
+    public static void relayPlayerCommand(ServerPlayer player, String command) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || !mod.relayPlayerCommands || player == null) return;
+        String visible = PublicPlayerCommandPolicy.sanitize(command);
+        if (visible.isEmpty() || mod.runtime == null || mod.serverId == null) return;
+        mod.sourceCommands.observe(player.getName().getString(), command);
+        boolean emitted = mod.runtime.publishEvent(new ProtocolEnvelope(
+            1, "player_command", mod.serverId, null,
+            Map.of("minecraft_uuid", player.getStringUUID(),
+                "player_name", player.getName().getString(), "message", visible)
+        ));
+        if (emitted && mod.echoPlayerCommands) {
+            player.sendSystemMessage(Component.literal("[DMCC command] " + visible));
+        }
+    }
+
     /** Called only by the player-death Mixin while the original death message remains available. */
     public static void relayDeath(ServerPlayer player) {
         BridgeMod active = activeInstance;
@@ -111,12 +218,42 @@ public final class BridgeMod implements ModInitializer {
     }
 
     private void startRuntime(MinecraftServer server) {
+        if (statsWorker.isShutdown()) {
+            statsWorker = createStatsWorker();
+        }
         Path configPath = FabricLoader.getInstance().getConfigDir().resolve("minecraft-bridge.properties");
         try (var reader = Files.newBufferedReader(configPath)) {
             BridgeSettings settings = BridgeSettings.fromReader(reader);
             serverId = settings.serverId();
             pendingRequestTtlMillis = settings.pendingRequestTtlMillis();
             gracefulShutdownTimeoutMillis = settings.gracefulShutdownTimeoutMillis();
+            requireLinking = settings.requireLinking();
+            unlinkedPlayerAction = settings.unlinkedPlayerAction();
+            opSyncEnabled = settings.opSyncEnabled();
+            relayPlayerCommands = settings.relayPlayerCommands();
+            overwriteNativeMessages = settings.overwriteNativeMessages();
+            NativeFormatPolicy nativePreview = NativeFormatPolicy.load(configPath);
+            NativeMessageFormatter.configure(nativePreview);
+            echoPlayerCommands = nativePreview.echoPlayerCommands();
+            echoGameMode = nativePreview.echoGameMode();
+            translationLocale = settings.translationLocale();
+            translationVersion = server.getServerVersion();
+            translationDirectory = configPath.resolveSibling("minecraft-bridge").resolve("lang");
+            translationRoots = FabricLoader.getInstance().getAllMods().stream()
+                .flatMap(mod -> mod.getRootPaths().stream())
+                .limit(256).toList();
+            selectedPackTranslations = MinecraftPackTranslations.snapshot(server, translationLocale);
+            refreshTranslations();
+            statsWorker.scheduleAtFixedRate(this::refreshTranslations, 300, 300, TimeUnit.SECONDS);
+            configureOfficialLanguageTask(configPath);
+            if (opSyncEnabled) {
+                try {
+                    opSyncApplier.configure(configPath.resolveSibling("minecraft-bridge-managed-ops.properties"));
+                } catch (IOException badLedger) {
+                    opSyncEnabled = false;
+                    LOGGER.error("DMCC OP sync disabled: ownership ledger unavailable", badLedger);
+                }
+            }
             runtime = new BridgeRuntime(
                 () -> new BridgeClient(settings, (client, envelope) -> handleGatewayPacket(server, client, envelope)),
                 1_000,
@@ -131,6 +268,164 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
+    /** Called from the login-thread mixin; never waits for Discord or another thread. */
+    public static boolean shouldHoldLogin(
+        ServerLoginPacketListenerImpl listener, Connection connection, GameProfile profile
+    ) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || !mod.requireLinking || !"kick".equals(mod.unlinkedPlayerAction)) return false;
+        if (!connection.isConnected()) return false;
+        UUID uuid = profileIdentifier(profile);
+        String name = profileName(profile);
+        if (uuid == null || name == null || !name.matches("[A-Za-z0-9_]{3,16}")) return false;
+        BridgeRuntime active = mod.runtime;
+        LinkGateRegistry.Decision decision = mod.loginGate.poll(
+            uuid, connection, active != null && active.isAuthenticated(),
+            requestId -> mod.sendLinkCheck(uuid, name, requestId)
+        );
+        if (decision.verdict() == LinkGateRegistry.Verdict.WAIT) return true;
+        if (decision.verdict() == LinkGateRegistry.Verdict.DENY) {
+            listener.disconnect(Component.literal(
+                "Discord account linking required. In Discord use /dmcc link " + decision.code()
+            ));
+            return true;
+        }
+        return false;
+    }
+
+    private static UUID profileIdentifier(GameProfile profile) {
+        Object value = profileAccessor(profile, "id", "getId");
+        return value instanceof UUID uuid ? uuid : null;
+    }
+
+    private static String profileName(GameProfile profile) {
+        Object value = profileAccessor(profile, "name", "getName");
+        return value instanceof String name ? name : null;
+    }
+
+    private static Object profileAccessor(GameProfile profile, String first, String second) {
+        for (String accessor : new String[]{first, second}) {
+            try {
+                return profile.getClass().getMethod(accessor).invoke(profile);
+            } catch (ReflectiveOperationException | SecurityException ignored) {
+                // Authlib has used both property and JavaBean names across MC versions.
+            }
+        }
+        return null;
+    }
+
+    private boolean sendLinkCheck(UUID uuid, String name, String requestId) {
+        BridgeRuntime active = runtime;
+        if (active == null || !active.isAuthenticated() || serverId == null) return false;
+        var sent = active.sendRequired(new ProtocolEnvelope(
+            1, "link_status_request", serverId, requestId,
+            Map.of("minecraft_uuid", uuid.toString(), "minecraft_name", name)
+        ));
+        return !sent.isCompletedExceptionally();
+    }
+
+    private void handleLinkStatusResponse(ProtocolEnvelope envelope) {
+        Object uuid = envelope.data().get("minecraft_uuid");
+        Object linked = envelope.data().get("linked");
+        if (!(uuid instanceof String identifier) || !(linked instanceof Boolean result)
+            || envelope.requestId() == null) return;
+        try {
+            UUID parsed = UUID.fromString(identifier);
+            Object code = envelope.data().get("code");
+            loginGate.respond(parsed, envelope.requestId(), result,
+                code instanceof String text ? text : null);
+            freezeChecks.respond(parsed, envelope.requestId(), result,
+                code instanceof String text ? text : null);
+        } catch (IllegalArgumentException ignored) {
+            // Invalid or stale responses cannot prevent a vanilla login.
+        }
+    }
+
+    /** Can be used by mixins on the server thread to gate frozen movement and actions. */
+    public static boolean isFrozenPlayer(ServerPlayer player) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || player == null) return false;
+        BridgeRuntime active = mod.runtime;
+        return mod.frozenPlayers.isFrozen(
+            player.getUUID(), active != null && active.isAuthenticated()
+        );
+    }
+
+    public static void correctFrozenPlayer(ServerPlayer player) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || !isFrozenPlayer(player)) return;
+        UUID uuid = player.getUUID();
+        long now = System.nanoTime();
+        Long last = mod.freezeCorrectedAt.get(uuid);
+        if (last != null && now - last < TimeUnit.SECONDS.toNanos(1)) return;
+        FreezeRegistry.Anchor anchor = mod.frozenPlayers.anchor(uuid);
+        if (anchor == null) return;
+        mod.freezeCorrectedAt.put(uuid, now);
+        player.connection.teleport(anchor.x(), anchor.y(), anchor.z(), anchor.yaw(), anchor.pitch());
+    }
+
+    private void freezeOnJoin(ServerPlayer player) {
+        BridgeRuntime active = runtime;
+        if (!requireLinking || !"freeze".equals(unlinkedPlayerAction)
+            || active == null || !active.isAuthenticated()) return;
+        UUID uuid = player.getUUID();
+        frozenPlayers.freeze(uuid, new FreezeRegistry.Anchor(
+            player.getX(), player.getY(), player.getZ(), player.getYRot(), player.getXRot()
+        ));
+        freezeSessions.put(uuid, new FreezeSession());
+        player.sendSystemMessage(Component.literal(
+            "DMCC: Checking your Discord account link. You can still use chat and commands."
+        ));
+    }
+
+    private void checkFrozenPlayers(MinecraftServer server) {
+        if (freezeSessions.isEmpty()) return;
+        BridgeRuntime active = runtime;
+        boolean available = active != null && active.isAuthenticated();
+        long now = System.nanoTime();
+        for (var item : new ArrayList<>(freezeSessions.entrySet())) {
+            UUID uuid = item.getKey();
+            FreezeSession session = item.getValue();
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player == null || !frozenPlayers.isFrozen(uuid, available)) {
+                releaseFreeze(uuid);
+                continue;
+            }
+            if (now < session.nextRequestAtNanos) continue;
+            LinkGateRegistry.Decision decision = freezeChecks.poll(
+                uuid, player, available,
+                requestId -> sendLinkCheck(uuid, player.getName().getString(), requestId)
+            );
+            if (decision.verdict() == LinkGateRegistry.Verdict.WAIT) continue;
+            if (decision.verdict() == LinkGateRegistry.Verdict.ALLOW) {
+                releaseFreeze(uuid);
+                player.sendSystemMessage(Component.literal(
+                    "DMCC: Account linking verified or service unavailable. You may play."
+                ));
+                continue;
+            }
+            String code = decision.code();
+            if (!code.equals(session.lastCode)) {
+                session.lastCode = code;
+                player.sendSystemMessage(LinkPromptComponents.linkCode(code));
+            }
+            freezeChecks.clear(uuid);
+            session.nextRequestAtNanos = now + TimeUnit.SECONDS.toNanos(15);
+        }
+    }
+
+    private void releaseFreeze(UUID uuid) {
+        frozenPlayers.release(uuid);
+        freezeChecks.clear(uuid);
+        freezeSessions.remove(uuid);
+        freezeCorrectedAt.remove(uuid);
+    }
+
+    private static final class FreezeSession {
+        long nextRequestAtNanos;
+        String lastCode = "";
+    }
+
     private void handleGatewayPacket(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
         if (envelope.type().equals("command_request")) {
             handleCommandRequest(server, client, envelope);
@@ -142,6 +437,33 @@ public final class BridgeMod implements ModInitializer {
         }
         if (envelope.type().equals("unlink_response")) {
             handleUnlinkResponse(server, envelope);
+            return;
+        }
+        if (envelope.type().equals("link_status_response")) {
+            handleLinkStatusResponse(envelope);
+            return;
+        }
+        if (envelope.type().equals("op_sync_apply")) {
+            if (!opSyncEnabled) return;
+            var validated = OpSyncPolicy.parse(envelope.data());
+            if (validated.isEmpty()) return;
+            server.execute(() -> {
+                OpSyncApplier.ApplyReport result = opSyncApplier.applyWithReport(server, validated.get());
+                if (result.updated() > 0) LOGGER.info(
+                    "DMCC synchronized {} managed linked-player operator records", result.updated()
+                );
+                if (envelope.requestId() != null) {
+                    sendRequired(new ProtocolEnvelope(
+                        1, "op_sync_response", envelope.serverId(), envelope.requestId(),
+                        Map.of("ok", result.failed() == 0,
+                            "updated", result.updated(), "failed", result.failed())
+                    ), "operator sync confirmation");
+                }
+            });
+            return;
+        }
+        if (envelope.type().equals("minecraft_private_message")) {
+            handlePrivateFromDiscord(server, envelope);
             return;
         }
         if (envelope.type().equals("server_info_request")) {
@@ -160,10 +482,214 @@ public final class BridgeMod implements ModInitializer {
             handleStatsRequest(server, client, envelope);
             return;
         }
+        if (envelope.type().equals("player_mention")) {
+            var request = PlayerMentionRequest.parse(envelope.data());
+            if (request.isEmpty()) return;
+            server.execute(() -> {
+                for (UUID uuid : request.get().players()) {
+                    ServerPlayer target = server.getPlayerList().getPlayer(uuid);
+                    if (target != null) {
+                        PlayerMentionRequest mention = request.get();
+                        Component notice = Component.literal(mention.message());
+                        if (mention.style().equals("title")) {
+                            target.connection.send(new ClientboundSetTitlesAnimationPacket(10, 70, 20));
+                            target.connection.send(new ClientboundSetTitleTextPacket(notice));
+                        } else {
+                            target.displayClientMessage(notice, mention.actionBar());
+                        }
+                        if (mention.sound()) {
+                            target.playNotifySound(SoundEvents.NOTE_BLOCK_PLING.value(), SoundSource.MASTER, 1.0F, 2.0F);
+                        }
+                    }
+                }
+            });
+            return;
+        }
+        if (envelope.type().equals("minecraft_components")) {
+            var decoded = RichTextComponents.parse(envelope.data());
+            if (decoded.isEmpty()) return;
+            server.execute(() -> server.getPlayerList().broadcastSystemMessage(decoded.get(), false));
+            return;
+        }
         if (!envelope.type().equals("minecraft_message")) return;
         Object rawMessage = envelope.data().get("message");
         if (!(rawMessage instanceof String message) || message.isBlank()) return;
         server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(message), false));
+    }
+
+    /**
+     * Reload local display, message and language settings without disconnecting
+     * the authenticated transport or changing OP ownership.
+     */
+    private void configureOfficialLanguageTask(Path configPath) {
+        java.util.concurrent.ScheduledFuture<?> prior = officialLanguageTask;
+        if (prior != null) prior.cancel(false);
+        officialLanguageTask = null;
+        if (!OfficialLanguageUpdater.enabled(configPath) || statsWorker.isShutdown()) return;
+        OfficialLanguageUpdater updater = new OfficialLanguageUpdater();
+        officialLanguageTask = statsWorker.scheduleWithFixedDelay(() -> {
+            Path directory = translationDirectory;
+            String version = translationVersion;
+            String locale = translationLocale;
+            if (directory == null || version == null || locale == null) return;
+            try {
+                if (updater.update(directory, version, locale)) {
+                    refreshTranslations();
+                    LOGGER.info("DMCC official Minecraft language cache refreshed");
+                }
+            } catch (IOException invalid) {
+                LOGGER.warn("DMCC official language update skipped: {}", invalid.toString());
+            }
+        }, 5, 43_200, TimeUnit.SECONDS);
+    }
+
+    private int refreshLocalPresentation(MinecraftServer server) {
+        Path file = FabricLoader.getInstance().getConfigDir().resolve("minecraft-bridge.properties");
+        try (var reader = Files.newBufferedReader(file)) {
+            BridgeSettings snapshot = BridgeSettings.fromReader(reader);
+            NativeFormatPolicy nativePolicy = NativeFormatPolicy.load(file);
+            if (!snapshot.serverId().equals(serverId)) {
+                LOGGER.warn("DMCC display refresh rejected: server_id changed");
+                return 0;
+            }
+            NativeMessageFormatter.configure(nativePolicy);
+            echoPlayerCommands = nativePolicy.echoPlayerCommands();
+            echoGameMode = nativePolicy.echoGameMode();
+            overwriteNativeMessages = snapshot.overwriteNativeMessages();
+            relayPlayerCommands = snapshot.relayPlayerCommands();
+            translationLocale = snapshot.translationLocale();
+            selectedPackTranslations = MinecraftPackTranslations.snapshot(server, translationLocale);
+            statsWorker.execute(this::refreshTranslations);
+            configureOfficialLanguageTask(file);
+            LOGGER.info("DMCC native presentation and language update scheduling refreshed");
+            return 1;
+        } catch (IOException | ProtocolException invalid) {
+            LOGGER.warn("DMCC presentation refresh rejected: {}", invalid.toString());
+            return 0;
+        }
+    }
+
+    private static String normalizePrivateText(Object raw) {
+        if (!(raw instanceof String text) || text.isBlank() || text.length() > 750) return null;
+        if (text.chars().anyMatch(ch -> ch < 32 || ch == 127)) return null;
+        return text.strip().replaceAll("(?i)@everyone", "[everyone]")
+            .replaceAll("(?i)@here", "[here]");
+    }
+
+    /**
+     * Minecraft's own /dmcc pm is explicit and recipient scoped. Never publish
+     * this event to general Minecraft chat or the public Discord relay.
+     */
+    private int sendPrivateFromMinecraft(
+        CommandSourceStack source, String targetName, String raw
+    ) throws CommandSyntaxException {
+        ServerPlayer sender = source.getPlayerOrException();
+        if (targetName == null || !targetName.matches("[A-Za-z0-9_]{3,16}")) return 0;
+        String message = normalizePrivateText(raw);
+        if (message == null) return 0;
+        ServerPlayer recipient = source.getServer().getPlayerList().getPlayerByName(targetName);
+        if (recipient == null) {
+            sender.sendSystemMessage(Component.literal("DMCC private: player is offline."));
+            return 0;
+        }
+        recipient.sendSystemMessage(Component.literal(
+            "[DMCC private] <" + sender.getName().getString() + "> " + message
+        ));
+        sender.sendSystemMessage(Component.literal(
+            "[DMCC private → " + recipient.getName().getString() + "] " + message
+        ));
+        BridgeRuntime active = runtime;
+        if (active != null && serverId != null) {
+            active.publishEvent(new ProtocolEnvelope(
+                1, "player_private_message", serverId, null, Map.of(
+                    "sender_uuid", sender.getStringUUID(),
+                    "sender_name", sender.getName().getString(),
+                    "recipient_uuid", recipient.getStringUUID(),
+                    "message", message
+                )
+            ));
+        }
+        return 1;
+    }
+
+    private void handlePrivateFromDiscord(MinecraftServer server, ProtocolEnvelope envelope) {
+        Object rawUuid = envelope.data().get("recipient_uuid");
+        Object rawSender = envelope.data().get("sender_name");
+        String message = normalizePrivateText(envelope.data().get("message"));
+        if (!(rawUuid instanceof String uuidText)
+            || !uuidText.matches("[a-fA-F0-9-]{36}")
+            || !(rawSender instanceof String senderName)
+            || !senderName.matches("[A-Za-z0-9_]{3,16}")
+            || message == null) {
+            sendPrivateResult(envelope, false);
+            return;
+        }
+        final UUID uuid;
+        try {
+            uuid = UUID.fromString(uuidText);
+        } catch (IllegalArgumentException invalid) {
+            sendPrivateResult(envelope, false);
+            return;
+        }
+        server.execute(() -> {
+            ServerPlayer recipient = server.getPlayerList().getPlayer(uuid);
+            boolean delivered = recipient != null;
+            if (delivered) {
+                recipient.sendSystemMessage(Component.literal(
+                    "[DMCC private Discord] <" + senderName + "> " + message
+                ));
+            }
+            sendPrivateResult(envelope, delivered);
+        });
+    }
+
+    private void sendPrivateResult(ProtocolEnvelope request, boolean ok) {
+        if (request.requestId() == null) return;
+        sendRequired(new ProtocolEnvelope(
+            1, "minecraft_private_response", request.serverId(), request.requestId(),
+            Map.of("ok", ok)
+        ), "private message delivery status");
+    }
+
+    /**
+     * Public source /msg @a: the exact selector is required before this method
+     * can be called. Never use this method for private recipient variants.
+     */
+    public static void relayVanillaAllPlayersMessage(
+        CommandSourceStack source, String content
+    ) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || source == null || content == null) return;
+        BridgeRuntime active = mod.runtime;
+        if (active == null || mod.serverId == null) return;
+        String safe = PublicTellrawPolicy.sanitize(content);
+        if (safe.isBlank()) return;
+        active.publishEvent(new ProtocolEnvelope(
+            1, "server_broadcast", mod.serverId, null,
+            Map.of("player_name", source.getTextName(), "message", safe,
+                "source_event", "msg", "public_broadcast", true)
+        ));
+    }
+
+    /**
+     * Vanilla /msg, /tell, /w with one direct recipient. The Gateway delivers
+     * privately, only when BOTH linked users have explicitly consented.
+     */
+    public static void relayVanillaPrivate(
+        ServerPlayer sender, ServerPlayer recipient, String raw
+    ) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || sender == null || recipient == null) return;
+        BridgeRuntime active = mod.runtime;
+        if (active == null || mod.serverId == null || !active.isAuthenticated()) return;
+        String message = normalizePrivateText(raw);
+        if (message == null) return;
+        active.publishEvent(new ProtocolEnvelope(
+            1, "player_private_message", mod.serverId, null,
+            Map.of("sender_uuid", sender.getStringUUID(),
+                "sender_name", sender.getName().getString(),
+                "recipient_uuid", recipient.getStringUUID(), "message", message)
+        ));
     }
 
     /** Sample cached game-server timing only once per 300 ticks, never perform network I/O here. */
@@ -181,8 +707,40 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
+    /** Observe an explicitly public /tellraw command without changing vanilla delivery. */
+    public static boolean isPublicTellrawCommand(String command) {
+        return PublicTellrawPolicy.isPublicBroadcast(command);
+    }
+
+    public static void relayTellrawCommand(String sender, Component content) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || content == null) return;
+        String sanitized = PublicTellrawPolicy.sanitize(mod.translations.translate(content));
+        if (!sanitized.isBlank()) mod.relayPublicCommand(sender, sanitized, "tell_raw");
+    }
+
+    private void relayPublicCommand(String sender, String content) {
+        relayPublicCommand(sender, content, sourceCommands.consume(sender, content));
+    }
+
+    private void relayPublicCommand(String sender, String content, String eventSource) {
+        BridgeRuntime active = runtime;
+        if (active == null || serverId == null || content == null || content.isBlank()) return;
+        String safe = PublicTellrawPolicy.sanitize(content);
+        if (safe.isBlank()) return;
+        String senderName = sender == null || sender.isBlank() ? "Server" : sender;
+        if (active.publishEvent(new ProtocolEnvelope(1, "server_broadcast", serverId, null, Map.of(
+            "player_name", senderName,
+            "message", safe,
+            "source_event", eventSource
+        )))) {
+            commandEchoes.mark(senderName, content);
+        }
+    }
+
     private void relayPlayerChat(ServerPlayer player, String content) {
         if (content.isBlank() || runtime == null || serverId == null) return;
+        if (commandEchoes.consume(player.getName().getString(), content)) return;
         if (!runtime.publishEvent(new ProtocolEnvelope(1, "player_chat", serverId, null,
                 Map.of("minecraft_uuid", player.getStringUUID(), "player_name", player.getName().getString(), "message", content)))) {
             LOGGER.debug("DMCC player chat skipped because the Bridge is offline");
@@ -197,15 +755,37 @@ public final class BridgeMod implements ModInitializer {
         }
     }
 
+    /**
+     * Immutable snapshots permit asynchronous reloads without exposing partial locale maps
+     * to callbacks on the Minecraft tick thread.
+     */
+    private void refreshTranslations() {
+        Path directory = translationDirectory;
+        if (directory == null) return;
+        try {
+            translations = MinecraftTranslations.load(
+                directory, translationLocale, translationRoots, translationVersion,
+                selectedPackTranslations
+            );
+        } catch (IOException | IllegalArgumentException invalid) {
+            LOGGER.warn("DMCC language catalogs unavailable; preserving previous snapshot: {}",
+                invalid.toString());
+        }
+    }
+
     private void sendGameModeChange(ServerPlayer player, GameType gameType) {
         BridgeRuntime active = runtime;
         if (active == null || serverId == null) return;
         if (!active.publishEvent(new ProtocolEnvelope(1, "player_gamemode", serverId, null, Map.of(
                 "minecraft_uuid", player.getStringUUID(),
                 "player_name", player.getName().getString(),
-                "game_mode", gameType.getLongDisplayName().getString()
+                "game_mode", translations.translate(gameType.getLongDisplayName())
             )))) {
             LOGGER.debug("DMCC game mode event skipped because the Bridge is offline");
+        } else if (echoGameMode) {
+            player.sendSystemMessage(Component.literal(
+                "[DMCC] Your game mode is now " + translations.translate(gameType.getLongDisplayName())
+            ));
         }
     }
 
@@ -215,7 +795,7 @@ public final class BridgeMod implements ModInitializer {
         if (!active.publishEvent(new ProtocolEnvelope(1, "player_death", serverId, null, Map.of(
                 "minecraft_uuid", player.getStringUUID(),
                 "player_name", player.getName().getString(),
-                "death_message", player.getCombatTracker().getDeathMessage().getString()
+                "death_message", translations.translate(player.getCombatTracker().getDeathMessage())
             )))) {
             LOGGER.debug("DMCC death event skipped because the Bridge is offline");
         }
@@ -239,8 +819,8 @@ public final class BridgeMod implements ModInitializer {
         if (!active.publishEvent(new ProtocolEnvelope(1, "player_advancement", serverId, null, Map.of(
                 "minecraft_uuid", player.getStringUUID(),
                 "player_name", player.getName().getString(),
-                "title", display.getTitle().getString(),
-                "description", display.getDescription().getString(),
+                "title", translations.translate(display.getTitle()),
+                "description", translations.translate(display.getDescription()),
                 "advancement_type", type
             )))) {
             LOGGER.debug("DMCC advancement event skipped because the Bridge is offline");
@@ -279,7 +859,7 @@ public final class BridgeMod implements ModInitializer {
         server.execute(() -> {
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerId());
             if (player != null) {
-                player.sendSystemMessage(Component.literal("DMCC link code: " + code + " — use /dmcc link " + code + " in Discord."));
+                player.sendSystemMessage(LinkPromptComponents.linkCode(code));
             }
         });
     }
@@ -409,10 +989,23 @@ public final class BridgeMod implements ModInitializer {
         Path logPath = server.getServerDirectory().resolve("logs").resolve("latest.log").normalize();
         statsWorker.execute(() -> {
             try {
-                String content = LogTailReader.read(logPath, 131_072);
-                if (content.length() > 32_768) content = content.substring(content.length() - 32_768);
-                sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
-                    Map.of("content", content)), "log response");
+                if (envelope.data().containsKey("offset")) {
+                    Object rawOffset = envelope.data().get("offset");
+                    Object rawFileId = envelope.data().get("file_id");
+                    if (!(rawOffset instanceof Number number) || !(rawFileId instanceof String fileId)
+                        || fileId.length() > 64) return;
+                    long offset = number.longValue();
+                    if (offset < -1L || number.doubleValue() != (double) offset) return;
+                    var chunk = LogTailReader.readChunk(logPath, offset, fileId, 1024);
+                    sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
+                        Map.of("content", chunk.content(), "file_id", chunk.fileId(),
+                            "next_offset", chunk.nextOffset())), "log cursor response");
+                } else {
+                    String content = LogTailReader.read(logPath, 131_072);
+                    if (content.length() > 32_768) content = content.substring(content.length() - 32_768);
+                    sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
+                        Map.of("content", content)), "log response");
+                }
             } catch (IOException exception) {
                 sendRequired(new ProtocolEnvelope(1, "log_response", envelope.serverId(), envelope.requestId(),
                     Map.of("error", "latest.log is unavailable")), "log error response");
@@ -516,8 +1109,29 @@ public final class BridgeMod implements ModInitializer {
             runtime = null;
         }
         metricTickCounter = 0L;
+        requireLinking = false;
+        opSyncEnabled = false;
+        relayPlayerCommands = false;
+        overwriteNativeMessages = false;
+        echoPlayerCommands = false;
+        echoGameMode = false;
+        NativeMessageFormatter.configure(NativeFormatPolicy.defaults());
+        opSyncApplier.clear();
+        translations = MinecraftTranslations.empty();
+        translationDirectory = null;
+        translationVersion = null;
+        translationRoots = List.of();
+        selectedPackTranslations = MinecraftPackTranslations.Snapshot.empty();
+        loginGate.clearAll();
+        freezeChecks.clearAll();
+        frozenPlayers.clearAll();
+        freezeSessions.clear();
+        freezeCorrectedAt.clear();
         pendingLinkPlayers.clear();
         pendingUnlinkPlayers.clear();
+        sourceCommands.clear();
+        if (officialLanguageTask != null) officialLanguageTask.cancel(true);
+        officialLanguageTask = null;
         statsWorker.shutdownNow();
     }
 
@@ -550,6 +1164,7 @@ public final class BridgeMod implements ModInitializer {
 
     private void handlePlayerDisconnect(ServerPlayer player) {
         UUID playerId = player.getUUID();
+        releaseFreeze(playerId);
         pendingLinkPlayers.values().removeIf(item -> item.playerId().equals(playerId));
         pendingUnlinkPlayers.values().removeIf(item -> item.playerId().equals(playerId));
         relayPlayerEvent("player_quit", player);

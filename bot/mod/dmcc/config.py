@@ -18,6 +18,12 @@ from .domain.models import ManagedServer
 from .services.presentation import PresentationError, PresentationSettings
 from .services.monitoring import MonitoringConfig
 from .services.mod_updates import ModUpdateConfig
+from .services.console_stream import ConsoleStreamConfig
+from .services.nickname_sync import NicknameSyncConfig
+from .services.release_updates import ReleaseCheckConfig
+from .services.mentions import MentionConfig
+from .services.op_sync import OpSyncConfig
+from .services.v3_features import V3FeatureConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -30,11 +36,20 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "request_timeout_seconds": 15.0,
     "mode": "standalone",
     "cross_server_relay": False,
+    "cross_server_events": ["player_chat"],
     "providers": {"control": [], "backup": []},
     "servers": [],
     "presentation": {"servers": {}},
     "monitoring": {"enabled": False, "servers": {}},
     "mod_updates": {"enabled": False, "servers": {}},
+    "console_stream": {"enabled": False, "servers": {}},
+    "account_linking": {"max_accounts": 0},
+    "nickname_sync": {"enabled": False},
+    "release_check": {"enabled": False},
+    "mentions": {"enabled": False},
+    "rich_chat": False,
+    "op_sync": {"enabled": False},
+    "v3_features": {"enabled": False},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -50,11 +65,20 @@ def build_settings_schema(rule_type):
         "request_timeout_seconds": rule_type((int, float), minimum=0.01, maximum=600),
         "mode": rule_type(str),
         "cross_server_relay": rule_type(bool),
+        "cross_server_events": rule_type(list),
         "providers": rule_type(dict),
         "servers": rule_type(list),
         "presentation": rule_type(dict),
         "monitoring": rule_type(dict),
         "mod_updates": rule_type(dict),
+        "console_stream": rule_type(dict),
+        "account_linking": rule_type(dict),
+        "nickname_sync": rule_type(dict),
+        "release_check": rule_type(dict),
+        "mentions": rule_type(dict),
+        "rich_chat": rule_type(bool),
+        "op_sync": rule_type(dict),
+        "v3_features": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -87,12 +111,21 @@ class DmccSettings:
     request_timeout_seconds: float
     mode: str
     cross_server_relay: bool
+    cross_server_events: frozenset[str]
     servers: tuple[ManagedServer, ...]
     control_providers: tuple[ControlProviderDefinition, ...] = ()
     backup_providers: tuple[BackupProviderDefinition, ...] = ()
     presentation: PresentationSettings = field(default_factory=PresentationSettings.empty)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     mod_updates: ModUpdateConfig = field(default_factory=ModUpdateConfig)
+    console_stream: ConsoleStreamConfig = field(default_factory=ConsoleStreamConfig)
+    max_linked_accounts: int = 0
+    nickname_sync: NicknameSyncConfig = field(default_factory=NicknameSyncConfig)
+    release_check: ReleaseCheckConfig = field(default_factory=ReleaseCheckConfig)
+    mentions: MentionConfig = field(default_factory=MentionConfig)
+    rich_chat: bool = False
+    op_sync: OpSyncConfig = field(default_factory=OpSyncConfig)
+    v3_features: V3FeatureConfig = field(default_factory=V3FeatureConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
@@ -117,6 +150,17 @@ class DmccSettings:
         cross_server_relay = raw.get("cross_server_relay", False)
         if type(cross_server_relay) is not bool:
             raise SettingsError("cross_server_relay must be a boolean")
+        cross_events = raw.get("cross_server_events", ["player_chat"])
+        allowed_events = {
+            "player_chat", "player_join", "player_quit", "player_death",
+            "player_gamemode", "player_advancement", "server_started", "server_stopping",
+            "server_broadcast",
+        }
+        if (
+            not isinstance(cross_events, list)
+            or not all(isinstance(name, str) and name in allowed_events for name in cross_events)
+        ):
+            raise SettingsError("cross_server_events contains invalid or private event types")
 
         providers = _mapping(raw.get("providers", {"control": [], "backup": []}), "providers")
         controls = _control_providers(providers.get("control", []), environment)
@@ -141,6 +185,41 @@ class DmccSettings:
             )
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
+        try:
+            console_stream = ConsoleStreamConfig.from_mapping(
+                raw.get("console_stream", {}), {server.server_id for server in servers}
+            )
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        link_options = raw.get("account_linking", {"max_accounts": 0})
+        if not isinstance(link_options, Mapping) or set(link_options) - {"max_accounts"}:
+            raise SettingsError("account_linking settings invalid")
+        max_links = link_options.get("max_accounts", 0)
+        if type(max_links) is not int or not 0 <= max_links <= 100:
+            raise SettingsError("account_linking.max_accounts must be an integer between 0 and 100")
+        try:
+            nickname_sync = NicknameSyncConfig.from_mapping(raw.get("nickname_sync", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        try:
+            release_check = ReleaseCheckConfig.from_mapping(raw.get("release_check", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        try:
+            mentions = MentionConfig.from_mapping(raw.get("mentions", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        rich_chat = raw.get("rich_chat", False)
+        if type(rich_chat) is not bool:
+            raise SettingsError("rich_chat must be a boolean")
+        try:
+            op_sync = OpSyncConfig.from_mapping(raw.get("op_sync", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        try:
+            v3_features = V3FeatureConfig.from_mapping(raw.get("v3_features", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -151,12 +230,21 @@ class DmccSettings:
             request_timeout_seconds=request_timeout,
             mode=str(mode),
             cross_server_relay=cross_server_relay,
+            cross_server_events=frozenset(cross_events),
             servers=servers,
             control_providers=controls,
             backup_providers=backups,
             presentation=presentation,
             monitoring=monitoring,
             mod_updates=mod_updates,
+            console_stream=console_stream,
+            max_linked_accounts=max_links,
+            nickname_sync=nickname_sync,
+            release_check=release_check,
+            mentions=mentions,
+            rich_chat=rich_chat,
+            op_sync=op_sync,
+            v3_features=v3_features,
             _bridge_secrets=MappingProxyType(bridge_secrets),
         )
 

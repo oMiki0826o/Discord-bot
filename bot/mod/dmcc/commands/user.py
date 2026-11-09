@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import discord
 from discord import AllowedMentions, app_commands
 from discord.ext import commands
 
@@ -19,6 +20,13 @@ from ..services.command_catalog import CommandCatalog
 from ..services.discord_relay import DiscordRelayService
 from ..services.info import InfoService
 from ..services.linking import LinkingService
+from ..services.nickname_sync import NicknameSyncService
+from ..services.mentions import MinecraftMentionService, collect_role_mention_users
+from ..services.release_updates import ReleaseUpdateService
+from ..services.private_messages import DmPrivateMessageService
+from ..services.console_stream import ConsoleStreamConfig, redact_console_line
+from ..services.dashboard import DmccDashboardView
+from ..services.rich_text import _safe_click_url
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -67,6 +75,11 @@ class DmccUserCog(commands.Cog):
         op_levels: OpLevelResolver,
         bridge: BridgeRequestService,
         autocomplete: AutocompleteService,
+        nicknames: NicknameSyncService | None = None,
+        mentions: MinecraftMentionService | None = None,
+        release_updates: ReleaseUpdateService | None = None,
+        private_messages: DmPrivateMessageService | None = None,
+        console_config: ConsoleStreamConfig | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -76,6 +89,11 @@ class DmccUserCog(commands.Cog):
         self._op_levels = op_levels
         self._bridge = bridge
         self._autocomplete = autocomplete
+        self._nicknames = nicknames
+        self._mentions = mentions
+        self._release_updates = release_updates
+        self._private_messages = private_messages
+        self._console_config = console_config or ConsoleStreamConfig()
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -87,13 +105,112 @@ class DmccUserCog(commands.Cog):
             ephemeral=True,
         )
 
+    @dmcc_slash.command(name="dm-consent", description="Allow linked-player private Minecraft messages to reach your Discord DMs")
+    async def slash_dm_consent(self, interaction, enabled: bool) -> None:
+        if self._private_messages is None:
+            await interaction.response.send_message("DMCC private messages are unavailable.", ephemeral=True)
+            return
+        try:
+            self._private_messages.opt_in(str(interaction.user.id), enabled)
+        except (ValueError, OSError) as exc:
+            await interaction.response.send_message(f"DMCC consent rejected: {exc}", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Private Minecraft DMs enabled for your linked account."
+            if enabled else "Private Minecraft DMs disabled for your account.",
+            ephemeral=True,
+        )
+
+    @dmcc_slash.command(name="whisper", description="Send a private message to a consenting linked Minecraft player")
+    async def slash_whisper(
+        self, interaction, server_id: str, player_name: str, message: str,
+    ) -> None:
+        if self._private_messages is None:
+            await interaction.response.send_message("DMCC private messaging is unavailable.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        delivered = await self._private_messages.from_discord(
+            str(interaction.user.id), server_id, player_name, message,
+        )
+        await interaction.followup.send(
+            "Private Minecraft message delivered." if delivered
+            else "Private message could not be delivered (offline, no consent, or not linked).",
+            ephemeral=True,
+        )
+
+    @dmcc_slash.command(name="broadcast", description="Send an authorized public Discord announcement into Minecraft")
+    async def slash_broadcast(
+        self, interaction, server_id: str, message: str,
+    ) -> None:
+        if self._op_level(interaction, server_id) < 2:
+            await interaction.response.send_message(
+                "DMCC broadcast requires a trusted bridge operator.", ephemeral=True
+            )
+            return
+        success = await self._relay.forward_command(
+            server_id, str(getattr(interaction.user, "display_name", interaction.user)),
+            message,
+        )
+        await interaction.response.send_message(
+            "Announcement delivered to Minecraft." if success
+            else "Announcement rejected or the server is offline.",
+            ephemeral=True,
+        )
+
+    @dmcc_slash.command(name="update", description="Check for a newer Discord Minecraft Bridge release")
+    async def slash_update(self, interaction) -> None:
+        if self._release_updates is None:
+            await interaction.response.send_message(
+                "DMCC release check is unavailable.", ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        result = await self._release_updates.check_now()
+        if result is None:
+            await interaction.followup.send(
+                "No verified newer stable DMCC release was found, or GitHub is unavailable.",
+                ephemeral=True,
+            )
+            return
+        tag, url = result
+        await interaction.followup.send(
+            f"New DMCC release: {tag}\\n{url}\\nCheck Fabric compatibility before updating.",
+            ephemeral=True,
+        )
+
+    def _dashboard(self, interaction, *, selected: str | None = None):
+        """Real Discord interactions get a private, requester-locked dashboard.
+        Lightweight test interaction objects keep the old text-only response.
+        """
+        if not isinstance(interaction, discord.Interaction):
+            return None
+
+        async def fetch_server(server_id: str) -> str:
+            response = await self._bridge.server_info(server_id)
+            return render_server_info(server_id, response)
+
+        def summary() -> str:
+            report = self._info.report()
+            online = ", ".join(report.online_server_ids) if report.online_server_ids else "none"
+            return f"DMCC online servers: {online}\nChannel mappings: {report.channel_mappings}"
+
+        report = self._info.report()
+        ids = list(report.online_server_ids)
+        if selected and selected not in ids:
+            ids.append(selected)
+        servers = tuple(dict.fromkeys(ids))
+        return DmccDashboardView(
+            interaction.user.id, servers, summary, fetch_server, selected=selected
+        )
+
     @dmcc_slash.command(name="info", description="Show DMCC bridge status")
     async def slash_info(self, interaction) -> None:
         report = self._info.report()
         online = ", ".join(report.online_server_ids) if report.online_server_ids else "none"
+        kwargs = {"view": view} if (view := self._dashboard(interaction)) else {}
         await interaction.response.send_message(
             f"DMCC online servers: {online}\nChannel mappings: {report.channel_mappings}",
-            ephemeral=True,
+            ephemeral=True, **kwargs,
         )
 
     @dmcc_slash.command(name="server-info", description="Show live information from a connected Minecraft server")
@@ -104,7 +221,11 @@ class DmccUserCog(commands.Cog):
         except _REQUEST_ERRORS as exc:
             await interaction.followup.send(f"DMCC server info failed: {exc}", ephemeral=True)
             return
-        await interaction.followup.send(render_server_info(server_id, response), ephemeral=True)
+        view = self._dashboard(interaction, selected=server_id)
+        await interaction.followup.send(
+            render_server_info(server_id, response), ephemeral=True,
+            **({"view": view} if view is not None else {}),
+        )
 
     @dmcc_slash.command(name="console", description="Run a command on a connected Minecraft server")
     async def slash_console(self, interaction, server_id: str, command: str) -> None:
@@ -233,6 +354,8 @@ class DmccUserCog(commands.Cog):
         await interaction.response.send_message(
             f"Linked Minecraft account `{account.minecraft_name}`.", ephemeral=True
         )
+        if self._nicknames is not None:
+            await self._nicknames.sync_user(str(interaction.user.id))
 
     @dmcc_slash.command(name="unlink", description="Unlink all of your Minecraft accounts")
     async def slash_unlink(self, interaction) -> None:
@@ -241,6 +364,8 @@ class DmccUserCog(commands.Cog):
         if removed:
             message = f"Unlinked {removed} Minecraft account(s)."
         await interaction.response.send_message(message, ephemeral=True)
+        if removed and self._nicknames is not None:
+            await self._nicknames.sync_user(str(interaction.user.id))
 
     @dmcc_slash.command(name="links", description="List linked Minecraft accounts for a Discord user")
     async def slash_links(self, interaction, discord_user_id: str) -> None:
@@ -264,14 +389,49 @@ class DmccUserCog(commands.Cog):
         )
 
     @commands.Cog.listener()
+    async def on_member_join(self, member: Any) -> None:
+        if self._nicknames is not None:
+            await self._nicknames.sync_user(str(member.id), member=member)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: Any, after: Any) -> None:
+        if self._nicknames is not None and before.nick != after.nick:
+            await self._nicknames.sync_user(str(after.id), member=after)
+
+    @commands.Cog.listener()
     async def on_message(self, message: Any) -> None:
+        channel_id = getattr(getattr(message, "channel", None), "id", None)
+        system_checker = getattr(message, "is_system", None)
+        if channel_id is not None and callable(system_checker) and system_checker():
+            text = getattr(message, "system_content", None)
+            await self._relay.forward_system_message(
+                str(channel_id), text if isinstance(text, str) else "",
+            )
+            return
         if bool(getattr(getattr(message, "author", None), "bot", False)):
             return
-        channel_id = getattr(getattr(message, "channel", None), "id", None)
         author = getattr(message, "author", None)
         if channel_id is None or author is None:
             return
-        await self._relay.forward_message(
+        if self._console_config.enabled and str(channel_id) in self._console_config.servers.values():
+            await self._handle_console_channel(message, str(channel_id), author)
+            return
+        poll = getattr(message, "poll", None)
+        question = getattr(getattr(poll, "question", None), "text", None)
+        answers = getattr(poll, "answers", ()) if poll is not None else ()
+        poll_summary = (
+            (str(question), tuple(str(getattr(answer, "text", "")) for answer in answers))
+            if isinstance(question, str) and question.strip() else None
+        )
+        mentioned_names = {}
+        for collection in ("mentions", "role_mentions", "channel_mentions"):
+            for target in tuple(getattr(message, collection, ()) or ()):
+                target_id = getattr(target, "id", None)
+                if target_id is not None:
+                    mentioned_names[str(target_id)] = str(
+                        getattr(target, "display_name", getattr(target, "name", ""))
+                    )[:48]
+        forwarded = await self._relay.forward_message(
             str(getattr(message, "id", "")),
             str(channel_id),
             str(getattr(author, "display_name", author)),
@@ -281,7 +441,114 @@ class DmccUserCog(commands.Cog):
                 str(getattr(item, "url", ""))
                 for item in tuple(getattr(message, "attachments", ()) or ())
             ),
+            sticker_names=tuple(
+                str(getattr(sticker, "name", "")) for sticker in tuple(
+                    getattr(message, "stickers", ()) or ()
+                )
+            ),
+            embed_summaries=tuple(
+                (str(getattr(embed, "title", "") or ""),
+                 str(getattr(embed, "url", "") or ""))
+                for embed in tuple(getattr(message, "embeds", ()) or ())
+            ),
+            poll_summary=poll_summary,
+            component_summaries=self._component_summaries(message),
+            mention_names=mentioned_names,
+            author_color=self._discord_role_color(author),
         )
+        if forwarded and self._mentions is not None:
+            mentioned = tuple(
+                str(user.id) for user in tuple(getattr(message, "mentions", ()) or ())
+            )
+            if self._mentions.config.role_mentions:
+                from_roles = collect_role_mention_users(
+                    getattr(message, "guild", None),
+                    tuple(getattr(message, "role_mentions", ()) or ()),
+                    max_targets=self._mentions.config.max_targets,
+                )
+                mentioned = tuple(dict.fromkeys((*mentioned, *from_roles)))
+            await self._mentions.notify(
+                str(channel_id), str(getattr(author, "display_name", author)),
+                str(getattr(message, "content", "")), mentioned,
+            )
+
+    async def _handle_console_channel(self, message: Any, channel_id: str, author: Any) -> None:
+        """Only explicit, high-privilege console channels may execute commands."""
+        if not self._console_config.execute_from_channel:
+            return
+        import re
+        command = getattr(message, "content", None)
+        if not isinstance(command, str) or not command.strip() or len(command) > 1024:
+            return
+        if re.search(r"[\x00-\x1f\x7f]", command):
+            return
+        from types import SimpleNamespace
+        for server_id, configured_id in self._console_config.servers.items():
+            if configured_id != channel_id:
+                continue
+            level = self._op_level(SimpleNamespace(user=author), server_id)
+            if level < 4 or self._catalog.validate("console", level, (command,)) is not None:
+                continue
+            try:
+                output = await self._bridge.execute(server_id, command.strip(), 4)
+            except _REQUEST_ERRORS as exc:
+                output = "Console request failed: " + type(exc).__name__
+            if isinstance(output, str):
+                safe = redact_console_line(output)[:1650]
+                channel = getattr(message, "channel", None)
+                if channel is not None and hasattr(channel, "send"):
+                    await channel.send(safe or "Command completed.", allowed_mentions=AllowedMentions.none())
+            return
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: Any) -> None:
+        member = getattr(payload, "member", None)
+        user_id = getattr(payload, "user_id", None)
+        if user_id is None or user_id == getattr(getattr(self.bot, "user", None), "id", None):
+            return
+        if member is not None and bool(getattr(member, "bot", False)):
+            return
+        if member is None:
+            user = self.bot.get_user(user_id) if hasattr(self.bot, "get_user") else None
+            if user is None or bool(getattr(user, "bot", False)):
+                return
+            member = user
+        name = str(getattr(member, "display_name", member)).strip()
+        if name:
+            await self._relay.forward_reaction(
+                str(getattr(payload, "message_id", "")),
+                name,
+                str(getattr(payload, "emoji", "")),
+            )
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: Any) -> None:
+        user_id = getattr(payload, "user_id", None)
+        if user_id is None or user_id == getattr(getattr(self.bot, "user", None), "id", None):
+            return
+        user = self.bot.get_user(user_id) if hasattr(self.bot, "get_user") else None
+        if user is None or bool(getattr(user, "bot", False)):
+            return
+        name = str(getattr(user, "display_name", user)).strip()
+        if name:
+            await self._relay.forward_reaction(
+                str(getattr(payload, "message_id", "")), name,
+                str(getattr(payload, "emoji", "")), removed=True,
+            )
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: Any, after: Any) -> None:
+        if bool(getattr(getattr(after, "author", None), "bot", False)):
+            return
+        before_text = getattr(before, "content", None)
+        after_text = getattr(after, "content", None)
+        if isinstance(after_text, str) and after_text != before_text:
+            await self._relay.forward_edit(str(getattr(after, "id", "")), after_text)
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: Any) -> None:
+        if not bool(getattr(getattr(message, "author", None), "bot", False)):
+            await self._relay.forward_delete(str(getattr(message, "id", "")))
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: Any) -> None:
@@ -329,6 +596,37 @@ class DmccUserCog(commands.Cog):
             discord_user_name=getattr(user, "name", None),
             role_names=(str(getattr(role, "name", "")) for role in roles),
         )
+
+    @staticmethod
+    def _component_summaries(message: Any) -> tuple[str, ...]:
+        """Only text labels are mirrored; custom IDs, URLs and interaction tokens never are."""
+        result: list[str] = []
+        for row in tuple(getattr(message, "components", ()) or ())[:5]:
+            nested = getattr(row, "children", None)
+            components = tuple(nested or (row,))
+            for item in components[:5]:
+                label = getattr(item, "label", None)
+                if not isinstance(label, str) or not label.strip():
+                    label = getattr(item, "placeholder", None)
+                if isinstance(label, str) and label.strip():
+                    safe_label = label.strip()[:70].replace("[", "").replace("]", "")
+                    # Only Discord link buttons may become Minecraft OpenUrl
+                    # components. Never forward arbitrary custom_id interactions.
+                    url = getattr(item, "url", None)
+                    if isinstance(url, str) and _safe_click_url(url):
+                        result.append(f"[{safe_label}]({url})")
+                    else:
+                        result.append(safe_label)
+                    if len(result) >= 8:
+                        return tuple(result)
+        return tuple(result)
+
+    @staticmethod
+    def _discord_role_color(author: Any) -> str | None:
+        raw = getattr(getattr(author, "color", None), "value", None)
+        if type(raw) is int and 1 <= raw <= 0xFFFFFF:
+            return f"#{raw:06X}"
+        return None
 
     @staticmethod
     def _reply_preview(message: Any) -> str | None:

@@ -197,3 +197,29 @@ def test_new_sender_uses_presentation_payload(tmp_path) -> None:
     asyncio.run(check())
     assert sender.payloads[0].content == "Steve 加入了 survival"
     assert sender.payloads[0].mode == "webhook"
+
+
+def test_advancement_and_server_templates_support_safe_structured_placeholders() -> None:
+    settings = _settings({"servers": {"survival": {
+        "templates": {
+            "player_advancement": "{player}: {title} / {description} [{advancement_type}] {minecraft_uuid}",
+            "server_started": "Minecraft {minecraft_version}: {motd}",
+        },
+    }}})
+    profile = settings.presentation.servers["survival"]
+    achievement = MinecraftEvent("player_advancement", "survival", {
+        "player_name": "Steve",
+        "minecraft_uuid": "123e4567-e89b-12d3-a456-426614174000",
+        "title": "Stone Age",
+        "description": "Mine stone",
+        "advancement_type": "task",
+    })
+    result = render_message(achievement, profile, "111")
+    assert result is not None
+    assert result.content == "Steve: Stone Age / Mine stone [task] 123e4567-e89b-12d3-a456-426614174000"
+    started = render_message(MinecraftEvent("server_started", "survival", {
+        "minecraft_version": "1.21.8", "motd": "Survival World",
+    }), profile, "111")
+    assert started is not None
+    assert started.content == "Minecraft 1.21.8: Survival World"
+

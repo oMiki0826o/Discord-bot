@@ -98,7 +98,7 @@ Bridge 以 `settings/dmcc.json` 的 `presentation` 區塊控制輸出。沒有�
 
 ### Deployment notes (English)
 
-Presentation is opt-in under `settings/dmcc.json → presentation.servers.<server_id>`. The existing Bot channel mapping remains unchanged if no profile is configured. Each of `chat`, `events`, and optional `event_routes` supports independent Bot or Webhook delivery. Provide Webhook URLs only through the environment variables named by `webhook_url_env`, never through committed JSON. A Webhook URL controls its destination channel; changing `channel_id` alone cannot redirect it. Failed Webhook sends fall back to the Bot with player attribution preserved, and all automatic mentions are disabled. Only Fabric Minecraft 1.21.8 is currently listed as a tested build target.
+Presentation is opt-in under `settings/dmcc.json → presentation.servers.<server_id>`. The existing Bot channel mapping remains unchanged if no profile is configured. Each of `chat`, `events`, and optional `event_routes` supports independent Bot or Webhook delivery. Provide Webhook URLs only through the environment variables named by `webhook_url_env`, never through committed JSON. A Webhook URL controls its destination channel; changing `channel_id` alone cannot redirect it. Failed Webhook sends fall back to the Bot with player attribution preserved, and all automatic mentions are disabled. CI builds separately for Fabric Minecraft 1.21.8 and 1.21.9; neither build implies NeoForge compatibility.
 
 ## 監控與模組更新（選用）
 
@@ -150,3 +150,269 @@ Presentation is opt-in under `settings/dmcc.json → presentation.servers.<serve
 ## Monitoring and mod updates (English)
 
 Monitoring is **disabled by default** and receives authenticated Bridge telemetry. Optional settings update a text-channel topic and a voice-channel name, alert only on sustained MSPT degradation, and (when explicitly enabled) set a reversible Minecraft Presence override. Permissions to manage channels are required. Monitoring edits are rate-limited to one change per 600 seconds per field, with stale metrics treated as unknown. `mod_updates` is also opt-in; it consults Modrinth only for explicitly mapped Fabric mods and announces *known compatible* updates, without downloading or installing anything. Match the server's exact Minecraft version to its CI-built JAR (1.21.8 or 1.21.9). Full end-to-end verification on your deployed Discord and Minecraft servers must be performed before production rollout.
+
+## DMCC v3 額外訊息功能（開發分支）
+
+在原有 Discord → Minecraft 文字轉送外，新增以下安全的**純文字摘要**能力：Discord 自訂表情 `<:name:id>` 轉成 `:name:`，用事件內的名稱解析 Discord 使用者／身分組／頻道提及，將 Discord 時間戳轉為 UTC 日期，將 `@everyone`、`@here` 轉成不會觸發提醒的字樣。附件最多五個、貼圖最多三個、嵌入資訊最多三項，投票會轉成題目及選項摘要。已成功轉送的訊息才會在收到 Discord Reaction 時轉送對應表情；編輯與刪除仍沿用原本的受限追蹤表。此功能目前以 Minecraft **純文字**呈現，並未聲稱有原版 DMCC 的完整 Markdown / ClickEvent / HoverEvent / Title 渲染能力。
+
+新版 Fabric Bridge 使用 Fabric API 的公開 `COMMAND_MESSAGE` 事件接收指令造成的**公開廣播**（如 `/say`、`/me`），不監聽發送給私人收件者的 `/msg`；同時抑制事件系統產生的重複聊天回顯。在 Discord 呈現中可用 `server_broadcast` 自訂模板，或將該事件加入 `cross_server_events`，避免將未授權的私聊傳至其它伺服器。對 `/tellraw @a` 的完整結構化解析尚未保證。
+
+### 跨服事件
+
+根據你的需求，在 `settings/dmcc.json` 最外層加入（示例）：
+
+```json
+{
+  "cross_server_relay": true,
+  "cross_server_events": [
+    "player_chat",
+    "player_join",
+    "player_quit",
+    "player_death",
+    "server_broadcast"
+  ]
+}
+```
+
+此欄位為嚴格允許清單，只能選玩家聊天、加入、離開、死亡、進度、遊戲模式、伺服器啟停及公開廣播。帳號綁定、私有資訊、指令請求、伺服器指標不會跨服廣播。未設定時維持只跨服轉送聊天的舊行為。
+
+### 私密控制台日誌（選用）
+
+若管理員確實需要連續觀看 `latest.log`，可在最外層加入：
+
+```json
+{
+  "console_stream": {
+    "enabled": true,
+    "poll_seconds": 5,
+    "servers": {
+      "survival": {"channel_id": "123456789012345678"}
+    }
+  },
+  "account_linking": {"max_accounts": 1}
+}
+```
+
+- `console_stream` **預設關閉**。啟用後由 Python 透過原有 HMAC 認證的 Bridge `log_request` 輪詢有限大小的日誌尾部；不會在第一次啟用時倒灌舊有歷史。每次最多轉送八十行，截斷過長訊息，並預設遮蔽 IP、IPv6、常見 Secret／Token／Bearer 憑證、`@everyone` 等。
+- 請將日誌頻道設為**只有可信任管理員可見**。正則遮蔽不能保證識別所有敏感資訊，因此不要把控制台日誌轉至公開頻道。**此功能只顯示日誌，不開放頻道內任意使用者執行控制台指令。** 需要操作請使用既有受權限控制的 `/dmcc console` 指令。
+- `account_linking.max_accounts` 以 Discord ID 設定一個使用者可連結幾個 Minecraft 帳號。數值 `0` 表示沿用既有無上限行為；設定為 `1` 可比照 DMCC 的單一綁定策略，不會自動刪除舊綁定。仍使用 Minecraft 端啟動、一次性驗證碼完成綁定。
+
+### 頭像及看板擴充
+
+若使用 Webhook，`presentation.servers.<id>.chat.avatar_url` 及 `.events.avatar_url` 可指定 HTTPS 頭像來源或 `{player}`、`{minecraft_uuid}` 模板。為避免任意外站資料要求，只允許 `mc-heads.net`、`crafatar.com` 與 Discord CDN。Minecraft UUID 不存在時，正常 Minecraft 使用者名稱可作為預設玩家頭像的查詢值。
+
+`monitoring.servers.<id>.player_count_voice_channel_id` 可指定另一個語音頻道呈現 `Players: X/Y`；原來的 `status_voice_channel_id` 繼續只顯示 Online / Offline。Bot Presence 支援三態：有在線玩家顯示 Online；有伺服器連線但無玩家時 Idle；全部離線 DND。
+
+### Scope statement (English)
+
+The added Discord rich-message bridge produces **readable bounded text**, not fully styled Minecraft chat components. Public-command broadcasts are subscribed through Fabric's broadcast event rather than a raw command interceptor; private DMCC link packets and server statistics remain outside cross-server relays. Optional console log polling masks common secrets but must only be sent to administrator-only Discord channels. `account_linking.max_accounts=0` retains the prior unlimited-link behavior; set it explicitly to `1` to enforce a single link. The monitoring extension adds a separate player-count voice channel and an online/idle/DND Presence policy. Upstream DMCC v3 features not explicitly implemented and verified here — notably NeoForge, styled Minecraft chat, full mention alerts, command filter controls, forced account linking, automatic OP synchronization and dynamic internationalization — are **not** claimed as reproduced.
+
+## 帳號暱稱同步、更新通知與提及提醒（選用）
+
+這三項功能皆**預設關閉**，可在既有 `settings/dmcc.json` 的最外層新增：
+
+```json
+{
+  "nickname_sync": {
+    "enabled": true,
+    "guild_id": "123456789012345678",
+    "template": "[MC] {player_name}",
+    "reset_unlinked": false,
+    "sweep_interval_seconds": 3600,
+    "max_sweep_per_cycle": 100
+  },
+  "release_check": {
+    "enabled": true,
+    "channel_id": "123456789012345679",
+    "interval_seconds": 21600
+  },
+  "mentions": {
+    "enabled": true,
+    "style": "title",
+    "sound": true,
+    "role_mentions": false,
+    "max_targets": 8,
+    "cooldown_seconds": 15
+  }
+}
+```
+
+- **暱稱同步**：若要接收成員加入與暱稱變更事件，須在 Discord Developer Portal 啟用 **Server Members Intent**，並在 Bot 的 `bot.intents.members` 設定中啟用；未啟用時只會作用於可取得的快取成員，無法保證完整同步。
+- **暱稱同步**：僅在指定 Discord `guild_id` 中，對已完成 Minecraft 帳號綁定、可被 Bot 管理的成員套用模板。Bot 需有「管理暱稱」權限，且角色必須高於目標成員；不會更動 Bot 帳號或伺服器擁有者。支援 `{player_name}`、`{discord_name}`；最多 32 字元。定期掃描限定數量，另於成員加入、暱稱變更以及連結／解除連結時檢查。**解除連結不會自動清除他人設定的暱稱**；僅在明確設定 `reset_unlinked: true` 後才會清除，啟用前請先評估此破壞性操作。
+- **發布版本檢查**：僅查詢本專案 `oMiki0826o/Discord-bot` 的 GitHub Releases，定期通知穩定且較新的版本，僅允許官方 GitHub 連結。**不下載、不執行、不自動升級**，也不能代替 Minecraft／Fabric 版本相容性驗證。此功能與 Modrinth 的遊戲模組更新檢查相互獨立。
+- **玩家提及通知**：Discord 映射頻道中的明確使用者提及（`<@user_id>`）可通知該使用者已綁定的 Minecraft UUID。只對在線玩家發送，不將整則 Discord 訊息重複廣播；可用 `style: "actionbar"`、`"chat"` 或 `"title"`，搭配 `sound: true/false` 控制提示音，並限制每次人數及每名玩家冷卻時間。**不支援角色提及、`@everyone` 或 `@here` 的大量通知**，以避免洗版。Minecraft 端需安裝此分支重新編譯的 Bridge JAR，否則新封包可能無法顯示。
+
+### Optional account nickname, release and mention settings (English)
+
+All three settings default to disabled. Nickname sync is scoped to one Discord guild and checks **Manage Nicknames**, role hierarchy, guild ownership, and whether the member is a bot before issuing an edit. It never clears unlinked nicknames unless `reset_unlinked` is explicitly enabled. Release checks query only the official GitHub Releases endpoint, notify newer stable tags and never install anything. Discord user mentions are resolved through verified account links and delivered by UUID to online Minecraft players using an authenticated Bridge message; no role-wide or everyone mentions are sent, and per-player cooldown/recipient limits apply. Live Discord permissions, actual Minecraft client UI and server deployment must still be verified by operators.
+
+## Discord → Minecraft 富文字（安全子集）
+
+`rich_chat` 預設為 `false`，可以在 `settings/dmcc.json` 最外層設定 `"rich_chat": true`。啟用後，Discord 文字會先轉換為最多 128 個、總長度受限的**樣式片段**，透過已驗證的 Gateway 傳給 Java Bridge，再轉成原生 Minecraft `Component`。目前可保留一般 Markdown 的粗體、斜體、底線、刪除線與程式碼灰色顯示；新版亦會在 Discord 成員有有效身分組顏色時，僅將驗證過的 `#RRGGBB` 套用到訊息作者前綴（文字內容不繼承），不支援任意 JSON、執行指令或可點擊的 ClickEvent，避免 Discord 訊息直接觸發遊戲管理操作。若維持預設關閉，繼續使用舊版純文字封包，保障對老舊 Bridge 的相容。
+
+**注意：啟用前必須部署與此分支相同提交所編譯的 Minecraft Bridge JAR**。與原版 DMCC 完整 Discord Markdown / Hover / Click、附件貼圖完整渲染相比，這仍是明確限定的安全子集，尚未做到 100% 功能對等。
+
+### Rich text (English)
+
+The opt-in `rich_chat: true` setting sends validated, bounded style-only segments (bold, italic, underline, strike-through and code gray) over the authenticated Gateway to the Fabric Bridge. It does not serialize executable Minecraft JSON, ClickEvent, arbitrary URL actions or commands. Deploy a Bridge JAR built from the same source revision before enabling it. Other upstream DMCC rendering features remain unverified or unsupported.
+
+
+## 本分支的語言設定、手動更新與日誌重連
+
+- Discord 事件訊息的語言可在 `presentation.servers.<server_id>.locale` 設為 `zh_TW`（預設）或 `en_US`。此為本地固定模板，不會下載外部語言包；各事件的 `templates` 設定仍優先於語言預設。遊戲伺服器自行產生的死亡原文或進度標題**不會自動翻譯**，也尚未達到 DMCC v3 的動態 i18n 下載能力。
+- `/dmcc update` 可**手動**查詢官方 GitHub Releases 的穩定新版本，私密回覆給使用者；不需要啟用自動通知，且不下載或安裝任何檔案。自動通知由 `release_check.enabled` 控制。
+- 在 `console_stream.enabled` 的日誌尾部輪詢中，若偵測到輪替或原始資料不連續，系統會建立新的基線、略過不能確認為新資料的片段，而不是將舊日誌重新發到 Discord。Bridge 斷線重連同樣不重播舊紀錄。這種保守策略可能略過斷線期間的訊息，尚非具備位移游標與補送機制的完整持久化串流。
+
+### Compatibility notes (English)
+
+Set `presentation.servers.<server_id>.locale` to `zh_TW` (default) or `en_US`; custom templates override those local defaults. This does **not** claim automatic translations for game-generated advancement or death messages. `/dmcc update` checks a trusted GitHub Release URL on request without publishing a channel notification or installing software. Console polling resets its baseline across rotation/disconnection instead of replaying ambiguous history; messages during disconnection may be lost. Full original DMCC v3 feature parity remains an open review requirement.
+
+## Cursor-based console log streaming (opt-in)
+
+With `console_stream.enabled: true`, the Bot now uses an authenticated byte-offset cursor rather than repeatedly diffing the last part of `latest.log`. The Fabric Bridge returns no historical text on the first connection, then returns **only newline-terminated records**, limited to 1 KiB per poll, with a file identity and the next byte offset. The Bot atomically checkpoints each server's cursor in its ignored runtime directory (`data/dmcc/console_cursors.json`, or the directory of the configured DMCC state file).
+
+- A disconnected Minecraft Bridge does not erase the cursor. On reconnect or Bot restart, logs are read from the last committed byte offset; a Discord API error prevents cursor advancement, so the batch is retried. This provides **at-least-once delivery**; if Discord accepted a message but the cursor file could not be saved, duplicates are still possible.
+- Rotation is detected using the local log file identity and resumes at the start of the new file. If a single log line is longer than the read limit, the reader skips that unbounded fragment rather than leaking a partial secret or allocating an unlimited buffer; this can drop some backlog.
+- Sensitive log content remains restricted to administrator-only channels, with IP/token redaction. Common private commands recorded as console lines (such as `/msg`, `/tell`, `/login`, `/register`, and `/dmcc link`) have their arguments redacted before Discord delivery. Automated redaction is best-effort, not a guarantee that every credential is hidden. Revoke leaked credentials if they appear in logs.
+- This requires the new Fabric Bridge JAR and Python Bot to be deployed together; the old `/dmcc log` on-demand command continues to use the legacy excerpt protocol. A new Bot with an old Bridge cannot use cursor streaming.
+- **NeoForge, full upstream command interception, exact OP synchronization and login freeze are not part of this addition.** Do not consider this implementation full DMCC v3 parity.
+
+### Console cursor streaming (English)
+
+With the optional console stream enabled, each authenticated Fabric server produces bounded complete-line log chunks with file identity and byte offsets. Per-server cursors are atomically saved under the ignored runtime data directory and survive reconnect/restart. Offsets advance only after a successful Discord delivery attempt. Delivery is *at least once*, not exactly once, because a crash between Discord acceptance and checkpoint persistence can repeat an entry. Oversized lines are dropped to prevent partial-credential leakage. Operators must restrict the target channel to trusted administrators. Build and deploy matching Python/Java revisions.
+
+## Fabric v3 Parity Audit (Branch-only)
+
+Scope: Fabric Minecraft **1.21.8 / 1.21.9**, Python Discord Gateway. NeoForge is explicitly out of scope for this milestone. A GitHub Actions build alone is not an actual Minecraft + Discord end-to-end test.
+
+| Feature slice | Branch implementation | Remaining acceptance work |
+|---|---|---|
+| Discord message relay and media summaries | Implemented with bounded metadata | Live Discord permissions and rate-limit verification |
+| Mention notifications | Targeted UUID notification, chat/actionbar/title, optional sound | Role and mass-mention policy, real client display |
+| Rich text / role colors | Safe Markdown subset; validated sender-only role color | Links, hover events, ANSI blocks, fuller markdown; client verification |
+| Minecraft command sources | Public broadcast and guarded tellraw observation | Exact per-recipient tellraw behavior, configurable command filters, no private leakage |
+| Account linking and login policies | Fabric linking; fail-open kick and freeze controls | Real handshake, reconnect and TTL validation |
+| Native OP synchronization | Opt-in linked-player updates with stable IDs | Persistent ownership, unlink/restart reconciliation and acknowledgment |
+| Localization | zh_TW/en_US event templates | Dynamic advancement/death localization and complete placeholders |
+| Multi-server and console | Authenticated routing, bounded log cursor | Stress and disconnect/rotation testing |
+
+**Release gate:** all Python 3.11–3.13 checks, Fabric 1.21.8/1.21.9 Gradle/JUnit/remapJar, release artifact integrity, security review, and a real isolated server end-to-end smoke test must pass before declaring full parity or merging into `main`.
+
+
+## Fabric v3 功能補完：安全預設與權限管理（2026-11-05）
+
+此階段只驗收 **Fabric Minecraft 1.21.8 / 1.21.9**。NeoForge 暫停新增功能。所有選用能力需同時部署相同開發分支來源的 Python Gateway 與 Fabric JAR。
+
+### 玩家公開指令事件
+
+在 `config/minecraft-bridge.properties` 中明確設定：
+
+```properties
+relay_player_commands=true
+```
+
+預設為 `false`。僅轉送 `/say`、`/me`、`/list`、無 selector 條件的 `/tellraw @a` 等公開指令輸入；Java 與 Python 皆有獨立白名單。私人 `/msg`／`/tell`、登入／註冊、隊伍私訊、包含換行或控制字元的指令不會轉送。此功能並非全部命令轉送；不保證與 Fabric 的公開廣播事件去重，部署前須進行實機測試。
+
+### Discord 玩家與角色提及
+
+`settings/dmcc.json`：
+
+```json
+{
+  "mentions": {
+    "enabled": true,
+    "style": "title",
+    "sound": true,
+    "role_mentions": false,
+    "max_targets": 8,
+    "cooldown_seconds": 15
+  }
+}
+```
+
+`role_mentions` 預設 `false`。啟用後仍只會通知已綁定 Minecraft UUID 的使用者；必須由 Discord Server Members Intent 提供**完整成員快取**，並且群組成員數不超出 `max_targets`。若快取不完整或角色對應超限，群組提及直接略過。不支援 `@everyone`／`@here` 自動全員提醒。每台伺服器／玩家仍受冷卻控制。
+
+### OP 權限同步與重啟恢復
+
+Fabric 選用 `op_sync_enabled=true` 搭配 Gateway `op_sync.enabled=true`。當同步開啟時，Fabric 會在設定目錄建立 `minecraft-bridge-managed-ops.properties`，記錄**只有 Bridge 管理的 OP**，並在重啟後重載。該檔案應視為安全敏感的本機資料；不可手動編輯或提交 Git。若檔案損壞，OP 同步停止而非接管既有 Minecraft 管理員的權限。手動新增或修改的 OP 不能被 Bridge 自動覆蓋。
+
+要啟用撤銷，必須明確設定 `op_sync.allow_removals=true` 並提供完整 Discord guild 成員資料。Gateway 提交含 `full_snapshot` 的快照，允許撤銷不再綁定、已離開 Discord guild、或權限降低的 **Bridge 管理項目**。透過 `op_sync_response` 等待 Java 真正套用結果，避免只靠網路寫入成功就宣告已同步。任何失敗需要觀察伺服器日誌，並等待下次週期再次同步。**不保證跨程序的原子交易**，遇到磁碟故障需人工核對原生 `ops.json` 和管理名冊。
+
+### 富文字與互動
+
+在 Gateway `rich_chat=true` 時，額外支援部分 Discord ANSI 色碼區塊，以及經過限制的 HTTP(S) URL 標記／原生 Minecraft OpenUrl + Hover Text。仍會檢查控制字元、總長度及片段數；不接受從 Discord 直接傳入 RunCommand、SuggestCommand、任意 NBT 或 JSON Text Component。這不是無限制 Markdown、ANSI 或上游原版互動元件的完整復刻。
+
+### 驗收門檻
+
+公開功能清單只標記**已實作或部分實作**；完整 DMCC v3 對等需再確認原版全部命令及原生封包特性、動態死亡／進度翻譯、`/tellraw` 的收件者上下文、Discord API 實機互動，以及中斷重連／Minecraft 原生權限與伺服器負載。CI（Python、Fabric Gradle/JUnit/remapJar、啟動 Smoke Test、發行驗證）通過後，仍不得宣稱完成真實 Discord + Minecraft 端對端測試。維持 Draft PR，不合併 main。
+
+
+## Fabric v3：語言翻譯、原生訊息覆寫與實際 Gateway 測試
+
+### Minecraft 語言翻譯
+
+Fabric `config/minecraft-bridge.properties` 新增 `translation_locale=zh_tw`（預設 `en_us`，採語言_地區碼）。
+
+- 將官方或自訂 Minecraft 語言 JSON 放在 `config/minecraft-bridge/lang/zh_tw.json`、`en_us.json`。不會在伺服器主 Tick 下載遠端語言包。
+- Bridge 也會讀取已安裝 Fabric Mod 根目錄中的 `assets/<namespace>/lang/<locale>.json`，其中自訂語言檔優先，英文作為備援。此階段**尚未直接讀取已啟用資料包的 Client Resources，也不自動下載 Mojang 官方完整語系**；這兩種來源仍需額外驗收。
+- 每五分鐘在背景重新載入不可變語言表；語言檔損毀時保留上一份快照。文字翻譯支持 `%s`、`%1$s`、`%%` 與部分巢狀 Text Component，長度上限 1800 個 UTF-16 單位。
+- 事件：死亡訊息、進度標題與說明、遊戲模式，以及公開 `/tellraw @a` 的內容，會先嘗試翻譯並安全截斷。未找到鍵值時保留原翻譯鍵；不是把缺失鍵值虛構成中文。
+
+### 原生聊天覆寫（**明確選用**）
+
+```properties
+overwrite_native_messages=false
+```
+
+設為 `true` 後，Bridge 透過 Fabric 的 `ALLOW_CHAT_MESSAGE`／`ALLOW_COMMAND_MESSAGE` 事件，在玩家和公開指令的原生廣播位置提供長度受限的本機系統訊息，原生廣播不重複發送；Discord Relay 仍送出已核准的事件。**這會將原生簽章聊天改成系統訊息，失去原本的簽章與檢舉語意**。建議保持關閉，除非伺服器管理者理解此影響。私人指令和登入用指令不應經此管道傳播。
+
+### Minecraft 原生互動提示
+
+玩家連結碼可透過 Minecraft ClickEvent.CopyToClipboard 複製，HoverEvent 顯示提示；`/dmcc unlink` 僅作為受控的 SuggestCommand。外部 Discord 內容不能任意指定 Minecraft RunCommand／任意互動事件，避免把聊天內容提升成伺服器權限。
+
+### CI 真實整合測試邊界
+
+Fabric 1.21.8 與 1.21.9 在 GitHub Actions 啟動真實專用伺服器，Bridge 連接到專案原本的**真正 Python Gateway**，完成 Protocol v1 HMAC 驗證，並要求收到 `server_started`、`server_info_response`、Minecraft `/say` 命令執行回覆與 `server_broadcast`。另以 Python 單元測試驗證 Gateway 協定及模擬 Java Peer。這是**真正的 Fabric Java ↔ TCP Gateway** 驗收，而不是「僅編譯」；仍不等於使用正式 Discord Token 驗證 Webhook 權限、反向貼文或真實 Minecraft 客戶端的顯示效果。僅有外部 Bot 連線後才能對這些邊界做完整端對端驗收。
+
+## Fabric v3 額外強化：官方語言資源與權限／事件防護
+
+### 取得 Mojang 官方語言資源（離線快取）
+
+新增 `tools/fetch_minecraft_languages.py`，透過 Mojang 官方版本資訊與資源索引，按**明確指定的 Minecraft 版本**取得語言檔。工具只接受官方 HTTPS 網域，驗證版本資源索引與語言資源 SHA-1，限制傳輸大小並以原子寫入方式建立快取。下載失敗不會覆寫既有資料。
+
+```bash
+python3 -m tools.fetch_minecraft_languages \
+  --minecraft-version 1.21.8 \
+  --locale zh_tw \
+  --directory /path/to/minecraft/config/minecraft-bridge/lang
+```
+
+結果放在 `lang/mojang/1.21.8/zh_tw.json`，不覆蓋自訂 `lang/zh_tw.json`。Minecraft Fabric 伺服器會依當前版本載入對應快取。優先順序為：自訂語言檔 → 已安裝 Mod 語言 → 版本相符的 Mojang 官方快取 → 英文備援。沒有對應快取或翻譯鍵時，使用原有後備語言與未翻譯鍵。
+
+**此工具是需由管理員或外部排程啟動的下載命令，不會於 Minecraft 主 Tick 自動連網。** 未驗證的 Java 自動連網更新與所謂「讀取已啟用資料包 Client Resource」不計入功能完成，後者仍需對應伺服器資源管理器及實機驗證。
+
+### 公開指令及 /tellraw 安全性
+
+- 公開 `/say`、`/me` 由 Fabric API 的 `COMMAND_MESSAGE`／`ALLOW_COMMAND_MESSAGE` 廣播專用事件觀察。依官方 Fabric API 定義，這些事件只在廣播給全體玩家時觸發，收件者限定的 `/msg` 不會觸發；避免使用不穩定的匿名 lambda Mixin。
+- `/tellraw @a` 只在全部收件者解析後內容一致、且收件人數不超過 64 時才向 Discord 鏡像，避免選擇器／NBT／計分板內容因收件者不同而被誤轉送。原版 Minecraft 命令仍正常執行。
+- `overwrite_native_messages=true` 會將 **玩家原生聊天** 與特定公開 `/say` 廣播轉成系統訊息，會改變 Minecraft 簽章／檢舉語意，**預設仍為 false**；沒有聲稱覆寫所有私訊或所有模組自行註冊的命令。
+
+### 模板欄位擴充
+
+Discord 端的事件 `presentation` 模板除 `{player}`、`{server}`、`{message}` 等欄位外，現在也接受 `{description}`、`{advancement_type}`、`{minecraft_uuid}`、`{minecraft_version}`、`{motd}`、`{online_players}`、`{max_players}`。只能使用列出的**純變數名稱**，不接受 Python 物件屬性、索引、格式指定或任意程式碼。
+
+### 整合測試／故障注入
+
+CI Fabric 分支採用實際 `bot.mod.dmcc.gateway.server.Gateway`，與真實 Fabric 專用伺服器進行 HMAC 交換、`server_started`、伺服器資訊、公開 `/say` 執行與 `server_broadcast` 回傳；不再只靠模擬 Gateway。另有 Python 250 則聊天事件突發測試、重複伺服器 ID 拒絕、斷線重連與未完成 Request 取消回歸測試。
+
+**仍需外部設備／服務才能驗證**：真正 Discord API Bot/Webhook 權限與速率限制、真實 Minecraft 客戶端的簽章／Hover／點擊顯示、長時間大流量壓力及跨主機環境。GitHub Actions 通過不能等同完成正式服務端到端驗收。
+
+
+## Fabric DMCC v3 開發預覽：新功能入口
+
+完整說明與範例請參閱 [DMCC-FABRIC-V3-PREVIEW.md](DMCC-FABRIC-V3-PREVIEW.md) 和 [dmcc-v3-preview.json](examples/dmcc-v3-preview.json)。
+
+預覽新增：Discord ↔ Minecraft 受同意控制的私訊（`/dmcc pm`、`/dmcc dm-consent`、`/dmcc whisper`）、受權限保護的 `/dmcc broadcast`、系統／編輯／回覆模板、跨服 Minecraft 富文字、原生 NativeFormatPolicy、`/dmcc refresh` 顯示設定更新、背景官方 Mojang 語言快取。功能預設不覆寫正式 Relay，私訊與原生簽章聊天替換需明確啟用。請先在隔離測試伺服器使用。
+
+
+初版延伸：原生 `/msg`、`/tell`、`/w` 單人私訊透過雙方 Discord 同意才允許跨平台發送，純 `@a` 作為公開 source_msg；支援來源訊息模板、Requester-only Discord 操作面板、外部安全 Link Button、Minecraft Font Glyph Aliases、Hover Spoiler 及反應移除同步。參閱 [Fabric v3 功能說明](DMCC-FABRIC-V3-PREVIEW.md)。
