@@ -63,6 +63,9 @@ class V3FeatureConfig:
     minecraft_emoji_aliases: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    minecraft_glyph_aliases: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     minecraft_mention_ids: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -76,8 +79,8 @@ class V3FeatureConfig:
         if not isinstance(value, Mapping):
             raise ValueError("v3_features must be a mapping")
         if set(value) - {"enabled", "message_parsing", "source_events", "templates",
-                          "minecraft_emoji_aliases", "minecraft_mention_ids",
-                          "private_messages"}:
+                          "minecraft_emoji_aliases", "minecraft_glyph_aliases",
+                          "minecraft_mention_ids", "private_messages"}:
             raise ValueError("unknown v3_features options")
         enabled = value.get("enabled", False)
         if type(enabled) is not bool:
@@ -110,11 +113,13 @@ class V3FeatureConfig:
         })
         emoji = cls._mappings(value.get("minecraft_emoji_aliases", {}), emoji=True)
         mentions = cls._mappings(value.get("minecraft_mention_ids", {}), emoji=False)
+        glyphs = cls._glyph_mappings(value.get("minecraft_glyph_aliases", {}))
         return cls(
             enabled=enabled,
             parsing=parser,
             source_events=MappingProxyType(allowed_sources),
             minecraft_emoji_aliases=emoji,
+            minecraft_glyph_aliases=glyphs,
             minecraft_mention_ids=mentions,
             private_messages=private_messages,
             templates=templates,
@@ -134,6 +139,21 @@ class V3FeatureConfig:
                 raise ValueError("invalid v3 alias target")
             mapped[key.casefold()] = value
         return MappingProxyType(mapped)
+
+    @staticmethod
+    def _glyph_mappings(raw: object) -> Mapping[str, str]:
+        if not isinstance(raw, Mapping) or len(raw) > 256:
+            raise ValueError("invalid Minecraft font glyph mappings")
+        result: dict[str, str] = {}
+        for key, glyph in raw.items():
+            if not isinstance(key, str) or not _ALIAS.fullmatch(key):
+                raise ValueError("invalid Minecraft font glyph name")
+            if (not isinstance(glyph, str) or not 1 <= len(glyph) <= 8
+                    or any(ord(ch) < 32 or ord(ch) == 127 for ch in glyph)
+                    or "@everyone" in glyph.casefold() or "@here" in glyph.casefold()):
+                raise ValueError("invalid Minecraft font glyph value")
+            result[key.casefold()] = glyph
+        return MappingProxyType(result)
 
     def allows(self, direction: str, flag: str) -> bool:
         return self.enabled and bool(self.parsing.get(direction, {}).get(flag, False))

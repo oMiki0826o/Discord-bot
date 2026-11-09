@@ -23,6 +23,8 @@ from .rich_text import parse_discord_markdown, colorize_author_prefix
 from .v3_features import V3FeatureConfig
 from .v3_templates import render_segments
 
+_GLYPH = re.compile(r"(?<![A-Za-z0-9_]):([A-Za-z0-9_]{1,32}):(?![A-Za-z0-9_])")
+
 
 # ── Gateway Contract ──────────────────────
 
@@ -254,6 +256,12 @@ class DiscordRelayService:
             if self._rich_chat and hasattr(self._gateway, "send_minecraft_segments"):
                 flags = self._features.parsing["discord_to_minecraft"]
                 def parse(text: str) -> list[dict[str, object]]:
+                    if self._features.enabled and flags["custom_emojis"]:
+                        text = _GLYPH.sub(
+                            lambda match: self._features.minecraft_glyph_aliases.get(
+                                match.group(1).casefold(), match.group(0)
+                            ), text,
+                        )
                     if self._features.enabled and not flags["markdown"]:
                         clean = re.sub(r"[\x00-\x1f\x7f]", " ", text)
                         return [{"text": clean[:1800], "color": "white"}]

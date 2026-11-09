@@ -87,7 +87,7 @@ class CrossServerRelayService:
             flags = self._features.parsing["minecraft_to_minecraft"]
             payload = format_minecraft_message(
                 payload,
-                emoji_aliases=self._features.minecraft_emoji_aliases,
+                emoji_aliases=self._features.minecraft_glyph_aliases,
                 mention_ids=self._features.minecraft_mention_ids,
                 custom_emojis=flags["custom_emojis"],
                 mentions=flags["mentions"],
