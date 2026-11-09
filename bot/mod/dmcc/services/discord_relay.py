@@ -181,6 +181,7 @@ class DiscordRelayService:
 
     async def forward_reaction(
         self, message_id: str, reactor_name: str, emoji: str,
+        *, removed: bool = False,
     ) -> bool:
         """Relay only reactions for messages originally forwarded by this bridge."""
         previous = self._messages.get(message_id)
@@ -191,7 +192,7 @@ class DiscordRelayService:
             return False
         return await self._send_to_server(
             previous.server_id,
-            f"* {reactor_name.strip()[:64]} reacted {rendered} to {previous.author_name[:64]}'s message",
+            f"* {reactor_name.strip()[:64]} {'removed' if removed else 'reacted'} {rendered} {'from' if removed else 'to'} {previous.author_name[:64]}'s message",
             template_kind="reaction", template_body=rendered,
             template_values={"effective_name": reactor_name.strip()[:64]},
         )

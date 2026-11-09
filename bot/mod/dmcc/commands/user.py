@@ -399,8 +399,6 @@ class DmccUserCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: Any) -> None:
-        if bool(getattr(getattr(message, "author", None), "bot", False)):
-            return
         channel_id = getattr(getattr(message, "channel", None), "id", None)
         system_checker = getattr(message, "is_system", None)
         if channel_id is not None and callable(system_checker) and system_checker():
@@ -408,6 +406,8 @@ class DmccUserCog(commands.Cog):
             await self._relay.forward_system_message(
                 str(channel_id), text if isinstance(text, str) else "",
             )
+            return
+        if bool(getattr(getattr(message, "author", None), "bot", False)):
             return
         author = getattr(message, "author", None)
         if channel_id is None or author is None:
@@ -519,6 +519,35 @@ class DmccUserCog(commands.Cog):
                 name,
                 str(getattr(payload, "emoji", "")),
             )
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: Any) -> None:
+        user_id = getattr(payload, "user_id", None)
+        if user_id is None or user_id == getattr(getattr(self.bot, "user", None), "id", None):
+            return
+        user = self.bot.get_user(user_id) if hasattr(self.bot, "get_user") else None
+        if user is None or bool(getattr(user, "bot", False)):
+            return
+        name = str(getattr(user, "display_name", user)).strip()
+        if name:
+            await self._relay.forward_reaction(
+                str(getattr(payload, "message_id", "")), name,
+                str(getattr(payload, "emoji", "")), removed=True,
+            )
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: Any, after: Any) -> None:
+        if bool(getattr(getattr(after, "author", None), "bot", False)):
+            return
+        before_text = getattr(before, "content", None)
+        after_text = getattr(after, "content", None)
+        if isinstance(after_text, str) and after_text != before_text:
+            await self._relay.forward_edit(str(getattr(after, "id", "")), after_text)
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: Any) -> None:
+        if not bool(getattr(getattr(message, "author", None), "bot", False)):
+            await self._relay.forward_delete(str(getattr(message, "id", "")))
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: Any) -> None:
