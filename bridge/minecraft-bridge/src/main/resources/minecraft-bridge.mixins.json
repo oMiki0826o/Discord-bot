@@ -6,6 +6,7 @@
     "FrozenPacketMixin",
     "LoginGateMixin",
     "PlayerCommandMixin",
+    "MsgCommandMixin",
     "GameModeCommandMixin",
     "TellRawCommandMixin",
     "PlayerAdvancementsMixin",

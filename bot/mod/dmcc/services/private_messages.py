@@ -99,7 +99,8 @@ class DmPrivateMessageService:
             return False
         from_user = self._links.discord_for_minecraft(source)
         to_user = self._links.discord_for_minecraft(recipient)
-        if not from_user or not to_user or not self._consent.enabled(to_user):
+        if (not from_user or not to_user or not self._consent.enabled(from_user)
+                or not self._consent.enabled(to_user)):
             return False
         get_user = getattr(self._bot, "get_user", None)
         user = get_user(int(to_user)) if callable(get_user) else None
@@ -130,7 +131,8 @@ class DmPrivateMessageService:
     ) -> bool:
         if not (self._features.enabled and self._features.private_messages):
             return False
-        if not _USER.fullmatch(user_id) or not self._links.links_for_discord(user_id):
+        if (not _USER.fullmatch(user_id) or not self._links.links_for_discord(user_id)
+                or not self._consent.enabled(user_id)):
             return False
         if not isinstance(minecraft_name, str) or not _PLAYER.fullmatch(minecraft_name):
             return False

@@ -637,6 +637,47 @@ public final class BridgeMod implements ModInitializer {
         ), "private message delivery status");
     }
 
+    /**
+     * Public source /msg @a: the exact selector is required before this method
+     * can be called. Never use this method for private recipient variants.
+     */
+    public static void relayVanillaAllPlayersMessage(
+        CommandSourceStack source, String content
+    ) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || source == null || content == null) return;
+        BridgeRuntime active = mod.runtime;
+        if (active == null || mod.serverId == null) return;
+        String safe = PublicTellrawPolicy.sanitize(content);
+        if (safe.isBlank()) return;
+        active.publishEvent(new ProtocolEnvelope(
+            1, "server_broadcast", mod.serverId, null,
+            Map.of("player_name", source.getTextName(), "message", safe,
+                "source_event", "msg", "public_broadcast", true)
+        ));
+    }
+
+    /**
+     * Vanilla /msg, /tell, /w with one direct recipient. The Gateway delivers
+     * privately, only when BOTH linked users have explicitly consented.
+     */
+    public static void relayVanillaPrivate(
+        ServerPlayer sender, ServerPlayer recipient, String raw
+    ) {
+        BridgeMod mod = activeInstance;
+        if (mod == null || sender == null || recipient == null) return;
+        BridgeRuntime active = mod.runtime;
+        if (active == null || mod.serverId == null || !active.isAuthenticated()) return;
+        String message = normalizePrivateText(raw);
+        if (message == null) return;
+        active.publishEvent(new ProtocolEnvelope(
+            1, "player_private_message", mod.serverId, null,
+            Map.of("sender_uuid", sender.getStringUUID(),
+                "sender_name", sender.getName().getString(),
+                "recipient_uuid", recipient.getStringUUID(), "message", message)
+        ));
+    }
+
     /** Sample cached game-server timing only once per 300 ticks, never perform network I/O here. */
     private void publishMetricsOnTick(MinecraftServer server) {
         BridgeRuntime active = runtime;
