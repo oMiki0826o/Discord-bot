@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import discord
 from discord import AllowedMentions, app_commands
 from discord.ext import commands
 
@@ -24,6 +25,7 @@ from ..services.mentions import MinecraftMentionService, collect_role_mention_us
 from ..services.release_updates import ReleaseUpdateService
 from ..services.private_messages import DmPrivateMessageService
 from ..services.console_stream import ConsoleStreamConfig, redact_console_line
+from ..services.dashboard import DmccDashboardView
 from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
@@ -175,13 +177,38 @@ class DmccUserCog(commands.Cog):
             ephemeral=True,
         )
 
+    def _dashboard(self, interaction, *, selected: str | None = None):
+        """Real Discord interactions get a private, requester-locked dashboard.
+        Lightweight test interaction objects keep the old text-only response.
+        """
+        if not isinstance(interaction, discord.Interaction):
+            return None
+
+        async def fetch_server(server_id: str) -> str:
+            response = await self._bridge.server_info(server_id)
+            return render_server_info(server_id, response)
+
+        def summary() -> str:
+            report = self._info.report()
+            online = ", ".join(report.online_server_ids) if report.online_server_ids else "none"
+            return f"DMCC online servers: {online}\nChannel mappings: {report.channel_mappings}"
+
+        report = self._info.report()
+        servers = tuple(dict.fromkeys((*report.online_server_ids, *( 
+            [selected] if selected else []
+        ))))
+        return DmccDashboardView(
+            interaction.user.id, servers, summary, fetch_server, selected=selected
+        )
+
     @dmcc_slash.command(name="info", description="Show DMCC bridge status")
     async def slash_info(self, interaction) -> None:
         report = self._info.report()
         online = ", ".join(report.online_server_ids) if report.online_server_ids else "none"
+        kwargs = {"view": view} if (view := self._dashboard(interaction)) else {}
         await interaction.response.send_message(
             f"DMCC online servers: {online}\nChannel mappings: {report.channel_mappings}",
-            ephemeral=True,
+            ephemeral=True, **kwargs,
         )
 
     @dmcc_slash.command(name="server-info", description="Show live information from a connected Minecraft server")
@@ -192,7 +219,11 @@ class DmccUserCog(commands.Cog):
         except _REQUEST_ERRORS as exc:
             await interaction.followup.send(f"DMCC server info failed: {exc}", ephemeral=True)
             return
-        await interaction.followup.send(render_server_info(server_id, response), ephemeral=True)
+        view = self._dashboard(interaction, selected=server_id)
+        await interaction.followup.send(
+            render_server_info(server_id, response), ephemeral=True,
+            **({"view": view} if view is not None else {}),
+        )
 
     @dmcc_slash.command(name="console", description="Run a command on a connected Minecraft server")
     async def slash_console(self, interaction, server_id: str, command: str) -> None:
