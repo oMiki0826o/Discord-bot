@@ -333,15 +333,6 @@ class OwnerDataService:
                 continue
 
             relative = path.relative_to(self.root).as_posix()
-            if (
-                relative.startswith("knowledge/")
-                and path.is_file()
-                and not path.is_symlink()
-                and path.suffix.casefold() in KNOWLEDGE_SOURCE_SUFFIXES
-                and path.name != "填寫說明.md"
-            ):
-                knowledge_documents += 1
-
             # 不支援的副檔名不屬於 AI 可編輯資料來源。
             if not self._is_supported_text_source(path, relative):
                 continue
@@ -370,6 +361,11 @@ class OwnerDataService:
                 continue
 
             source_type = self._source_type(relative)
+            # 空白檔常來自上游來源樹的 placeholder；它沒有可索引內容，
+            # 因此不應阻斷整個 AI 模組的啟動，也不應寫入 manifest。
+            if source_type == "knowledge" and size == 0:
+                continue
+
             prior = previous.get(relative)
             if (
                 source_type is not None
@@ -385,14 +381,6 @@ class OwnerDataService:
                 issues.append(f"{relative}: cannot read source ({exc})")
                 continue
 
-            if source_type is not None:
-                manifest[relative] = (
-                    hashlib.sha256(raw).hexdigest(),
-                    source_type,
-                    size,
-                    mtime_ns,
-                )
-
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
@@ -401,15 +389,19 @@ class OwnerDataService:
                 )
                 continue
 
-            if (
-                relative.startswith("knowledge/")
-                and path.suffix.casefold() in KNOWLEDGE_SOURCE_SUFFIXES
-                and path.name != "填寫說明.md"
-                and not text.strip()
-            ):
-                issues.append(
-                    f"{relative}: knowledge document must not be blank"
+            if source_type == "knowledge" and not text.strip():
+                continue
+
+            if source_type is not None:
+                manifest[relative] = (
+                    hashlib.sha256(raw).hexdigest(),
+                    source_type,
+                    size,
+                    mtime_ns,
                 )
+
+            if source_type == "knowledge":
+                knowledge_documents += 1
 
         return _SourceSnapshot(
             issues=tuple(issues),

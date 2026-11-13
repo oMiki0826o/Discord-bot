@@ -192,6 +192,24 @@ def test_casual_conversation_does_not_prefetch_knowledge_or_enable_web() -> None
     assert route.wants_web is False
 
 
+def test_non_casual_request_prefetches_knowledge_by_default() -> None:
+    route = Router().infer("幫我整理一下伺服器目前的規範")
+
+    assert route.wants_knowledge is True
+
+
+def test_greeting_does_not_suppress_a_technical_knowledge_lookup() -> None:
+    route = Router().infer("嗨，Minecraft 的紅石比較器怎麼用？")
+
+    assert route.wants_knowledge is True
+
+
+def test_explicit_knowledge_base_request_forces_a_lookup() -> None:
+    route = Router().infer("請查知識庫：今天有沒有需要我注意的事？")
+
+    assert route.wants_knowledge is True
+
+
 def test_missing_local_knowledge_enables_web_fallback_only_for_an_information_request() -> None:
     route = Router().infer("太陽牌代表什麼？")
 

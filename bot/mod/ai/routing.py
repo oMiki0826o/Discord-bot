@@ -38,6 +38,9 @@ _CASUAL_CONVERSATION_CUES = (
     "你好", "哈囉", "晚安", "早安", "心情", "陪我", "聊天", "謝謝", "掰掰",
     "hello", "hi ", "good morning", "good night", "how are you", "thanks", "bye",
 )
+_FORCE_KNOWLEDGE_CUES = (
+    "知識庫", "本機資料庫", "本地資料庫", "knowledge base", "local knowledge",
+)
 
 _MODEL_ALIASES = {"gemini": "gemini", "flash": "flash", "gemma": "gemma", "agent": "agent"}
 _MODEL_DIRECTIVE_RE = re.compile(
@@ -58,15 +61,20 @@ def contains_url(text: str) -> bool:
 
 
 def is_information_request(prompt: str) -> bool:
-    """判斷是否值得先查本機 Knowledge，而不把一般聊天視為檢索需求。"""
+    """判斷是否值得先查本機 Knowledge，而不把純閒聊視為檢索需求。"""
 
     folded = prompt.casefold().strip()
-    if not folded or any(cue in folded for cue in _CASUAL_CONVERSATION_CUES):
+    if not folded:
         return False
-    return (
-        contains_url(prompt)
-        or any(cue in folded for cue in (*_TECHNICAL_KNOWLEDGE_CUES, *_INFORMATION_REQUEST_CUES, *_WEB_CUES))
-    )
+    if any(cue in folded for cue in _FORCE_KNOWLEDGE_CUES):
+        return True
+    if contains_url(prompt) or any(cue in folded for cue in (*_TECHNICAL_KNOWLEDGE_CUES, *_WEB_CUES)):
+        return True
+    if any(cue in folded for cue in _CASUAL_CONVERSATION_CUES):
+        return False
+    if any(cue in folded for cue in _INFORMATION_REQUEST_CUES):
+        return True
+    return True
 
 
 def should_enable_web_fallback(route: "RouteRequest", *, has_knowledge: bool) -> bool:

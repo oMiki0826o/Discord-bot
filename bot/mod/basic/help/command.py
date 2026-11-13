@@ -173,6 +173,12 @@ class HelpCog(commands.Cog):
     ) -> None:
         """顯示目前 Bot 可用的 Slash Commands。"""
 
+        # 指令清單會隨載入模組數量增加；先確認 Interaction，避免 Discord
+        # 在初始回覆期限內未收到回應而使後續 Help 回覆失效。
+        await interaction.response.defer(
+            thinking=True,
+        )
+
         commands_by_module = _collect_commands(
             self.bot
         )
@@ -180,7 +186,7 @@ class HelpCog(commands.Cog):
         categories = build_help_categories(commands_by_module, category_name_resolver=lambda name: module_display_name(self.bot, name))
 
         if not categories:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "目前沒有可顯示的指令。",
                 ephemeral=True,
             )
@@ -191,7 +197,7 @@ class HelpCog(commands.Cog):
             user_id=interaction.user.id,
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=view.build_embed(),
             view=view,
         )

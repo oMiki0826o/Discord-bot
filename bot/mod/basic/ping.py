@@ -42,10 +42,16 @@ class PingCog(commands.Cog):
     ) -> None:
         """顯示 Discord WebSocket 延遲。"""
 
+        # 即使指令本身很短，也先確認 Interaction；Gateway 恢復或事件迴圈
+        # 暫時繁忙時，這可避免首次回覆逾期。
+        await interaction.response.defer(
+            thinking=True,
+        )
+
         latency_ms = round(
             self.bot.latency * 1000
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Ping：**{latency_ms} ms**"
         )
