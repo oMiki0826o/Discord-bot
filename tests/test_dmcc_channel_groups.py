@@ -99,3 +99,41 @@ def test_shared_group_can_opt_into_edit_delete_reaction_and_reply(tmp_path: Path
         assert await relay.forward_delete("m1")
         assert [server for server, _ in gateway.sent] == ["survival", "creative"] * 4
     asyncio.run(check())
+
+@pytest.mark.parametrize("mappings", [
+    {"survival": "100", "creative": "100"},
+    {"survival": ""},
+    {"": "100"},
+])
+def test_state_rejects_invalid_direct_mappings(tmp_path: Path, mappings: dict[str, str]) -> None:
+    import json
+
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({"channel_mappings": mappings}), encoding="utf-8")
+    state = JsonStateRepository(path)
+
+    with pytest.raises(ValueError, match="invalid JSON document quarantined"):
+        state.initialize()
+    assert path.with_suffix(".json.corrupt").exists()
+
+
+def test_shared_group_continues_after_peer_disconnect(tmp_path: Path) -> None:
+    class FlakyGateway(Gateway):
+        async def send_minecraft_message(self, server_id: str, message: str) -> None:
+            if server_id == "survival":
+                raise ConnectionError("peer disconnected during send")
+            await super().send_minecraft_message(server_id, message)
+
+    async def check() -> None:
+        state = JsonStateRepository(tmp_path / "state.json")
+        state.set_channel_group("100", ("survival", "creative", "mirror"))
+        gateway = FlakyGateway()
+        relay = DiscordRelayService(state, gateway)
+
+        assert await relay.forward_message("m1", "100", "Alex", "hello")
+        assert gateway.sent == [
+            ("creative", "<Alex> hello"),
+            ("mirror", "<Alex> hello"),
+        ]
+
+    asyncio.run(check())
