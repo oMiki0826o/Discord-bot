@@ -1,3 +1,10 @@
+"""tests/test_import_legacy_dmcc.py
+Check legacy DMCC migration sanitization and settings.
+
+Modification():
+- Check legacy DMCC migration sanitization and settings.
+"""
+
 from tools.import_legacy_dmcc import migrate
 from bot.mod.dmcc.config import DEFAULT_SETTINGS, DmccSettings
 from bot.mod.dmcc.repositories.state import JsonStateRepository

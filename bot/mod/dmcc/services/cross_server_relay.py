@@ -109,7 +109,9 @@ class CrossServerRelayService:
                     )
                 else:
                     await self._gateway.send_minecraft_message(server_id, payload)
-            except LookupError:
+            except (LookupError, OSError):
+                # A peer may close between the online snapshot and the send.
+                # Continue the one-hop relay to other authenticated peers.
                 continue
             delivered = True
         return delivered

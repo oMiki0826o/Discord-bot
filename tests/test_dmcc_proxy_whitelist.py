@@ -1,4 +1,9 @@
-"""Optional Velocity global-whitelist routing stays outside backend servers."""
+"""tests/test_dmcc_proxy_whitelist.py
+Optional Velocity global-whitelist routing stays outside backend servers.
+
+Modification():
+- Check Velocity whitelist routing.
+"""
 from __future__ import annotations
 
 import asyncio

@@ -56,3 +56,25 @@ def test_cross_server_event_settings_reject_private_command_types():
 def test_cross_server_legacy_default_remains_chat_only():
     settings = DmccSettings.from_mapping(DEFAULT_SETTINGS, environ={})
     assert settings.cross_server_events == frozenset({"player_chat"})
+
+def test_cross_server_relay_continues_after_one_peer_disconnects():
+    class Gateway:
+        def __init__(self):
+            self.sent = []
+
+        async def send_minecraft_message(self, server_id, message):
+            if server_id == "creative":
+                raise ConnectionError("peer disconnected while forwarding")
+            self.sent.append((server_id, message))
+
+    async def run():
+        gateway = Gateway()
+        service = CrossServerRelayService(
+            gateway, lambda: ("survival", "creative", "mirror"),
+        )
+        assert await service.forward(MinecraftEvent(
+            "player_chat", "survival", {"player_name": "Steve", "message": "hello"},
+        ))
+        assert gateway.sent == [("mirror", "[survival] <Steve> hello")]
+
+    asyncio.run(run())

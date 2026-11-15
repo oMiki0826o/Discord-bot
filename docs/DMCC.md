@@ -57,7 +57,7 @@ Bridge 將必要請求回覆與一般玩家事件分開排隊。一般事件滿�
 在 **Bot 副本** 執行下列指令；它只讀取舊 JSON，將結果印到標準輸出，不會讀取或改寫 Discord、Minecraft、Velocity 或任何 token：
 
 ```bash
-/home/allen/codex-miki/.codex-python/venv/bin/python tools/import_legacy_dmcc.py \
+python3 tools/import_legacy_dmcc.py \
   --server survival:生存服:/path/to/survival/config.json \
   --server creative:創造服:/path/to/creative/config.json \
   --server mirror:鏡像服:/path/to/mirror/config.json
