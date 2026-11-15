@@ -1,4 +1,9 @@
-"""Avatar refresh prefers a genuine proxy connection over backend hops."""
+"""tests/test_dmcc_avatar_refresh.py
+Avatar refresh prefers a genuine proxy connection over backend hops.
+
+Modification():
+- Check Fabric and Velocity avatar refresh source selection.
+"""
 from __future__ import annotations
 
 import asyncio
