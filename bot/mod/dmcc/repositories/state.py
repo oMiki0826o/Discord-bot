@@ -29,6 +29,10 @@ def _validate(value: object) -> dict[str, object]:
         for server_id, channel_id in mappings.items()
     ):
         raise ValueError("channel_mappings must contain string IDs")
+    if any(not server_id.strip() or not channel_id.strip() for server_id, channel_id in mappings.items()):
+        raise ValueError("channel_mappings cannot contain blank IDs")
+    if len(set(mappings.values())) != len(mappings):
+        raise ValueError("channel_mappings cannot share one channel")
     groups = value.get("channel_groups", {})
     if not isinstance(groups, dict):
         raise ValueError("channel_groups must be an object")
