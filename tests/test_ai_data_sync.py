@@ -254,7 +254,7 @@ def test_owner_data_preview_tracks_changed_and_removed_sources(tmp_path) -> None
     assert third.removed_sources == 1
 
 
-def test_owner_data_validation_rejects_blank_knowledge_documents(tmp_path) -> None:
+def test_owner_data_validation_ignores_blank_knowledge_documents(tmp_path) -> None:
     data = tmp_path / "data"
     knowledge = data / "knowledge"
     knowledge.mkdir(parents=True)
@@ -271,8 +271,9 @@ def test_owner_data_validation_rejects_blank_knowledge_documents(tmp_path) -> No
 
     report = service.validate()
 
-    assert report.valid is False
-    assert any("knowledge/empty.md" in issue and "blank" in issue for issue in report.issues)
+    assert report.valid is True
+    assert report.knowledge_documents == 0
+    assert report.issues == ()
 
 
 def test_knowledge_source_reader_accepts_java_source_files(tmp_path) -> None:

@@ -69,6 +69,24 @@ async def send_interaction_error(
                 ephemeral=True,
             )
 
+    except discord.HTTPException as exc:
+        # Interaction token 已過期（10062），或 Discord 已確認該 Interaction
+        # （40060）時，不可能再傳送任何回覆；避免把同一件事記成第二個錯誤。
+        if exc.code in {10062, 40060}:
+            logger.info(
+                "Interaction 已過期或已確認，略過錯誤回覆 user=%s guild=%s code=%s",
+                interaction.user.id,
+                interaction.guild_id,
+                exc.code,
+            )
+            return
+
+        logger.exception(
+            "Interaction 錯誤訊息傳送失敗 user=%s guild=%s",
+            interaction.user.id,
+            interaction.guild_id,
+        )
+
     except Exception:
         logger.exception(
             "Interaction 錯誤訊息傳送失敗 user=%s guild=%s",
