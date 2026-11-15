@@ -1,7 +1,11 @@
-"""Convert legacy Discord-MC-Chat JSON into DMCC v3 configuration fragments.
+"""tools/import_legacy_dmcc.py
+Convert legacy Discord-MC-Chat JSON into DMCC v3 configuration fragments.
 
 The converter never copies Discord tokens, webhook URLs, or administrator IDs.
 It writes no files unless the caller redirects its JSON output.
+
+Modification():
+- Convert legacy DMCC JSON into safe configuration fragments.
 """
 from __future__ import annotations
 
