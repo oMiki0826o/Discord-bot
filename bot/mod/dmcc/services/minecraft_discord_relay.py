@@ -19,6 +19,7 @@ from .presentation import OutboundDiscordMessage, PresentationSettings, render_m
 from .public_commands import sanitize_public_player_command
 from .v3_features import V3FeatureConfig, SOURCE_EVENTS
 from .v3_minecraft import format_minecraft_message
+from .avatar_refresh import AvatarRefreshService
 
 
 class DiscordMessageSender(Protocol):
@@ -34,11 +35,13 @@ class MinecraftDiscordRelayService:
         sender: DiscordMessageSender,
         presentation: PresentationSettings | None = None,
         *, features: V3FeatureConfig | None = None,
+        avatars: AvatarRefreshService | None = None,
     ) -> None:
         self._state = state
         self._sender = sender
         self._presentation = presentation or PresentationSettings.empty()
         self._features = features or V3FeatureConfig()
+        self._avatars = avatars
 
     def apply_preview_features(
         self, features: V3FeatureConfig,
@@ -50,6 +53,10 @@ class MinecraftDiscordRelayService:
             self._presentation = presentation
 
     async def forward(self, event: MinecraftEvent) -> bool:
+        if self._avatars is not None and event.type in {"proxy_player_login", "player_join"}:
+            await self._avatars.observe(event)
+            if event.type == "proxy_player_login":
+                return False
         if (event.type == "server_broadcast"
                 and event.data.get("source_event") == "msg"
                 and event.data.get("public_broadcast") is not True):
@@ -82,7 +89,13 @@ class MinecraftDiscordRelayService:
         channel_id = self._state.channel_for_server(event.server_id)
         profile = self._presentation.servers.get(event.server_id)
         if profile is not None:
-            payload = render_message(event, profile, channel_id)
+            payload = render_message(
+                event, profile, channel_id,
+                resolved_avatar_url=(
+                    self._avatars.cached_url(event.data.get("minecraft_uuid"))
+                    if self._avatars is not None else None
+                ),
+            )
             if payload is None:
                 return False
             await self._deliver(payload)

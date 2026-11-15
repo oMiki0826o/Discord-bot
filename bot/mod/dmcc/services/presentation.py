@@ -290,6 +290,8 @@ def render_message(
     event: MinecraftEvent,
     profile: ServerPresentation,
     default_channel: str | None,
+    *,
+    resolved_avatar_url: str | None = None,
 ) -> OutboundDiscordMessage | None:
     """Build one safe, bounded message without contacting Discord or Minecraft."""
     if event.type not in EVENT_TYPES or event.type in profile.disabled_events:
@@ -384,6 +386,8 @@ def render_message(
                         "minecraft_uuid": valid_uuid or "",
                         "player": valid_player or "",
                     })
+        elif event.type == "player_chat" and resolved_avatar_url is not None:
+            avatar_url = resolved_avatar_url
         elif event.type == "player_chat":
             if valid_uuid is not None:
                 avatar_url = f"https://mc-heads.net/avatar/{valid_uuid}/64"

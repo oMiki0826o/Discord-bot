@@ -135,6 +135,89 @@ def test_unauthenticated_bridge_cannot_inject_minecraft_chat():
     asyncio.run(scenario())
 
 
+def test_authenticated_proxy_login_event_reaches_subscribers_without_presentation(tmp_path):
+    async def scenario():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        secret = "proxy-test-secret"
+        settings = DmccSettings.from_mapping({
+            **DEFAULT_SETTINGS, "gateway": {"host": "127.0.0.1", "port": port},
+            "servers": [{"server_id": "proxy", "bridge": {
+                "enabled": True, "peer_kind": "velocity", "secret_env": "PROXY_BRIDGE_SECRET",
+            }}],
+        }, environ={"PROXY_BRIDGE_SECRET": secret})
+        gateway = Gateway(settings)
+        received: list[MinecraftEvent] = []
+
+        async def record(event: MinecraftEvent):
+            received.append(event)
+
+        gateway.relay.subscribe(record)
+        await gateway.start()
+        try:
+            reader, writer = await asyncio.open_connection(*gateway.address)
+            try:
+                writer.write(encode_frame(Envelope(1, "handshake", "proxy", None, {
+                    "bridge_kind": "velocity",
+                })))
+                await writer.drain()
+                challenge = await _receive(reader)
+                writer.write(encode_frame(Envelope(1, "authenticate", "proxy", None, {
+                    "response": create_response(challenge.data["challenge"], secret),
+                })))
+                await writer.drain()
+                assert (await _receive(reader)).type == "login_success"
+                writer.write(encode_frame(Envelope(1, "proxy_player_login", "proxy", None, {
+                    "minecraft_uuid": "123e4567-e89b-12d3-a456-426614174000",
+                    "player_name": "Steve",
+                })))
+                await writer.drain()
+                for _ in range(20):
+                    if received:
+                        break
+                    await asyncio.sleep(0.01)
+                assert [(event.type, event.server_id, event.data["player_name"]) for event in received] == [
+                    ("proxy_player_login", "proxy", "Steve"),
+                ]
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        finally:
+            await gateway.close()
+    asyncio.run(scenario())
+
+
+def test_gateway_rejects_the_wrong_bridge_kind_for_a_velocity_peer():
+    async def scenario():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        settings = DmccSettings.from_mapping({
+            **DEFAULT_SETTINGS, "gateway": {"host": "127.0.0.1", "port": port},
+            "servers": [{"server_id": "proxy", "bridge": {
+                "enabled": True, "peer_kind": "velocity", "secret_env": "PROXY_BRIDGE_SECRET",
+            }}],
+        }, environ={"PROXY_BRIDGE_SECRET": "proxy-test-secret"})
+        gateway = Gateway(settings)
+        await gateway.start()
+        try:
+            reader, writer = await asyncio.open_connection(*gateway.address)
+            try:
+                # Omission means Fabric for backward-compatible Fabric peers.
+                writer.write(encode_frame(Envelope(1, "handshake", "proxy", None, {})))
+                await writer.drain()
+                failure = await _receive(reader)
+                assert failure.type == "login_failure"
+                assert failure.data["reason"] == "bridge_kind_mismatch"
+            finally:
+                writer.close()
+                await writer.wait_closed()
+        finally:
+            await gateway.close()
+    asyncio.run(scenario())
+
+
 def test_link_status_roundtrip_over_authenticated_gateway(tmp_path):
     from bot.mod.dmcc.repositories.links import JsonLinkRepository
     from bot.mod.dmcc.services.linking import LinkingService

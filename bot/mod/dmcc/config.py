@@ -49,6 +49,9 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "mentions": {"enabled": False},
     "rich_chat": False,
     "op_sync": {"enabled": False},
+    "proxy_whitelist": {"enabled": False},
+    "avatar_refresh": {"enabled": False},
+    "private_messages": {"enabled": False},
     "v3_features": {"enabled": False},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
@@ -78,6 +81,9 @@ def build_settings_schema(rule_type):
         "mentions": rule_type(dict),
         "rich_chat": rule_type(bool),
         "op_sync": rule_type(dict),
+        "proxy_whitelist": rule_type(dict),
+        "avatar_refresh": rule_type(dict),
+        "private_messages": rule_type(dict),
         "v3_features": rule_type(dict),
         "permissions": rule_type(dict),
     }
@@ -99,6 +105,74 @@ class BackupProviderDefinition:
     provider_id: str
     provider_type: str
     options: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ProxyWhitelistConfig:
+    """Optional Velocity global-whitelist relay target."""
+
+    enabled: bool = False
+    server_id: str | None = None
+
+    @classmethod
+    def from_mapping(
+        cls, raw: object, servers: tuple[ManagedServer, ...], bridge_kinds: Mapping[str, str],
+    ) -> "ProxyWhitelistConfig":
+        if not isinstance(raw, Mapping) or set(raw) - {"enabled", "server_id"}:
+            raise SettingsError("proxy_whitelist settings invalid")
+        enabled = raw.get("enabled", False)
+        if type(enabled) is not bool:
+            raise SettingsError("proxy_whitelist.enabled must be a boolean")
+        server_id = raw.get("server_id")
+        if not enabled:
+            if server_id is not None:
+                _require_text(server_id, "proxy_whitelist.server_id")
+            return cls(False, str(server_id) if isinstance(server_id, str) else None)
+        server_id = _require_text(server_id, "proxy_whitelist.server_id")
+        target = next((item for item in servers if item.server_id == server_id), None)
+        if target is None or not target.bridge_enabled or bridge_kinds.get(server_id) != "velocity":
+            raise SettingsError("proxy_whitelist.server_id must name a velocity bridge peer")
+        return cls(True, server_id)
+
+
+@dataclass(frozen=True, slots=True)
+class AvatarRefreshConfig:
+    """Bounded avatar probe policy for webhook player-chat messages."""
+
+    enabled: bool = False
+    source: str = "fabric"
+    source_server_id: str | None = None
+    cache_ttl_seconds: int = 21_600
+
+    @classmethod
+    def from_mapping(cls, raw: object) -> "AvatarRefreshConfig":
+        allowed = {"enabled", "source", "source_server_id", "cache_ttl_seconds"}
+        if not isinstance(raw, Mapping) or set(raw) - allowed:
+            raise SettingsError("avatar_refresh settings invalid")
+        enabled = raw.get("enabled", False)
+        source = raw.get("source", "fabric")
+        source_server_id = raw.get("source_server_id")
+        ttl = raw.get("cache_ttl_seconds", 21_600)
+        if type(enabled) is not bool or source not in {"fabric", "velocity"}:
+            raise SettingsError("avatar_refresh.enabled must be boolean and source must be fabric or velocity")
+        if type(ttl) is not int or not 60 <= ttl <= 604_800:
+            raise SettingsError("avatar_refresh.cache_ttl_seconds must be between 60 and 604800")
+        if source == "velocity":
+            source_server_id = _require_text(source_server_id, "avatar_refresh.source_server_id")
+        elif source_server_id is not None:
+            raise SettingsError("avatar_refresh.source_server_id requires source velocity")
+        return cls(enabled, str(source), str(source_server_id) if source_server_id else None, ttl)
+
+
+@dataclass(frozen=True, slots=True)
+class PrivateMessagesConfig:
+    enabled: bool = False
+
+    @classmethod
+    def from_mapping(cls, raw: object) -> "PrivateMessagesConfig":
+        if not isinstance(raw, Mapping) or set(raw) - {"enabled"} or type(raw.get("enabled", False)) is not bool:
+            raise SettingsError("private_messages settings invalid")
+        return cls(bool(raw.get("enabled", False)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,12 +199,16 @@ class DmccSettings:
     mentions: MentionConfig = field(default_factory=MentionConfig)
     rich_chat: bool = False
     op_sync: OpSyncConfig = field(default_factory=OpSyncConfig)
+    proxy_whitelist: ProxyWhitelistConfig = field(default_factory=ProxyWhitelistConfig)
+    avatar_refresh: AvatarRefreshConfig = field(default_factory=AvatarRefreshConfig)
+    private_messages: PrivateMessagesConfig = field(default_factory=PrivateMessagesConfig)
     v3_features: V3FeatureConfig = field(default_factory=V3FeatureConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
         compare=False,
     )
+    _bridge_kinds: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
     def from_mapping(
@@ -165,7 +243,7 @@ class DmccSettings:
         providers = _mapping(raw.get("providers", {"control": [], "backup": []}), "providers")
         controls = _control_providers(providers.get("control", []), environment)
         backups = _backup_providers(providers.get("backup", []))
-        servers, bridge_secrets = _servers(raw.get("servers"), controls, backups, environment)
+        servers, bridge_secrets, bridge_kinds = _servers(raw.get("servers"), controls, backups, environment)
         try:
             presentation = PresentationSettings.from_mapping(raw.get("presentation", {}), environment)
         except PresentationError as exc:
@@ -216,6 +294,16 @@ class DmccSettings:
             op_sync = OpSyncConfig.from_mapping(raw.get("op_sync", {}))
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
+        proxy_whitelist = ProxyWhitelistConfig.from_mapping(
+            raw.get("proxy_whitelist", {}), servers, bridge_kinds,
+        )
+        avatar_refresh = AvatarRefreshConfig.from_mapping(raw.get("avatar_refresh", {}))
+        if (
+            avatar_refresh.source == "velocity"
+            and bridge_kinds.get(avatar_refresh.source_server_id) != "velocity"
+        ):
+            raise SettingsError("avatar_refresh.source_server_id must name a velocity bridge peer")
+        private_messages = PrivateMessagesConfig.from_mapping(raw.get("private_messages", {}))
         try:
             v3_features = V3FeatureConfig.from_mapping(raw.get("v3_features", {}))
         except ValueError as exc:
@@ -244,12 +332,19 @@ class DmccSettings:
             mentions=mentions,
             rich_chat=rich_chat,
             op_sync=op_sync,
+            proxy_whitelist=proxy_whitelist,
+            avatar_refresh=avatar_refresh,
+            private_messages=private_messages,
             v3_features=v3_features,
             _bridge_secrets=MappingProxyType(bridge_secrets),
+            _bridge_kinds=MappingProxyType(bridge_kinds),
         )
 
     def server_secret(self, server_id: str) -> str | None:
         return self._bridge_secrets.get(server_id)
+
+    def server_bridge_kind(self, server_id: str) -> str | None:
+        return self._bridge_kinds.get(server_id)
 
     @property
     def recommended_bridge_read_timeout_millis(self) -> int:
@@ -356,13 +451,14 @@ def _servers(
     controls: tuple[ControlProviderDefinition, ...],
     backups: tuple[BackupProviderDefinition, ...],
     environ: Mapping[str, str],
-) -> tuple[tuple[ManagedServer, ...], dict[str, str]]:
+) -> tuple[tuple[ManagedServer, ...], dict[str, str], dict[str, str]]:
     if not isinstance(value, list):
         raise SettingsError("servers must be a list")
     control_ids = {item.provider_id for item in controls}
     backup_ids = {item.provider_id for item in backups}
     servers: list[ManagedServer] = []
     secrets: dict[str, str] = {}
+    bridge_kinds: dict[str, str] = {}
     seen: set[str] = set()
     for raw_value in value:
         raw = _mapping(raw_value, "server")
@@ -373,12 +469,18 @@ def _servers(
         if "secret" in raw:
             raise SettingsError("servers[].secret is not supported; use bridge.secret_env")
         bridge = _mapping(raw.get("bridge", {"enabled": False}), "bridge")
+        if set(bridge) - {"enabled", "secret_env", "peer_kind"}:
+            raise SettingsError("unknown bridge option")
         bridge_enabled = bridge.get("enabled", False)
         if type(bridge_enabled) is not bool:
             raise SettingsError("bridge.enabled must be a boolean")
         if bridge_enabled:
             secret_name = _require_text(bridge.get("secret_env"), "bridge.secret_env")
             secrets[server_id] = _require_environment(secret_name, environ)
+            peer_kind = bridge.get("peer_kind", "fabric")
+            if peer_kind not in {"fabric", "velocity"}:
+                raise SettingsError("bridge.peer_kind must be fabric or velocity")
+            bridge_kinds[server_id] = str(peer_kind)
         control_id = _optional_text(raw.get("control_provider"), "control_provider")
         backup_id = _optional_text(raw.get("backup_provider"), "backup_provider")
         if control_id is not None and control_id not in control_ids:
@@ -403,7 +505,7 @@ def _servers(
                 allow_kill=_strict_bool(raw.get("allow_kill", False), "allow_kill"),
             )
         )
-    return tuple(servers), secrets
+    return tuple(servers), secrets, bridge_kinds
 
 
 def _validate_local_paths(

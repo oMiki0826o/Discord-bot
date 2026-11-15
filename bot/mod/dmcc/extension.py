@@ -47,6 +47,8 @@ from .services.release_updates import ReleaseUpdateService
 from .services.mentions import MinecraftMentionService
 from .services.op_sync import OpSyncService
 from .services.private_messages import DmPrivateMessageService, PrivateMessageConsent
+from .services.proxy_whitelist import ProxyWhitelistService
+from .services.avatar_refresh import AvatarRefreshService
 
 
 MODULE_VERSION = "0.3.0"
@@ -123,10 +125,12 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
     preview_user_relay = None
     preview_inbound_relay = None
     preview_cross_server_relay = None
-    private_relay = DmPrivateMessageService(
-        bot, gateway, links,
-        PrivateMessageConsent(state_path.parent / "private_consent.json"),
-        settings.v3_features,
+    private_relay = (
+        DmPrivateMessageService(
+            bot, gateway, links,
+            PrivateMessageConsent(state_path.parent / "private_consent.json"),
+            settings.v3_features,
+        ) if settings.private_messages.enabled else None
     )
     try:
         await gateway.start()
@@ -139,7 +143,8 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
             )
             op_sync.start()
         gateway.relay.subscribe(LinkRequestHandler(linking, gateway).handle)
-        gateway.relay.subscribe(private_relay.from_minecraft)
+        if private_relay is not None:
+            gateway.relay.subscribe(private_relay.from_minecraft)
         if settings.nickname_sync.enabled:
             nicknames = NicknameSyncService(bot, links, settings.nickname_sync)
             nicknames.start()
@@ -195,6 +200,12 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
             preview_inbound_relay = MinecraftDiscordRelayService(
                 state, DiscordDeliveryAdapter(bot), settings.presentation,
                 features=settings.v3_features,
+                avatars=AvatarRefreshService(
+                    enabled=settings.avatar_refresh.enabled,
+                    source=settings.avatar_refresh.source,
+                    source_server_id=settings.avatar_refresh.source_server_id,
+                    cache_ttl_seconds=settings.avatar_refresh.cache_ttl_seconds,
+                ),
             )
             discord_queue = DiscordEventQueue(preview_inbound_relay)
             discord_queue.start()
@@ -235,7 +246,8 @@ async def setup(bot, *, settings_registry=None, state_path: Path | None = None) 
             fresh = DmccSettings.from_mapping(load_settings(SETTINGS_NAME))
         except (RuntimeError, ValueError, OSError):
             return False
-        private_relay.refresh(fresh.v3_features)
+        if private_relay is not None:
+            private_relay.refresh(fresh.v3_features)
         if preview_cross_server_relay is not None:
             preview_cross_server_relay.apply_preview_features(fresh.v3_features)
         if preview_user_relay is not None:
@@ -315,6 +327,10 @@ def _build_cogs(
         release_updates=release_updates,
         private_messages=private_relay,
         console_config=settings.console_stream,
+        proxy_whitelist=ProxyWhitelistService(
+            gateway.requests,
+            settings.proxy_whitelist.server_id if settings.proxy_whitelist.enabled else None,
+        ),
     )
     owner = DmccOwnerCog(
         bot,

@@ -52,6 +52,26 @@ Bridge 需要 Fabric API，設定位置為 `<Minecraft資料夾>/config/minecraf
 
 Bridge 將必要請求回覆與一般玩家事件分開排隊。一般事件滿載時可以丟棄並累計診斷數字，必要回覆保有獨立容量；關服時會在有限期限內送出 `server_stopping`，不會無期限阻塞 Minecraft 關閉流程。`latest.log` 僅在背景讀取有限檔尾。
 
+## 從舊 Discord-MC-Chat 遷移三服共用頻道
+
+在 **Bot 副本** 執行下列指令；它只讀取舊 JSON，將結果印到標準輸出，不會讀取或改寫 Discord、Minecraft、Velocity 或任何 token：
+
+```bash
+/home/allen/codex-miki/.codex-python/venv/bin/python tools/import_legacy_dmcc.py \
+  --server survival:生存服:/path/to/survival/config.json \
+  --server creative:創造服:/path/to/creative/config.json \
+  --server mirror:鏡像服:/path/to/mirror/config.json
+```
+
+輸出的 JSON 有兩個根欄位，須各自合併，**不能直接覆蓋完整設定檔**：
+
+- `dmcc`：合併到 Bot 的 `settings/dmcc.json` 既有物件。它保留頻道、訊息模板、監控與頭像開關；私訊固定輸出為 `{"enabled": false}`。
+- `state`：先備份 Bot 的 `data/dmcc/state.json`，再以輸出的 `channel_mappings` 和 `channel_groups` **替換 state 內同名的兩個欄位**，不要與舊映射逐筆混合。同一個舊 `channelId` 的生存、創造與鏡像服會成為一個 `channel_groups`，因此 Discord 訊息會送到三服，而各服事件仍回報到同一個 Discord 頻道。這能避免同一服同時存在舊一對一映射與新群組而被 Bot 拒絕啟動。
+
+轉換器刻意不輸出 Bot token、Webhook URL、管理員 ID、Bridge secret 或控制面板憑證。保留既有的 `servers`／`bridge.secret_env` 設定，並為三個 Fabric bridge 指派不同 `server_id`。群組預設會同步一般訊息、回覆、附件（`<image>` 標示）、貼圖和自訂 emoji；編輯、刪除、反應、Embed、投票與元件預設關閉，可在 `state.channel_groups.<頻道 ID>` 個別改為 `true`。
+
+若使用 Velocity，依 [Velocity companion 說明](DMCC-VELOCITY-BRIDGE.md) 新增 `proxy` peer 並設定 `peer_kind: "velocity"`；後端三台仍使用 Fabric bridge 傳遞聊天與事件。頭像來源則只選擇其一：一般環境為 `fabric`，代理環境為 `velocity`。
+
 
 ## Discord 訊息呈現：Bot / Webhook
 

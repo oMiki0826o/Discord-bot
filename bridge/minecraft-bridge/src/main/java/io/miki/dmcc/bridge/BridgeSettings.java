@@ -24,10 +24,11 @@ public record BridgeSettings(
     boolean opSyncEnabled,
     boolean relayPlayerCommands,
     String translationLocale,
-    boolean overwriteNativeMessages
+    boolean overwriteNativeMessages,
+    String bridgeKind
 ) {
     public BridgeSettings(String serverId, String gatewayHost, int gatewayPort, String authenticationSecret) {
-        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick", false, false, "en_us", false);
+        this(serverId, gatewayHost, gatewayPort, authenticationSecret, 5_000, 15_000, 60_000, 120_000, 1_500, false, "kick", false, false, "en_us", false, "fabric");
     }
 
     /** Backward-compatible constructor for callers predating optional link enforcement. */
@@ -39,7 +40,7 @@ public record BridgeSettings(
         this(
             serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
-            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, false, "kick", false, false, "en_us", false
+            pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, false, "kick", false, false, "en_us", false, "fabric"
         );
     }
 
@@ -53,7 +54,7 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
             pendingRequestTtlMillis, gracefulShutdownTimeoutMillis,
-            requireLinking, unlinkedPlayerAction, false, false, "en_us", false);
+            requireLinking, unlinkedPlayerAction, false, false, "en_us", false, "fabric");
     }
 
     /** Preserves the previous OP-enabled constructor for existing users and tests. */
@@ -66,7 +67,7 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
             pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, requireLinking,
-            unlinkedPlayerAction, opSyncEnabled, false, "en_us", false);
+            unlinkedPlayerAction, opSyncEnabled, false, "en_us", false, "fabric");
     }
 
     /** Preserves pre-translation configuration API. */
@@ -80,7 +81,7 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
             pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, requireLinking,
-            unlinkedPlayerAction, opSyncEnabled, relayPlayerCommands, "en_us", false);
+            unlinkedPlayerAction, opSyncEnabled, relayPlayerCommands, "en_us", false, "fabric");
     }
 
     /** Preserves the locale-aware constructor before native message replacement. */
@@ -94,7 +95,7 @@ public record BridgeSettings(
         this(serverId, gatewayHost, gatewayPort, authenticationSecret,
             connectTimeoutMillis, authenticationTimeoutMillis, readTimeoutMillis,
             pendingRequestTtlMillis, gracefulShutdownTimeoutMillis, requireLinking,
-            unlinkedPlayerAction, opSyncEnabled, relayPlayerCommands, translationLocale, false);
+            unlinkedPlayerAction, opSyncEnabled, relayPlayerCommands, translationLocale, false, "fabric");
     }
 
     /** Parses a standard Java properties stream without doing filesystem I/O. */
@@ -132,7 +133,8 @@ public record BridgeSettings(
             strictBoolean(properties, "op_sync_enabled", false),
             strictBoolean(properties, "relay_player_commands", false),
             locale(properties),
-            strictBoolean(properties, "overwrite_native_messages", false)
+            strictBoolean(properties, "overwrite_native_messages", false),
+            bridgeKind(properties)
         );
     }
 
@@ -141,6 +143,14 @@ public record BridgeSettings(
             .trim().toLowerCase(java.util.Locale.ROOT);
         if (!value.matches("[a-z]{2}_[a-z]{2}")) {
             throw new ProtocolException("translation_locale must be a language_region code");
+        }
+        return value;
+    }
+
+    private static String bridgeKind(Properties properties) {
+        String value = properties.getProperty("bridge_kind", "fabric").trim();
+        if (!value.equals("fabric") && !value.equals("velocity")) {
+            throw new ProtocolException("bridge_kind must be fabric or velocity");
         }
         return value;
     }

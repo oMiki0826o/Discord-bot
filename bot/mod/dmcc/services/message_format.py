@@ -95,7 +95,7 @@ def render_extras(
     for filename, url in tuple(attachments)[:5]:
         name, link = _clean(filename, 80), _safe_url(url)
         if link:
-            parts.append(f"Attachment: {name or 'file'} — {link}")
+            parts.append(f"<image> {name or 'file'} — {link}")
     for sticker in tuple(stickers)[:3]:
         name = _clean(sticker, 80)
         if name:

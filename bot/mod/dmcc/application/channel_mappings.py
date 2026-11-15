@@ -16,6 +16,10 @@ class ChannelMappingPort(Protocol):
 
     def remove_channel_mapping(self, server_id: str) -> bool: ...
 
+    def set_channel_group(self, channel_id: str, server_ids: tuple[str, ...], **options: bool) -> None: ...
+
+    def remove_channel_group(self, channel_id: str) -> bool: ...
+
 
 class ChannelMappingService:
     def __init__(self, repository: ChannelMappingPort) -> None:
@@ -26,3 +30,9 @@ class ChannelMappingService:
 
     def unmap(self, server_id: str) -> bool:
         return self._repository.remove_channel_mapping(server_id)
+
+    def map_group(self, channel_id: str, server_ids: tuple[str, ...], **options: bool) -> None:
+        self._repository.set_channel_group(channel_id, server_ids, **options)
+
+    def unmap_group(self, channel_id: str) -> bool:
+        return self._repository.remove_channel_group(channel_id)

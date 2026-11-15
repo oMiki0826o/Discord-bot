@@ -31,6 +31,7 @@ from ..services.logs import render_log_excerpt
 from ..services.op_levels import OpLevelResolver
 from ..services.stats import render_stats_response
 from ..services.whitelist import whitelist_add_command
+from ..services.proxy_whitelist import ProxyWhitelistService
 
 
 _REQUEST_ERRORS = (ConnectionError, LookupError, TimeoutError, ValueError)
@@ -80,6 +81,7 @@ class DmccUserCog(commands.Cog):
         release_updates: ReleaseUpdateService | None = None,
         private_messages: DmPrivateMessageService | None = None,
         console_config: ConsoleStreamConfig | None = None,
+        proxy_whitelist: ProxyWhitelistService | None = None,
     ) -> None:
         self.bot = bot
         self._relay = relay
@@ -94,6 +96,7 @@ class DmccUserCog(commands.Cog):
         self._release_updates = release_updates
         self._private_messages = private_messages
         self._console_config = console_config or ConsoleStreamConfig()
+        self._proxy_whitelist = proxy_whitelist
 
     dmcc_slash = app_commands.Group(name="dmcc", description="Minecraft bridge commands")
 
@@ -285,15 +288,28 @@ class DmccUserCog(commands.Cog):
 
     @dmcc_slash.command(name="whitelist", description="Add a Minecraft player to a connected server whitelist")
     async def slash_whitelist(self, interaction, server_id: str, player_name: str) -> None:
-        level = self._op_level(interaction, server_id)
+        permission_server_id = (
+            self._proxy_whitelist.server_id
+            if self._proxy_whitelist is not None and self._proxy_whitelist.enabled
+            else server_id
+        )
+        level = self._op_level(interaction, permission_server_id)
         if self._catalog.validate("whitelist", level, (player_name,)) is not None:
             await interaction.response.send_message(
                 "DMCC whitelist is not authorized for this account.", ephemeral=True
             )
             return
         try:
+            if self._proxy_whitelist is not None and self._proxy_whitelist.enabled:
+                await interaction.response.defer(ephemeral=True, thinking=True)
+                output = await self._proxy_whitelist.add(player_name)
+                await interaction.followup.send(output, ephemeral=True)
+                return
             command = whitelist_add_command(player_name)
-        except ValueError as exc:
+        except (ConnectionError, LookupError, TimeoutError, ValueError, RuntimeError) as exc:
+            if getattr(interaction.response, "is_done", lambda: False)():
+                await interaction.followup.send(f"DMCC whitelist failed: {exc}", ephemeral=True)
+                return
             await interaction.response.send_message(f"DMCC whitelist failed: {exc}", ephemeral=True)
             return
         await self._execute(interaction, server_id, command, level, "whitelist")

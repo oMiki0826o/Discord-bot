@@ -43,6 +43,7 @@ class DmccOwnerCog(commands.Cog):
     async def dmcc_group(self, ctx: commands.Context) -> None:
         await ctx.send(
             "DMCC: status | map <server_id> <channel_id> | unmap <server_id> | "
+            "group <channel_id> <server_ids...> | ungroup <channel_id> | "
             "console <server_id> <command> | reload"
         )
 
@@ -75,6 +76,40 @@ class DmccOwnerCog(commands.Cog):
             f"DMCC unmapped `{server_id}`."
             if removed
             else f"DMCC has no mapping for `{server_id}`."
+        )
+
+    @dmcc_group.command(name="group")
+    @commands.is_owner()
+    async def group_channel(
+        self, ctx: commands.Context, channel_id: str, *server_ids: str,
+    ) -> None:
+        """Map one Discord chat channel to multiple Minecraft servers.
+
+        The safe shared defaults forward text/replies/media but suppress noisy
+        Discord edits, deletions, reactions, embeds, polls and components.
+        Advanced per-feature switches belong in the state JSON produced by the
+        legacy importer, where they remain explicit and auditable.
+        """
+        try:
+            self._mappings.map_group(channel_id, tuple(server_ids))
+        except ValueError as exc:
+            await ctx.send(f"DMCC shared mapping failed: {exc}")
+            return
+        await ctx.send(
+            f"DMCC shared `{channel_id}` → {', '.join(f'`{item}`' for item in server_ids)}."
+        )
+
+    @dmcc_group.command(name="ungroup")
+    @commands.is_owner()
+    async def ungroup_channel(self, ctx: commands.Context, channel_id: str) -> None:
+        try:
+            removed = self._mappings.unmap_group(channel_id)
+        except ValueError as exc:
+            await ctx.send(f"DMCC shared unmap failed: {exc}")
+            return
+        await ctx.send(
+            f"DMCC removed shared mapping for `{channel_id}`."
+            if removed else f"DMCC has no shared mapping for `{channel_id}`."
         )
 
     @dmcc_group.command(name="console")

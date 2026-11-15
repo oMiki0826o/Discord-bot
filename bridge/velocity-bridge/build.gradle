@@ -1,0 +1,53 @@
+plugins {
+    id 'java'
+}
+
+group = project.group
+version = project.version
+
+java {
+    // The checked local Velocity runtime is built and launched with Java 25.
+    toolchain { languageVersion = JavaLanguageVersion.of(25) }
+}
+
+repositories { mavenCentral() }
+
+// Velocity supplies its API, SLF4J and Gson at runtime. Supply the exact JAR
+// explicitly with -PvelocityRuntimeJar=/path/to/velocity.jar or DMCC_VELOCITY_JAR.
+def velocityRuntimeJar = providers.gradleProperty('velocityRuntimeJar')
+    .orElse(providers.environmentVariable('DMCC_VELOCITY_JAR')).orNull
+if (velocityRuntimeJar == null) {
+    throw new GradleException('Set -PvelocityRuntimeJar or DMCC_VELOCITY_JAR to a Velocity proxy JAR')
+}
+def velocityJar = file(velocityRuntimeJar)
+if (!velocityJar.isFile()) {
+    throw new GradleException('velocityRuntimeJar does not name a file')
+}
+
+dependencies {
+    compileOnly files(velocityJar)
+    testImplementation files(velocityJar)
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+sourceSets.main.java {
+    srcDir '../minecraft-bridge/src/main/java'
+    include 'io/miki/dmcc/velocity/**'
+    [
+        'Authentication.java', 'BridgeClient.java', 'BridgeConnection.java',
+        'BridgeMessageHandler.java', 'BridgeRuntime.java', 'BridgeSettings.java',
+        'FrameCodec.java', 'ProtocolEnvelope.java', 'ProtocolException.java'
+    ].each { filename -> include "io/miki/dmcc/bridge/${filename}" }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+}
+tasks.withType(Test).configureEach { useJUnitPlatform() }
+
+jar {
+    archiveBaseName = 'dmcc-velocity-bridge'
+}

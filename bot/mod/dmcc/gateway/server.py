@@ -215,12 +215,13 @@ class Gateway:
             "stats_response",
             "op_sync_response",
             "minecraft_private_response",
+            "proxy_whitelist_response",
         }:
             if not self.requests.resolve(envelope):
                 await connection.close()
             return
         if envelope.type in {
-            "server_started", "server_stopping", "server_metrics", "server_broadcast", "player_chat", "player_private_message", "player_command", "player_join", "player_quit", "player_death", "player_advancement", "player_gamemode", "link_request", "unlink_request", "link_status_request",
+            "server_started", "server_stopping", "server_metrics", "server_broadcast", "player_chat", "player_private_message", "player_command", "player_join", "player_quit", "player_death", "player_advancement", "player_gamemode", "proxy_player_login", "link_request", "unlink_request", "link_status_request",
         }:
             event_data = dict(envelope.data)
             if envelope.request_id is not None:
@@ -243,6 +244,10 @@ class Gateway:
         if envelope.type == "handshake" and connection.server_id is None:
             if self._settings.server_secret(envelope.server_id) is None:
                 await self._reject(connection, envelope.server_id, "server_not_allowed")
+                return
+            peer_kind = envelope.data.get("bridge_kind", "fabric")
+            if peer_kind != self._settings.server_bridge_kind(envelope.server_id):
+                await self._reject(connection, envelope.server_id, "bridge_kind_mismatch")
                 return
             if self.manager.get(envelope.server_id) is not None:
                 await self._reject(connection, envelope.server_id, "server_id_in_use")

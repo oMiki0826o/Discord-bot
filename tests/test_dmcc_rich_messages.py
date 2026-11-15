@@ -43,7 +43,7 @@ def test_discord_rich_metadata_is_truncated_and_bounded() -> None:
         embeds=[("Hello", "https://example.org") for _ in range(8)],
         poll=("Best option?", ["A", "B", "C"]),
     )
-    assert extras.count("Attachment:") == 5
+    assert extras.count("<image>") == 5
     assert extras.count("Sticker:") == 3
     assert extras.count("Embed:") == 3
     assert "Poll: Best option?" in extras

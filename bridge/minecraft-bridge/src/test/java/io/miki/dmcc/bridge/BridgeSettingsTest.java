@@ -24,6 +24,19 @@ final class BridgeSettingsTest {
         assertEquals(8765, settings.gatewayPort());
         assertEquals("shared-secret", settings.authenticationSecret());
         assertEquals(1_500, settings.gracefulShutdownTimeoutMillis());
+        assertEquals("fabric", settings.bridgeKind());
+    }
+
+    @Test
+    void acceptsVelocityBridgeKindOnlyWhenExplicitlyConfigured() throws Exception {
+        BridgeSettings settings = BridgeSettings.fromReader(new StringReader("""
+            server_id=proxy
+            gateway_host=127.0.0.1
+            gateway_port=8765
+            authentication_secret=shared-secret
+            bridge_kind=velocity
+            """));
+        assertEquals("velocity", settings.bridgeKind());
     }
 
     @Test
