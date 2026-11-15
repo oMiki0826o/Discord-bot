@@ -324,7 +324,9 @@ class DiscordRelayService:
                 await self._gateway.send_minecraft_segments(server_id, segments)
             else:
                 await self._gateway.send_minecraft_message(server_id, message)
-        except LookupError:
+        except (LookupError, OSError):
+            # A peer can disconnect between routing and write; continue
+            # delivering the shared-channel event to its healthy siblings.
             return False
         return True
 
