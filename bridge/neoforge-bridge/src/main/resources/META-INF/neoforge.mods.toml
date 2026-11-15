@@ -1,0 +1,20 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+[[mods]]
+modId="minecraft_bridge"
+version="${mod_version}"
+displayName="Miki Minecraft Discord Bridge (NeoForge)"
+description='''NeoForge 1.21.8 backend of the authenticated Discord Bridge.'''
+[[dependencies.minecraft_bridge]]
+modId="neoforge"
+type="required"
+versionRange="[21.8.54,)"
+ordering="NONE"
+side="SERVER"
+[[dependencies.minecraft_bridge]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.8,1.21.9)"
+ordering="NONE"
+side="SERVER"

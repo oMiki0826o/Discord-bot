@@ -39,7 +39,7 @@
 - **文件工具**：`/markitdown` 轉換支援的文件格式。
 - **AI**：`/ai`、直接 @Bot 對話、附件與 MarkItDown、History／Memory／Knowledge 權限隔離、Gemini Web／URL Context、原生訊息進度與輸入／輸出 Token 統計。
 - **Agent（可選）**：有限回合 Function Calling、Skills 自動初始化與漸進載入、官方 MCP SDK 的本機唯讀 Knowledge Tools、Discord ID 管理員診斷；依賴 `ai` 模組。
-- **Minecraft 維運**：Fabric DMCC bridge、Discord ↔ Minecraft 訊息轉送、可自訂的 Bot/Webhook 玩家聊天與伺服器事件顯示、選用 MSPT 警告／頻道狀態／Presence／模組更新通知、Owner 本機控制，以及 tmux + tar 的安全備份／回檔。
+- **Minecraft 維運**：Fabric DMCC bridge、Discord ↔ Minecraft 訊息轉送、可自訂的 Bot/Webhook 玩家聊天與伺服器事件顯示、Discord 表情／貼圖／附件／投票摘要與反應轉送、選用 Discord 暱稱同步／玩家提及提醒／GitHub 發布通知、選用 MSPT 警告／頻道狀態／Presence／模組更新通知、Owner 本機控制，以及 tmux + tar 的安全備份／回檔。
 
 ### 安裝
 
@@ -86,6 +86,9 @@ Discord AI 只接受**訊息開頭直接** `<@BotID>`、`<@!BotID>` 與 `/ai`，
 Knowledge 透過官方 MCP Python SDK 的**本機唯讀**服務搜尋，不提供任意 SQL、修改資料或對外 HTTP Port。詳細安全限制、資料生命週期及測試方式請參考 [AI / Agent 架構](docs/AI_AGENT_ARCHITECTURE.md)、[AI 模組](bot/mod/ai/README.md)、[Agent 模組](bot/mod/agent/README.md)。協作紀錄、測試草稿、`data/`、`.env`、`settings/*.json` 為本機資料，禁止提交至公開倉庫。
 
 ### Minecraft 與備份
+
+> **Fabric DMCC v3 功能初版（開發分支）**：已提供 [預覽架構、功能矩陣、設定與試用說明](docs/DMCC-FABRIC-V3-PREVIEW.md) 和 [範例設定](docs/examples/dmcc-v3-preview.json)。新功能採明確啟用、尚未完整實機驗證；正式版請仍參照 [DMCC 使用文件](docs/DMCC.md)。
+
 
 第一次部署請直接閱讀[從零安裝與啟動指南](docs/INSTALL.md)。其中包含 Linux 套件、Fabric bridge、DMCC、tmux 控制、備份與回檔的完整步驟。Fabric Bridge 在 CI 中針對 Minecraft **1.21.8** 及 **1.21.9** 個別編譯與測試，請安裝**相符版本**的 JAR；其他版本不可視為已驗證。
 
@@ -161,7 +164,7 @@ The current version is `v0.3.0` and the project is under active development. Sou
 - **Documents**: `/markitdown` conversion for supported document formats.
 - **AI**: `/ai`, direct bot mentions, attachments and MarkItDown, scoped History/Memory/Knowledge retrieval, Gemini Web/URL Context, native message progress and separate input/output token reporting.
 - **Agent (optional)**: bounded Function Calling, auto-initialized Skills, read-only Knowledge tools through the official MCP Python SDK, and Discord-ID status access; requires the `ai` module.
-- **Minecraft operations**: Fabric DMCC bridge, two-way Discord relay, configurable Bot/Webhook player chat and event presentation, optional MSPT alerts, channel/Presence status, Modrinth update checks, owner-operated local control, and tmux + tar backup/restore.
+- **Minecraft operations**: Fabric DMCC bridge, two-way Discord relay, configurable Bot/Webhook chat and event presentation, readable Discord emoji/sticker/attachment/poll summaries and reactions, optional linked-account nickname sync, targeted mentions and GitHub release notices, optional MSPT alerts, channel/Presence status, Modrinth update checks, owner-operated local control, and tmux + tar backup/restore.
 
 ### Installation
 
@@ -208,6 +211,9 @@ For limited read-only status access, populate `privileged_users` in your local `
 Knowledge search uses a **local read-only** MCP adapter based on the official MCP Python SDK; there is no raw SQL, data-write tool or public MCP HTTP port. See [AI / Agent architecture](docs/AI_AGENT_ARCHITECTURE.md), [AI module](bot/mod/ai/README.md) and [Agent module](bot/mod/agent/README.md). Private collaboration notes, `data/`, `.env` and `settings/*.json` are local-only and must never be committed.
 
 ### Minecraft and backups
+
+> **Fabric DMCC v3 preview (development branch)**: See the [architecture, feature matrix and manual testing notes](docs/DMCC-FABRIC-V3-PREVIEW.md) and [configuration example](docs/examples/dmcc-v3-preview.json). Optional features are experimental, not yet fully verified with live Discord and Minecraft clients.
+
 
 For a first deployment, follow the [step-by-step installation guide](docs/INSTALL.md). Fabric Bridge is built per Minecraft **1.21.8** and **1.21.9** in CI; install only the JAR targeting the server's exact version. Other game versions are unverified. It covers Linux packages, the Fabric bridge, DMCC, tmux control, backup, and restore.
 

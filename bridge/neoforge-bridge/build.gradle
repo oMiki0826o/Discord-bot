@@ -1,0 +1,73 @@
+
+// Minecraft-dependent Component JUnit tests are executed by the Fabric
+// Loom matrix. NeoForge verifies the shared HMAC/protocol/transport logic
+// with ordinary JVM tests; the native entrypoint must compile in this build.
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.147'
+}
+
+group = 'io.miki.dmcc'
+version = project.mod_version
+base { archivesName = 'minecraft-bridge-neoforge' }
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+neoForge {
+    version = project.neo_version
+    runs {
+        server {
+            server()
+            programArgument '--nogui'
+        }
+    }
+    mods {
+        minecraft_bridge { sourceSet sourceSets.main }
+    }
+}
+repositories { mavenCentral() }
+
+def shared = [
+    'Authentication.java', 'BridgeClient.java', 'BridgeConnection.java',
+    'BridgeMessageHandler.java', 'BridgeRuntime.java', 'BridgeSettings.java',
+    'FrameCodec.java', 'ProtocolEnvelope.java', 'ProtocolException.java',
+    'LogTailReader.java', 'MetricSnapshot.java', 'ServerInfoDiagnostics.java',
+    'RichTextComponents.java', 'PlayerMentionRequest.java', 'OpSyncPolicy.java',
+    'OpSyncApplier.java', 'ManagedOpLedger.java', 'PublicPlayerCommandPolicy.java', 'DmccRconConsoleSource.java', 'PublicTellrawPolicy.java'
+]
+sourceSets.main.java {
+    srcDir '../minecraft-bridge/src/main/java'
+    include 'io/miki/dmcc/bridge/NeoBridgeMod.java'
+    shared.each { filename -> include "io/miki/dmcc/bridge/${filename}" }
+}
+dependencies {
+    testImplementation 'com.google.code.gson:gson:2.11.0'
+    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.16'
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+tasks.withType(Test).configureEach { useJUnitPlatform() }
+processResources {
+    inputs.property 'mod_version', project.mod_version
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand mod_version: project.mod_version
+    }
+}
+
+sourceSets.test.java {
+    srcDir '../minecraft-bridge/src/test/java'
+    [
+        'AuthenticationTest.java', 'BridgeClientTest.java',
+        'BridgeRuntimeTest.java', 'BridgeSettingsTest.java',
+        'FrameCodecTest.java', 'ProtocolEnvelopeTest.java',
+        'PlayerMentionRequestTest.java',
+        'OpSyncPolicyTest.java', 'PublicPlayerCommandPolicyTest.java', 'LogTailReaderTest.java',
+        'MetricSnapshotTest.java', 'ServerInfoDiagnosticsTest.java'
+    ].each { name -> include "io/miki/dmcc/bridge/${name}" }
+}

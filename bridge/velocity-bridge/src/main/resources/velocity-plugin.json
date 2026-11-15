@@ -1,0 +1,8 @@
+{
+  "id": "dmcc-velocity-bridge",
+  "name": "DMCC Velocity Bridge",
+  "version": "0.3.0",
+  "description": "Local gateway relay for DMCC avatar-login events and Global Whitelist commands.",
+  "authors": ["Miki"],
+  "main": "io.miki.dmcc.velocity.DmccVelocityBridge"
+}

@@ -80,10 +80,13 @@ class Gateway:
                 heartbeat_task = None
         if server is not None:
             server.close()
-            await server.wait_closed()
+        # Python 3.13's wait_closed() correctly waits for active client
+        # handlers. Close peers first or shutdown can deadlock indefinitely.
         peers = tuple(self._peers)
         await asyncio.gather(*(peer.close() for peer in peers), return_exceptions=True)
         self._peers.clear()
+        if server is not None:
+            await server.wait_closed()
 
     async def _heartbeat_loop(self) -> None:
         """監看閒置 Peer，並對已認證 Bridge 維持 Protocol 層 liveness。"""
@@ -126,6 +129,18 @@ class Gateway:
                 data={"message": message},
             )
         )
+
+    async def send_minecraft_segments(
+        self, server_id: str, segments: list[dict[str, object]],
+    ) -> None:
+        """Send bounded, validated style-only segments to one authenticated Bridge."""
+        if not isinstance(segments, list) or not 1 <= len(segments) <= 128:
+            raise ValueError("segments must be a non-empty list of at most 128 items")
+        if any(not isinstance(part, dict) for part in segments):
+            raise ValueError("each text segment must be an object")
+        await self._send_packet(Envelope(1, "minecraft_components", server_id, None, {
+            "segments": segments,
+        }))
 
     async def send_packet(
         self,
@@ -198,12 +213,15 @@ class Gateway:
             "server_info_response",
             "log_response",
             "stats_response",
+            "op_sync_response",
+            "minecraft_private_response",
+            "proxy_whitelist_response",
         }:
             if not self.requests.resolve(envelope):
                 await connection.close()
             return
         if envelope.type in {
-            "server_started", "server_stopping", "server_metrics", "player_chat", "player_join", "player_quit", "player_death", "player_advancement", "player_gamemode", "link_request", "unlink_request",
+            "server_started", "server_stopping", "server_metrics", "server_broadcast", "player_chat", "player_private_message", "player_command", "player_join", "player_quit", "player_death", "player_advancement", "player_gamemode", "proxy_player_login", "link_request", "unlink_request", "link_status_request",
         }:
             event_data = dict(envelope.data)
             if envelope.request_id is not None:
@@ -226,6 +244,10 @@ class Gateway:
         if envelope.type == "handshake" and connection.server_id is None:
             if self._settings.server_secret(envelope.server_id) is None:
                 await self._reject(connection, envelope.server_id, "server_not_allowed")
+                return
+            peer_kind = envelope.data.get("bridge_kind", "fabric")
+            if peer_kind != self._settings.server_bridge_kind(envelope.server_id):
+                await self._reject(connection, envelope.server_id, "bridge_kind_mismatch")
                 return
             if self.manager.get(envelope.server_id) is not None:
                 await self._reject(connection, envelope.server_id, "server_id_in_use")

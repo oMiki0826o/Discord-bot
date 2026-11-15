@@ -33,6 +33,16 @@ class DiscordDeliveryAdapter:
         if channel is not None and hasattr(channel, "send"):
             await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
 
+    async def send_discord_message_required(self, channel_id: str, content: str) -> None:
+        """Require an actual Discord channel send before a durable log cursor advances."""
+        try:
+            channel = self._bot.get_channel(int(channel_id))
+        except (TypeError, ValueError) as exc:
+            raise LookupError("invalid log destination channel") from exc
+        if channel is None or not hasattr(channel, "send"):
+            raise LookupError("DMCC log destination is unavailable")
+        await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
+
     async def send_discord_payload(self, payload: OutboundDiscordMessage) -> None:
         if payload.mode != "webhook" or payload.webhook_url is None:
             await self.send_discord_message(payload.channel_id, payload.content)

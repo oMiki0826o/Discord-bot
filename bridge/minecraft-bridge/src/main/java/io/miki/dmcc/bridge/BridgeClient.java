@@ -79,7 +79,8 @@ public final class BridgeClient implements BridgeConnection {
                 }
                 socket = opened;
             }
-            send(new ProtocolEnvelope(1, "handshake", settings.serverId(), null, Map.of("bridge_version", "0.2.3")));
+            send(new ProtocolEnvelope(1, "handshake", settings.serverId(), null,
+                Map.of("bridge_version", "0.2.3", "bridge_kind", settings.bridgeKind())));
             ProtocolEnvelope challenge = receive();
             if (!challenge.type().equals("challenge")) {
                 throw new ProtocolException("expected challenge from gateway");

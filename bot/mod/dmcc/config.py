@@ -18,6 +18,12 @@ from .domain.models import ManagedServer
 from .services.presentation import PresentationError, PresentationSettings
 from .services.monitoring import MonitoringConfig
 from .services.mod_updates import ModUpdateConfig
+from .services.console_stream import ConsoleStreamConfig
+from .services.nickname_sync import NicknameSyncConfig
+from .services.release_updates import ReleaseCheckConfig
+from .services.mentions import MentionConfig
+from .services.op_sync import OpSyncConfig
+from .services.v3_features import V3FeatureConfig
 
 
 SETTINGS_NAME = "dmcc"
@@ -30,11 +36,23 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "request_timeout_seconds": 15.0,
     "mode": "standalone",
     "cross_server_relay": False,
+    "cross_server_events": ["player_chat"],
     "providers": {"control": [], "backup": []},
     "servers": [],
     "presentation": {"servers": {}},
     "monitoring": {"enabled": False, "servers": {}},
     "mod_updates": {"enabled": False, "servers": {}},
+    "console_stream": {"enabled": False, "servers": {}},
+    "account_linking": {"max_accounts": 0},
+    "nickname_sync": {"enabled": False},
+    "release_check": {"enabled": False},
+    "mentions": {"enabled": False},
+    "rich_chat": False,
+    "op_sync": {"enabled": False},
+    "proxy_whitelist": {"enabled": False},
+    "avatar_refresh": {"enabled": False},
+    "private_messages": {"enabled": False},
+    "v3_features": {"enabled": False},
     "permissions": {"user_mappings": [], "role_mappings": []},
 }
 
@@ -50,11 +68,23 @@ def build_settings_schema(rule_type):
         "request_timeout_seconds": rule_type((int, float), minimum=0.01, maximum=600),
         "mode": rule_type(str),
         "cross_server_relay": rule_type(bool),
+        "cross_server_events": rule_type(list),
         "providers": rule_type(dict),
         "servers": rule_type(list),
         "presentation": rule_type(dict),
         "monitoring": rule_type(dict),
         "mod_updates": rule_type(dict),
+        "console_stream": rule_type(dict),
+        "account_linking": rule_type(dict),
+        "nickname_sync": rule_type(dict),
+        "release_check": rule_type(dict),
+        "mentions": rule_type(dict),
+        "rich_chat": rule_type(bool),
+        "op_sync": rule_type(dict),
+        "proxy_whitelist": rule_type(dict),
+        "avatar_refresh": rule_type(dict),
+        "private_messages": rule_type(dict),
+        "v3_features": rule_type(dict),
         "permissions": rule_type(dict),
     }
 
@@ -78,6 +108,74 @@ class BackupProviderDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class ProxyWhitelistConfig:
+    """Optional Velocity global-whitelist relay target."""
+
+    enabled: bool = False
+    server_id: str | None = None
+
+    @classmethod
+    def from_mapping(
+        cls, raw: object, servers: tuple[ManagedServer, ...], bridge_kinds: Mapping[str, str],
+    ) -> "ProxyWhitelistConfig":
+        if not isinstance(raw, Mapping) or set(raw) - {"enabled", "server_id"}:
+            raise SettingsError("proxy_whitelist settings invalid")
+        enabled = raw.get("enabled", False)
+        if type(enabled) is not bool:
+            raise SettingsError("proxy_whitelist.enabled must be a boolean")
+        server_id = raw.get("server_id")
+        if not enabled:
+            if server_id is not None:
+                _require_text(server_id, "proxy_whitelist.server_id")
+            return cls(False, str(server_id) if isinstance(server_id, str) else None)
+        server_id = _require_text(server_id, "proxy_whitelist.server_id")
+        target = next((item for item in servers if item.server_id == server_id), None)
+        if target is None or not target.bridge_enabled or bridge_kinds.get(server_id) != "velocity":
+            raise SettingsError("proxy_whitelist.server_id must name a velocity bridge peer")
+        return cls(True, server_id)
+
+
+@dataclass(frozen=True, slots=True)
+class AvatarRefreshConfig:
+    """Bounded avatar probe policy for webhook player-chat messages."""
+
+    enabled: bool = False
+    source: str = "fabric"
+    source_server_id: str | None = None
+    cache_ttl_seconds: int = 21_600
+
+    @classmethod
+    def from_mapping(cls, raw: object) -> "AvatarRefreshConfig":
+        allowed = {"enabled", "source", "source_server_id", "cache_ttl_seconds"}
+        if not isinstance(raw, Mapping) or set(raw) - allowed:
+            raise SettingsError("avatar_refresh settings invalid")
+        enabled = raw.get("enabled", False)
+        source = raw.get("source", "fabric")
+        source_server_id = raw.get("source_server_id")
+        ttl = raw.get("cache_ttl_seconds", 21_600)
+        if type(enabled) is not bool or source not in {"fabric", "velocity"}:
+            raise SettingsError("avatar_refresh.enabled must be boolean and source must be fabric or velocity")
+        if type(ttl) is not int or not 60 <= ttl <= 604_800:
+            raise SettingsError("avatar_refresh.cache_ttl_seconds must be between 60 and 604800")
+        if source == "velocity":
+            source_server_id = _require_text(source_server_id, "avatar_refresh.source_server_id")
+        elif source_server_id is not None:
+            raise SettingsError("avatar_refresh.source_server_id requires source velocity")
+        return cls(enabled, str(source), str(source_server_id) if source_server_id else None, ttl)
+
+
+@dataclass(frozen=True, slots=True)
+class PrivateMessagesConfig:
+    enabled: bool = False
+
+    @classmethod
+    def from_mapping(cls, raw: object) -> "PrivateMessagesConfig":
+        if not isinstance(raw, Mapping) or set(raw) - {"enabled"} or type(raw.get("enabled", False)) is not bool:
+            raise SettingsError("private_messages settings invalid")
+        return cls(bool(raw.get("enabled", False)))
+
+
+@dataclass(frozen=True, slots=True)
 class DmccSettings:
     host: str
     port: int
@@ -87,17 +185,30 @@ class DmccSettings:
     request_timeout_seconds: float
     mode: str
     cross_server_relay: bool
+    cross_server_events: frozenset[str]
     servers: tuple[ManagedServer, ...]
     control_providers: tuple[ControlProviderDefinition, ...] = ()
     backup_providers: tuple[BackupProviderDefinition, ...] = ()
     presentation: PresentationSettings = field(default_factory=PresentationSettings.empty)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     mod_updates: ModUpdateConfig = field(default_factory=ModUpdateConfig)
+    console_stream: ConsoleStreamConfig = field(default_factory=ConsoleStreamConfig)
+    max_linked_accounts: int = 0
+    nickname_sync: NicknameSyncConfig = field(default_factory=NicknameSyncConfig)
+    release_check: ReleaseCheckConfig = field(default_factory=ReleaseCheckConfig)
+    mentions: MentionConfig = field(default_factory=MentionConfig)
+    rich_chat: bool = False
+    op_sync: OpSyncConfig = field(default_factory=OpSyncConfig)
+    proxy_whitelist: ProxyWhitelistConfig = field(default_factory=ProxyWhitelistConfig)
+    avatar_refresh: AvatarRefreshConfig = field(default_factory=AvatarRefreshConfig)
+    private_messages: PrivateMessagesConfig = field(default_factory=PrivateMessagesConfig)
+    v3_features: V3FeatureConfig = field(default_factory=V3FeatureConfig)
     _bridge_secrets: Mapping[str, str] = field(
         default_factory=dict,
         repr=False,
         compare=False,
     )
+    _bridge_kinds: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
     def from_mapping(
@@ -117,11 +228,22 @@ class DmccSettings:
         cross_server_relay = raw.get("cross_server_relay", False)
         if type(cross_server_relay) is not bool:
             raise SettingsError("cross_server_relay must be a boolean")
+        cross_events = raw.get("cross_server_events", ["player_chat"])
+        allowed_events = {
+            "player_chat", "player_join", "player_quit", "player_death",
+            "player_gamemode", "player_advancement", "server_started", "server_stopping",
+            "server_broadcast",
+        }
+        if (
+            not isinstance(cross_events, list)
+            or not all(isinstance(name, str) and name in allowed_events for name in cross_events)
+        ):
+            raise SettingsError("cross_server_events contains invalid or private event types")
 
         providers = _mapping(raw.get("providers", {"control": [], "backup": []}), "providers")
         controls = _control_providers(providers.get("control", []), environment)
         backups = _backup_providers(providers.get("backup", []))
-        servers, bridge_secrets = _servers(raw.get("servers"), controls, backups, environment)
+        servers, bridge_secrets, bridge_kinds = _servers(raw.get("servers"), controls, backups, environment)
         try:
             presentation = PresentationSettings.from_mapping(raw.get("presentation", {}), environment)
         except PresentationError as exc:
@@ -141,6 +263,51 @@ class DmccSettings:
             )
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
+        try:
+            console_stream = ConsoleStreamConfig.from_mapping(
+                raw.get("console_stream", {}), {server.server_id for server in servers}
+            )
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        link_options = raw.get("account_linking", {"max_accounts": 0})
+        if not isinstance(link_options, Mapping) or set(link_options) - {"max_accounts"}:
+            raise SettingsError("account_linking settings invalid")
+        max_links = link_options.get("max_accounts", 0)
+        if type(max_links) is not int or not 0 <= max_links <= 100:
+            raise SettingsError("account_linking.max_accounts must be an integer between 0 and 100")
+        try:
+            nickname_sync = NicknameSyncConfig.from_mapping(raw.get("nickname_sync", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        try:
+            release_check = ReleaseCheckConfig.from_mapping(raw.get("release_check", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        try:
+            mentions = MentionConfig.from_mapping(raw.get("mentions", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        rich_chat = raw.get("rich_chat", False)
+        if type(rich_chat) is not bool:
+            raise SettingsError("rich_chat must be a boolean")
+        try:
+            op_sync = OpSyncConfig.from_mapping(raw.get("op_sync", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+        proxy_whitelist = ProxyWhitelistConfig.from_mapping(
+            raw.get("proxy_whitelist", {}), servers, bridge_kinds,
+        )
+        avatar_refresh = AvatarRefreshConfig.from_mapping(raw.get("avatar_refresh", {}))
+        if (
+            avatar_refresh.source == "velocity"
+            and bridge_kinds.get(avatar_refresh.source_server_id) != "velocity"
+        ):
+            raise SettingsError("avatar_refresh.source_server_id must name a velocity bridge peer")
+        private_messages = PrivateMessagesConfig.from_mapping(raw.get("private_messages", {}))
+        try:
+            v3_features = V3FeatureConfig.from_mapping(raw.get("v3_features", {}))
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
         _validate_local_paths(servers, controls, backups)
         return cls(
             host=host,
@@ -151,17 +318,33 @@ class DmccSettings:
             request_timeout_seconds=request_timeout,
             mode=str(mode),
             cross_server_relay=cross_server_relay,
+            cross_server_events=frozenset(cross_events),
             servers=servers,
             control_providers=controls,
             backup_providers=backups,
             presentation=presentation,
             monitoring=monitoring,
             mod_updates=mod_updates,
+            console_stream=console_stream,
+            max_linked_accounts=max_links,
+            nickname_sync=nickname_sync,
+            release_check=release_check,
+            mentions=mentions,
+            rich_chat=rich_chat,
+            op_sync=op_sync,
+            proxy_whitelist=proxy_whitelist,
+            avatar_refresh=avatar_refresh,
+            private_messages=private_messages,
+            v3_features=v3_features,
             _bridge_secrets=MappingProxyType(bridge_secrets),
+            _bridge_kinds=MappingProxyType(bridge_kinds),
         )
 
     def server_secret(self, server_id: str) -> str | None:
         return self._bridge_secrets.get(server_id)
+
+    def server_bridge_kind(self, server_id: str) -> str | None:
+        return self._bridge_kinds.get(server_id)
 
     @property
     def recommended_bridge_read_timeout_millis(self) -> int:
@@ -268,13 +451,14 @@ def _servers(
     controls: tuple[ControlProviderDefinition, ...],
     backups: tuple[BackupProviderDefinition, ...],
     environ: Mapping[str, str],
-) -> tuple[tuple[ManagedServer, ...], dict[str, str]]:
+) -> tuple[tuple[ManagedServer, ...], dict[str, str], dict[str, str]]:
     if not isinstance(value, list):
         raise SettingsError("servers must be a list")
     control_ids = {item.provider_id for item in controls}
     backup_ids = {item.provider_id for item in backups}
     servers: list[ManagedServer] = []
     secrets: dict[str, str] = {}
+    bridge_kinds: dict[str, str] = {}
     seen: set[str] = set()
     for raw_value in value:
         raw = _mapping(raw_value, "server")
@@ -285,12 +469,18 @@ def _servers(
         if "secret" in raw:
             raise SettingsError("servers[].secret is not supported; use bridge.secret_env")
         bridge = _mapping(raw.get("bridge", {"enabled": False}), "bridge")
+        if set(bridge) - {"enabled", "secret_env", "peer_kind"}:
+            raise SettingsError("unknown bridge option")
         bridge_enabled = bridge.get("enabled", False)
         if type(bridge_enabled) is not bool:
             raise SettingsError("bridge.enabled must be a boolean")
         if bridge_enabled:
             secret_name = _require_text(bridge.get("secret_env"), "bridge.secret_env")
             secrets[server_id] = _require_environment(secret_name, environ)
+            peer_kind = bridge.get("peer_kind", "fabric")
+            if peer_kind not in {"fabric", "velocity"}:
+                raise SettingsError("bridge.peer_kind must be fabric or velocity")
+            bridge_kinds[server_id] = str(peer_kind)
         control_id = _optional_text(raw.get("control_provider"), "control_provider")
         backup_id = _optional_text(raw.get("backup_provider"), "backup_provider")
         if control_id is not None and control_id not in control_ids:
@@ -315,7 +505,7 @@ def _servers(
                 allow_kill=_strict_bool(raw.get("allow_kill", False), "allow_kill"),
             )
         )
-    return tuple(servers), secrets
+    return tuple(servers), secrets, bridge_kinds
 
 
 def _validate_local_paths(
