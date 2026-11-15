@@ -1,4 +1,9 @@
-"""Optional typed relay for the local Velocity global-whitelist companion."""
+"""bot/mod/dmcc/services/proxy_whitelist.py
+Optional typed relay for the local Velocity global-whitelist companion.
+
+Modification():
+- Typed Velocity global-whitelist request routing.
+"""
 
 from __future__ import annotations
 
