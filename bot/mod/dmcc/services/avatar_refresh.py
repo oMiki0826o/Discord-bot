@@ -1,4 +1,9 @@
-"""Bounded, opt-in Minecraft avatar URL verification with stable fallbacks."""
+"""bot/mod/dmcc/services/avatar_refresh.py
+Bounded, opt-in Minecraft avatar URL verification with stable fallbacks.
+
+Modification():
+- Bounded opt-in Minecraft avatar checks for configured login sources.
+"""
 
 from __future__ import annotations
 
