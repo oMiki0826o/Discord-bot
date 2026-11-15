@@ -1,4 +1,9 @@
-"""Shared Discord-channel groups fan out only configured relay kinds."""
+"""tests/test_dmcc_channel_groups.py
+Shared Discord-channel groups fan out only configured relay kinds.
+
+Modification():
+- Check validated shared-channel mappings and fanout.
+"""
 from __future__ import annotations
 
 import asyncio
