@@ -169,6 +169,15 @@ public final class BridgeMod implements ModInitializer {
                     .executes(context -> refreshLocalPresentation(context.getSource().getServer())))
                 .then(literal("reload").requires(source -> source.hasPermission(4))
                     .executes(context -> reloadLocalConfiguration(context.getSource())))
+                .then(literal("help").executes(context -> localHelp(context.getSource())))
+                .then(literal("info").executes(context -> localInfo(context.getSource())))
+                .then(literal("stats")
+                    .then(argument("type", StringArgumentType.word())
+                        .then(argument("stat", StringArgumentType.word())
+                            .executes(context -> localStats(context.getSource(),
+                                StringArgumentType.getString(context, "type"),
+                                StringArgumentType.getString(context, "stat"))))))
+                .then(literal("update").executes(context -> localUpdate(context.getSource())))
                 .then(literal("pm")
                     .then(argument("player", StringArgumentType.word())
                         .then(argument("message", StringArgumentType.greedyString())
@@ -643,6 +652,70 @@ public final class BridgeMod implements ModInitializer {
                 "DMCC reload failed; correct minecraft-bridge.properties and check server logs."));
             return 0;
         }
+    }
+
+    private int localHelp(CommandSourceStack source) {
+        String available = source.hasPermission(4)
+            ? "help, info, stats <type> <stat>, update, link, unlink, pm, refresh, reload"
+            : source.hasPermission(3)
+                ? "help, info, stats <type> <stat>, update, link, unlink, pm, refresh"
+                : "help, info, stats <type> <stat>, update, link, unlink, pm";
+        source.sendSuccess(() -> Component.literal("DMCC commands: " + available), false);
+        return 1;
+    }
+
+    private int localInfo(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        BridgeRuntime current = runtime;
+        String status = current != null && current.isAuthenticated() ? "online" : "offline";
+        source.sendSuccess(() -> Component.literal("DMCC: " + status
+            + ", server=" + (serverId == null ? "unconfigured" : serverId)
+            + ", Minecraft=" + server.getServerVersion()
+            + ", players=" + server.getPlayerCount() + "/" + server.getMaxPlayers()), false);
+        return 1;
+    }
+
+    private int localStats(CommandSourceStack source, String type, String stat) {
+        try {
+            BridgeLocalStats.identifier(type);
+            BridgeLocalStats.identifier(stat);
+        } catch (IllegalArgumentException invalid) {
+            source.sendFailure(Component.literal("DMCC: invalid statistic identifier."));
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        Path directory = server.getWorldPath(LevelResource.PLAYER_STATS_DIR);
+        Map<UUID, String> known = server.getPlayerList().getPlayers().stream().collect(
+            java.util.stream.Collectors.toUnmodifiableMap(
+                ServerPlayer::getUUID, player -> player.getName().getString()));
+        if (statsWorker.isShutdown()) return 0;
+        statsWorker.execute(() -> {
+            final String result;
+            try { result = BridgeLocalStats.read(directory, known, type, stat); }
+            catch (IOException error) {
+                server.execute(() -> source.sendFailure(Component.literal("DMCC: statistics unavailable.")));
+                return;
+            }
+            server.execute(() -> source.sendSuccess(() -> Component.literal(result), false));
+        });
+        source.sendSuccess(() -> Component.literal("DMCC: reading player statistics..."), false);
+        return 1;
+    }
+
+    private int localUpdate(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        if (statsWorker.isShutdown()) return 0;
+        statsWorker.execute(() -> {
+            try {
+                String result = BridgeUpdateChecker.latestRelease();
+                server.execute(() -> source.sendSuccess(() -> Component.literal(result), false));
+            } catch (IOException problem) {
+                server.execute(() -> source.sendFailure(Component.literal(
+                    "DMCC: release lookup unavailable; check GitHub Releases manually.")));
+            }
+        });
+        source.sendSuccess(() -> Component.literal("DMCC: checking releases..."), false);
+        return 1;
     }
 
     private int refreshLocalPresentation(MinecraftServer server) {
