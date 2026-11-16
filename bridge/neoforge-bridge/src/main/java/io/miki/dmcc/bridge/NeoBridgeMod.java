@@ -358,6 +358,8 @@ public final class NeoBridgeMod {
             UUID playerId = pendingLinks.remove(packet.requestId());
             if (playerId == null) return;
             server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
                 ServerPlayer player = server.getPlayerList().getPlayer(playerId);
                 if (player == null) return;
                 if (packet.type().equals("link_response")) {
@@ -379,22 +381,28 @@ public final class NeoBridgeMod {
         if (packet.type().equals("minecraft_message")) {
             Object raw = packet.data().get("message");
             if (raw instanceof String message && !message.isBlank() && message.length() <= 2000) {
-                server.execute(() -> server.getPlayerList().broadcastSystemMessage(
-                    Component.literal(message), false
-                ));
+                server.execute(() -> {
+                    BridgeRuntime live = runtime;
+                    if (live == null || !live.isCurrentConnection(client)) return;
+                    server.getPlayerList().broadcastSystemMessage(Component.literal(message), false);
+                });
             }
             return;
         }
         if (packet.type().equals("minecraft_components")) {
             var content = RichTextComponents.parse(packet.data());
-            content.ifPresent(component -> server.execute(() ->
-                server.getPlayerList().broadcastSystemMessage(component, false)
-            ));
+            content.ifPresent(component -> server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
+                server.getPlayerList().broadcastSystemMessage(component, false);
+            }));
             return;
         }
         if (packet.type().equals("player_mention")) {
             var mention = PlayerMentionRequest.parse(packet.data());
             mention.ifPresent(request -> server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
                 for (UUID uuid : request.players()) {
                     ServerPlayer player = server.getPlayerList().getPlayer(uuid);
                     if (player != null) {
