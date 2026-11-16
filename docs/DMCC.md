@@ -436,3 +436,21 @@ CI Fabric 分支採用實際 `bot.mod.dmcc.gateway.server.Gateway`，與真實 F
 
 
 初版延伸：原生 `/msg`、`/tell`、`/w` 單人私訊透過雙方 Discord 同意才允許跨平台發送，純 `@a` 作為公開 source_msg；支援來源訊息模板、Requester-only Discord 操作面板、外部安全 Link Button、Minecraft Font Glyph Aliases、Hover Spoiler 及反應移除同步。參閱 [Fabric v3 功能說明](DMCC-FABRIC-V3-PREVIEW.md)。
+
+### Minecraft Bridge `/dmcc reload` (OP 4)
+
+`/dmcc reload` re-reads **all** supported values in `config/minecraft-bridge.properties`.
+Malformed configuration is rejected without tearing down the previous
+connection. Changes to the Gateway address, port, authentication, timeouts,
+`server_id`, or `bridge_kind` start an authenticated reconnect on the background
+Bridge worker. Display, language, link policy, and OP-sync options are applied
+without reconnecting. In-flight requests from the old peer are discarded on
+reconnect. The target Gateway must already trust the new ID/secret; a syntactically
+valid but wrong secret cannot be authenticated and will continue to retry.
+
+The NeoForge 1.21.8 backend also supports `/dmcc reload` (OP 4) for its
+supported properties; `require_linking=true` remains explicitly unsupported.
+
+`/dmcc refresh` remains a Fabric display/language-only update (OP 3).
+`$dmcc reload` in Discord restarts the **Bot module**, which is separate.
+If the mod JAR itself was replaced, a Minecraft server restart is still needed.

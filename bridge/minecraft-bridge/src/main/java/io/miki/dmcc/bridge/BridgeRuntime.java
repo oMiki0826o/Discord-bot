@@ -13,6 +13,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.Objects;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,13 +24,14 @@ public final class BridgeRuntime implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger("minecraft_bridge/runtime");
     private static final int REQUIRED_QUEUE_CAPACITY = 64;
     private static final int EVENT_QUEUE_CAPACITY = 256;
-    private final Supplier<BridgeConnection> connectionFactory;
+    private volatile Supplier<BridgeConnection> connectionFactory;
     private final long initialDelayMillis;
     private final long maximumDelayMillis;
     private final Runnable connectedCallback;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "dmcc-bridge");
         thread.setDaemon(true);
+        connectionWorkerThread = thread;
         return thread;
     });
     private final ExecutorService sender = Executors.newSingleThreadExecutor(runnable -> {
@@ -38,6 +41,9 @@ public final class BridgeRuntime implements AutoCloseable {
     });
     private final BlockingQueue<Outbound> requiredOutbound;
     private final BlockingQueue<Outbound> eventOutbound;
+    private final AtomicLong configurationGeneration = new AtomicLong();
+    private volatile long activeGeneration;
+    private volatile Thread connectionWorkerThread;
     private final AtomicLong droppedEvents = new AtomicLong();
     private final AtomicBoolean acceptingEvents = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -91,14 +97,15 @@ public final class BridgeRuntime implements AutoCloseable {
     /** Read-only gateway readiness; never use an unverified socket for login decisions. */
     public boolean isAuthenticated() {
         BridgeConnection active = connection;
-        return running && active instanceof BridgeClient client
+        return activeGeneration == configurationGeneration.get()
+            && running && active instanceof BridgeClient client
             && client.state() == BridgeClient.State.AUTHENTICATED;
     }
 
     /** Enqueue a best-effort Minecraft event without blocking the server thread. */
     public boolean publishEvent(ProtocolEnvelope envelope) {
         if (!running || !acceptingEvents.get()) return false;
-        boolean accepted = eventOutbound.offer(new Outbound(envelope, null));
+        boolean accepted = eventOutbound.offer(new Outbound(envelope, null, configurationGeneration.get()));
         if (!accepted) droppedEvents.incrementAndGet();
         return accepted;
     }
@@ -106,7 +113,7 @@ public final class BridgeRuntime implements AutoCloseable {
     /** Enqueue a response whose caller needs an explicit success or failure signal. */
     public CompletableFuture<Void> sendRequired(ProtocolEnvelope envelope) {
         CompletableFuture<Void> result = new CompletableFuture<>();
-        if (!running || !requiredOutbound.offer(new Outbound(envelope, result))) {
+        if (!running || !requiredOutbound.offer(new Outbound(envelope, result, configurationGeneration.get()))) {
             result.completeExceptionally(new RejectedExecutionException("DMCC outbound queue is unavailable"));
         }
         return result;
@@ -138,24 +145,64 @@ public final class BridgeRuntime implements AutoCloseable {
 
     /** Sends a packet only while the current Bridge TCP client is authenticated. */
     public void send(ProtocolEnvelope envelope) throws IOException {
+        sendForGeneration(envelope, configurationGeneration.get());
+    }
+
+    private void sendForGeneration(ProtocolEnvelope envelope, long generation) throws IOException {
+        if (!running || generation != configurationGeneration.get()) {
+            throw new IOException("DMCC Bridge packet belongs to a retired connection");
+        }
         BridgeConnection active = connection;
-        if (active == null) {
+        if (active == null || activeGeneration != configurationGeneration.get()) {
             throw new IOException("DMCC Bridge is not connected");
         }
         if (active instanceof BridgeClient client && client.state() != BridgeClient.State.AUTHENTICATED) {
             throw new IOException("DMCC Bridge is not authenticated");
         }
+        if (generation != configurationGeneration.get() || connection != active) {
+            throw new IOException("DMCC Bridge peer changed before packet delivery");
+        }
         active.send(envelope);
+    }
+
+    /** Replace validated connection settings without replacing sender/worker threads.
+     * Existing queued packets are tied to the previous peer and must not leak to
+     * a newly authenticated server identity.
+     */
+    public void reconfigure(Supplier<BridgeConnection> nextFactory) {
+        Objects.requireNonNull(nextFactory, "connection factory");
+        if (!running || closed.get()) {
+            throw new IllegalStateException("DMCC Bridge runtime is not running");
+        }
+        connectionFactory = nextFactory;
+        configurationGeneration.incrementAndGet();
+        failPending(requiredOutbound, new IOException("DMCC Bridge settings were reloaded"));
+        eventOutbound.clear();
+        BridgeConnection previous = connection;
+        connection = null; // Reject responses from the previous peer immediately.
+        if (previous != null) previous.close();
+        Thread workerThread = connectionWorkerThread;
+        if (workerThread != null) LockSupport.unpark(workerThread);
+    }
+
+    /** Reject callbacks arriving from an obsolete peer after a configuration change. */
+    public boolean isCurrentConnection(BridgeConnection candidate) {
+        return running && candidate != null && connection == candidate
+            && activeGeneration == configurationGeneration.get();
     }
 
     private void run() {
         long delay = initialDelayMillis;
         while (running) {
+            long attemptGeneration = configurationGeneration.get();
             BridgeConnection candidate = null;
             try {
                 candidate = connectionFactory.get();
                 connection = candidate;
+                activeGeneration = attemptGeneration;
+                if (configurationGeneration.get() != attemptGeneration) continue;
                 candidate.connect();
+                if (configurationGeneration.get() != attemptGeneration) continue;
                 lastFailure = null;
                 connectedCallback.run();
                 delay = initialDelayMillis;
@@ -174,11 +221,18 @@ public final class BridgeRuntime implements AutoCloseable {
                 if (candidate != null) candidate.close();
                 if (connection == candidate) connection = null;
             }
-            try {
-                Thread.sleep(delay);
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                return;
+            if (!running) return;
+            if (configurationGeneration.get() != attemptGeneration) {
+                delay = initialDelayMillis;
+                continue;
+            }
+            // unpark() wakes this backoff when settings are reloaded; do not
+            // interrupt the worker because that would terminate its run loop.
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(delay));
+            if (!running) return;
+            if (configurationGeneration.get() != attemptGeneration) {
+                delay = initialDelayMillis;
+                continue;
             }
             delay = Math.min(maximumDelayMillis, Math.max(delay * 2, 1));
         }
@@ -196,7 +250,7 @@ public final class BridgeRuntime implements AutoCloseable {
             }
             if (item == null) continue;
             try {
-                send(item.envelope());
+                sendForGeneration(item.envelope(), item.generation());
                 if (item.result() != null) item.result().complete(null);
             } catch (Exception exception) {
                 lastSenderFailure = exception;
@@ -260,5 +314,5 @@ public final class BridgeRuntime implements AutoCloseable {
         }
     }
 
-    private record Outbound(ProtocolEnvelope envelope, CompletableFuture<Void> result) { }
+    private record Outbound(ProtocolEnvelope envelope, CompletableFuture<Void> result, long generation) { }
 }
