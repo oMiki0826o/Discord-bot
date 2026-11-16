@@ -31,6 +31,7 @@ repositories { mavenCentral() }
 def shared = [
     'Authentication.java', 'BridgeClient.java', 'BridgeConnection.java',
     'BridgeMessageHandler.java', 'BridgeRuntime.java', 'BridgeSettings.java', 'BridgeReloadPlan.java',
+    'BridgeLocalStats.java', 'BridgeUpdateChecker.java',
     'FrameCodec.java', 'ProtocolEnvelope.java', 'ProtocolException.java',
     'LogTailReader.java', 'MetricSnapshot.java', 'ServerInfoDiagnostics.java',
     'RichTextComponents.java', 'PlayerMentionRequest.java', 'OpSyncPolicy.java',
@@ -65,6 +66,7 @@ sourceSets.test.java {
     [
         'AuthenticationTest.java', 'BridgeClientTest.java',
         'BridgeRuntimeTest.java', 'BridgeSettingsTest.java', 'BridgeReloadPlanTest.java',
+        'BridgeLocalStatsTest.java', 'BridgeUpdateCheckerTest.java',
         'FrameCodecTest.java', 'ProtocolEnvelopeTest.java',
         'PlayerMentionRequestTest.java',
         'OpSyncPolicyTest.java', 'PublicPlayerCommandPolicyTest.java', 'LogTailReaderTest.java',
