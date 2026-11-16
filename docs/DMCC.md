@@ -454,3 +454,15 @@ supported properties; `require_linking=true` remains explicitly unsupported.
 `/dmcc refresh` remains a Fabric display/language-only update (OP 3).
 `$dmcc reload` in Discord restarts the **Bot module**, which is separate.
 If the mod JAR itself was replaced, a Minecraft server restart is still needed.
+
+### Minecraft 原生管理與狀態指令
+
+Fabric 和 NeoForge 現提供 `/dmcc help`、`/dmcc info`、`/dmcc stats <type> <stat>`、
+`/dmcc update` 與 `/dmcc reload`。其中完整設定重載要求 Minecraft OP 等級 4；
+Fabric 的 `/dmcc refresh` 要求等級 3，且只重新載入顯示與語言。
+
+玩家統計在背景工作執行，最多掃描 2,048 個檔案、顯示前 10 筆。更新查詢使用固定
+GitHub API 端點，含連線逾時及 16 KiB 回應限制。上述指令不授予遠端 Console 權限。
+
+NeoForge 仍不具備 Fabric 的預登入帳號驗證、所有私訊 Mixins 或完全相同的原生簽章聊天語意。
+不能僅因指令名稱相同就宣稱本專案與原版 DMCC v3 具有完整行為等效性。
