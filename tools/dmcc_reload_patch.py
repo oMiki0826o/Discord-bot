@@ -594,7 +594,7 @@ supported properties; `require_linking=true` remains explicitly unsupported.
 `/dmcc refresh` remains a Fabric display/language-only update (OP 3).\n`$dmcc reload` in Discord restarts the **Bot module**, which is separate.\nIf the mod JAR itself was replaced, a Minecraft server restart is still needed.\n\n'''
     if '### Minecraft Bridge `/dmcc reload` (OP 4)' in text:
         raise ValueError('docs/DMCC.md: reload docs already present')
-    return text.rstrip() + '\n' + section
+    return text.rstrip() + '\n' + section.rstrip() + '\n'
 
 
 def build_changes(root: Path) -> dict[Path, tuple[str | None, str]]:
