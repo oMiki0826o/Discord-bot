@@ -23,6 +23,8 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.minecraft.world.level.storage.LevelResource;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -31,6 +33,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static net.minecraft.commands.Commands.literal;
+import static net.minecraft.commands.Commands.argument;
 
 /**
  * NeoForge dedicated-server backend for the existing authenticated DMCC gateway.
@@ -149,6 +152,15 @@ public final class NeoBridgeMod {
                 .then(literal("unlink").executes(ctx -> requestUnlink(ctx.getSource())))
                 .then(literal("reload").requires(src -> src.hasPermission(4))
                     .executes(ctx -> reloadLocalConfiguration(ctx.getSource())))
+                .then(literal("help").executes(ctx -> localHelp(ctx.getSource())))
+                .then(literal("info").executes(ctx -> localInfo(ctx.getSource())))
+                .then(literal("stats")
+                    .then(argument("type", StringArgumentType.word())
+                        .then(argument("stat", StringArgumentType.word())
+                            .executes(ctx -> localStats(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "type"),
+                                StringArgumentType.getString(ctx, "stat"))))))
+                .then(literal("update").executes(ctx -> localUpdate(ctx.getSource())))
         );
     }
 
@@ -205,6 +217,67 @@ public final class NeoBridgeMod {
                 "DMCC reload failed; correct minecraft-bridge.properties and inspect logs."));
             return 0;
         }
+    }
+
+    private int localHelp(CommandSourceStack source) {
+        String options = source.hasPermission(4)
+            ? "help, info, stats <type> <stat>, update, link, unlink, reload"
+            : "help, info, stats <type> <stat>, update, link, unlink";
+        source.sendSuccess(() -> Component.literal("DMCC commands: " + options), false);
+        return 1;
+    }
+
+    private int localInfo(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        BridgeRuntime active = runtime;
+        BridgeSettings current = settings;
+        String status = active != null && active.isAuthenticated() ? "online" : "offline";
+        source.sendSuccess(() -> Component.literal("DMCC: " + status + ", server="
+            + (current == null ? "unconfigured" : current.serverId())
+            + ", Minecraft=" + server.getServerVersion()
+            + ", players=" + server.getPlayerCount() + "/" + server.getMaxPlayers()), false);
+        return 1;
+    }
+
+    private int localStats(CommandSourceStack source, String type, String stat) {
+        try { BridgeLocalStats.identifier(type); BridgeLocalStats.identifier(stat); }
+        catch (IllegalArgumentException invalid) {
+            source.sendFailure(Component.literal("DMCC: invalid statistic identifier."));
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        Path dir = server.getWorldPath(LevelResource.PLAYER_STATS_DIR);
+        Map<UUID, String> names = new java.util.HashMap<>();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            names.put(player.getUUID(), player.getName().getString());
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                String content = BridgeLocalStats.read(dir, Map.copyOf(names), type, stat);
+                server.execute(() -> source.sendSuccess(() -> Component.literal(content), false));
+            } catch (IOException error) {
+                server.execute(() -> source.sendFailure(Component.literal("DMCC: statistics unavailable.")));
+            }
+        }, "dmcc-neoforge-local-stats");
+        worker.setDaemon(true);
+        worker.start();
+        return 1;
+    }
+
+    private int localUpdate(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        Thread worker = new Thread(() -> {
+            try {
+                String content = BridgeUpdateChecker.latestRelease();
+                server.execute(() -> source.sendSuccess(() -> Component.literal(content), false));
+            } catch (IOException error) {
+                server.execute(() -> source.sendFailure(Component.literal(
+                    "DMCC: release lookup unavailable; check GitHub Releases manually.")));
+            }
+        }, "dmcc-neoforge-update-check");
+        worker.setDaemon(true);
+        worker.start();
+        return 1;
     }
 
     private int requestLink(CommandSourceStack source) throws CommandSyntaxException {
