@@ -450,11 +450,11 @@ public final class BridgeMod implements ModInitializer {
             return;
         }
         if (envelope.type().equals("link_response")) {
-            handleLinkResponse(server, envelope);
+            handleLinkResponse(server, client, envelope);
             return;
         }
         if (envelope.type().equals("unlink_response")) {
-            handleUnlinkResponse(server, envelope);
+            handleUnlinkResponse(server, client, envelope);
             return;
         }
         if (envelope.type().equals("link_status_response")) {
@@ -483,7 +483,7 @@ public final class BridgeMod implements ModInitializer {
             return;
         }
         if (envelope.type().equals("minecraft_private_message")) {
-            handlePrivateFromDiscord(server, envelope);
+            handlePrivateFromDiscord(server, client, envelope);
             return;
         }
         if (envelope.type().equals("server_info_request")) {
@@ -506,6 +506,8 @@ public final class BridgeMod implements ModInitializer {
             var request = PlayerMentionRequest.parse(envelope.data());
             if (request.isEmpty()) return;
             server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
                 for (UUID uuid : request.get().players()) {
                     ServerPlayer target = server.getPlayerList().getPlayer(uuid);
                     if (target != null) {
@@ -528,13 +530,21 @@ public final class BridgeMod implements ModInitializer {
         if (envelope.type().equals("minecraft_components")) {
             var decoded = RichTextComponents.parse(envelope.data());
             if (decoded.isEmpty()) return;
-            server.execute(() -> server.getPlayerList().broadcastSystemMessage(decoded.get(), false));
+            server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
+                server.getPlayerList().broadcastSystemMessage(decoded.get(), false);
+            });
             return;
         }
         if (!envelope.type().equals("minecraft_message")) return;
         Object rawMessage = envelope.data().get("message");
         if (!(rawMessage instanceof String message) || message.isBlank()) return;
-        server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(message), false));
+        server.execute(() -> {
+            BridgeRuntime live = runtime;
+            if (live == null || !live.isCurrentConnection(client)) return;
+            server.getPlayerList().broadcastSystemMessage(Component.literal(message), false);
+        });
     }
 
     /**
@@ -787,7 +797,7 @@ public final class BridgeMod implements ModInitializer {
         return 1;
     }
 
-    private void handlePrivateFromDiscord(MinecraftServer server, ProtocolEnvelope envelope) {
+    private void handlePrivateFromDiscord(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
         Object rawUuid = envelope.data().get("recipient_uuid");
         Object rawSender = envelope.data().get("sender_name");
         String message = normalizePrivateText(envelope.data().get("message"));
@@ -807,6 +817,8 @@ public final class BridgeMod implements ModInitializer {
             return;
         }
         server.execute(() -> {
+            BridgeRuntime live = runtime;
+            if (live == null || !live.isCurrentConnection(client)) return;
             ServerPlayer recipient = server.getPlayerList().getPlayer(uuid);
             boolean delivered = recipient != null;
             if (delivered) {
@@ -1026,12 +1038,14 @@ public final class BridgeMod implements ModInitializer {
         return 1;
     }
 
-    private void handleLinkResponse(MinecraftServer server, ProtocolEnvelope envelope) {
+    private void handleLinkResponse(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
         if (envelope.requestId() == null) return;
         PendingPlayer pending = pendingLinkPlayers.remove(envelope.requestId());
         Object rawCode = envelope.data().get("code");
         if (pending == null || pending.expired() || !(rawCode instanceof String code) || code.isBlank()) return;
         server.execute(() -> {
+            BridgeRuntime live = runtime;
+            if (live == null || !live.isCurrentConnection(client)) return;
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerId());
             if (player != null) {
                 player.sendSystemMessage(LinkPromptComponents.linkCode(code));
@@ -1059,12 +1073,14 @@ public final class BridgeMod implements ModInitializer {
         return 1;
     }
 
-    private void handleUnlinkResponse(MinecraftServer server, ProtocolEnvelope envelope) {
+    private void handleUnlinkResponse(MinecraftServer server, BridgeClient client, ProtocolEnvelope envelope) {
         if (envelope.requestId() == null) return;
         PendingPlayer pending = pendingUnlinkPlayers.remove(envelope.requestId());
         Object rawRemoved = envelope.data().get("removed");
         if (pending == null || pending.expired() || !(rawRemoved instanceof Boolean removed)) return;
         server.execute(() -> {
+            BridgeRuntime live = runtime;
+            if (live == null || !live.isCurrentConnection(client)) return;
             ServerPlayer player = server.getPlayerList().getPlayer(pending.playerId());
             if (player != null) {
                 player.sendSystemMessage(Component.literal(removed ? "DMCC account unlinked." : "No DMCC account link found."));
