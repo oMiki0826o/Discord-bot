@@ -10,23 +10,39 @@ java {
     toolchain { languageVersion = JavaLanguageVersion.of(25) }
 }
 
-repositories { mavenCentral() }
+repositories {
+    mavenCentral()
+    maven {
+        name = 'papermc'
+        url = 'https://repo.papermc.io/repository/maven-public/'
+    }
+}
 
 // Velocity supplies its API, SLF4J and Gson at runtime. Supply the exact JAR
 // explicitly with -PvelocityRuntimeJar=/path/to/velocity.jar or DMCC_VELOCITY_JAR.
 def velocityRuntimeJar = providers.gradleProperty('velocityRuntimeJar')
     .orElse(providers.environmentVariable('DMCC_VELOCITY_JAR')).orNull
-if (velocityRuntimeJar == null) {
-    throw new GradleException('Set -PvelocityRuntimeJar or DMCC_VELOCITY_JAR to a Velocity proxy JAR')
-}
-def velocityJar = file(velocityRuntimeJar)
-if (!velocityJar.isFile()) {
-    throw new GradleException('velocityRuntimeJar does not name a file')
-}
+// CI uses a versioned public API dependency; operators can still use a
+// compatible exact local runtime JAR via -PvelocityRuntimeJar=... .
+def velocityApiVersion = providers.gradleProperty('velocityApiVersion').orElse('4.3.0').get()
 
 dependencies {
-    compileOnly files(velocityJar)
-    testImplementation files(velocityJar)
+    if (velocityRuntimeJar != null) {
+        def velocityJar = file(velocityRuntimeJar)
+        if (!velocityJar.isFile()) {
+            throw new GradleException('velocityRuntimeJar does not name a file')
+        }
+        compileOnly files(velocityJar)
+        testImplementation files(velocityJar)
+    } else {
+        compileOnly "com.velocitypowered:velocity-api:${velocityApiVersion}"
+        testImplementation "com.velocitypowered:velocity-api:${velocityApiVersion}"
+    }
+    annotationProcessor "com.velocitypowered:velocity-api:${velocityApiVersion}"
+    compileOnly 'com.google.code.gson:gson:2.11.0'
+    compileOnly 'org.slf4j:slf4j-api:2.0.16'
+    testImplementation 'com.google.code.gson:gson:2.11.0'
+    testImplementation 'org.slf4j:slf4j-api:2.0.16'
     testImplementation platform('org.junit:junit-bom:5.11.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -47,6 +63,16 @@ tasks.withType(JavaCompile).configureEach {
     options.release = 25
 }
 tasks.withType(Test).configureEach { useJUnitPlatform() }
+
+sourceSets.test.java {
+    srcDir '../minecraft-bridge/src/test/java'
+    [
+        'AuthenticationTest.java', 'BridgeClientTest.java',
+        'BridgeRuntimeTest.java', 'BridgeSettingsTest.java',
+        'BridgeReloadPlanTest.java',
+        'FrameCodecTest.java', 'ProtocolEnvelopeTest.java'
+    ].each { name -> include "io/miki/dmcc/bridge/${name}" }
+}
 
 jar {
     archiveBaseName = 'dmcc-velocity-bridge'
