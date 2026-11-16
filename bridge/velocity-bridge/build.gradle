@@ -38,7 +38,7 @@ dependencies {
         compileOnly "com.velocitypowered:velocity-api:${velocityApiVersion}"
         testImplementation "com.velocitypowered:velocity-api:${velocityApiVersion}"
     }
-    annotationProcessor "com.velocitypowered:velocity-api:${velocityApiVersion}"
+    // The repository ships a reviewed velocity-plugin.json resource directly.
     compileOnly 'com.google.code.gson:gson:2.11.0'
     compileOnly 'org.slf4j:slf4j-api:2.0.16'
     compileOnly 'javax.inject:javax.inject:1'
