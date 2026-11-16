@@ -265,4 +265,96 @@ final class BridgeRuntimeTest {
             new ProtocolEnvelope(1, "late", "server", null, java.util.Map.of())
         ));
     }
+
+    @Test
+    void reconfigureWakesBackoffAndConnectsWithNewFactory() throws Exception {
+        CountDownLatch firstFailed = new CountDownLatch(1);
+        CountDownLatch secondConnected = new CountDownLatch(1);
+        CountDownLatch keepConnected = new CountDownLatch(1);
+        BridgeRuntime runtime = new BridgeRuntime(() -> new BridgeConnection() {
+            @Override public void connect() throws IOException {
+                firstFailed.countDown();
+                throw new IOException("old gateway is offline");
+            }
+            @Override public void send(ProtocolEnvelope envelope) { }
+            @Override public void awaitDisconnect() { }
+            @Override public void close() { }
+        }, 15_000, 15_000);
+        runtime.start();
+        try {
+            assertTrue(firstFailed.await(2, TimeUnit.SECONDS));
+            runtime.reconfigure(() -> new BridgeConnection() {
+                @Override public void connect() { secondConnected.countDown(); }
+                @Override public void send(ProtocolEnvelope envelope) { }
+                @Override public void awaitDisconnect() throws InterruptedException {
+                    keepConnected.await();
+                }
+                @Override public void close() { keepConnected.countDown(); }
+            });
+            // Before this change, the previous 15-second backoff blocked reload.
+            assertTrue(secondConnected.await(2, TimeUnit.SECONDS));
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    void reconfigureRejectsOldQueuedPacketsWithoutLeakingToNewPeer() throws Exception {
+        CountDownLatch firstConnected = new CountDownLatch(1);
+        CountDownLatch firstSendStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstSend = new CountDownLatch(1);
+        CountDownLatch secondConnected = new CountDownLatch(1);
+        CountDownLatch firstDisconnected = new CountDownLatch(1);
+        CountDownLatch secondDisconnected = new CountDownLatch(1);
+        AtomicInteger secondPeerPackets = new AtomicInteger();
+        BridgeRuntime runtime = new BridgeRuntime(() -> new BridgeConnection() {
+            @Override public void connect() { firstConnected.countDown(); }
+            @Override public void send(ProtocolEnvelope envelope) throws IOException {
+                firstSendStarted.countDown();
+                try {
+                    releaseFirstSend.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(exception);
+                }
+            }
+            @Override public void awaitDisconnect() throws InterruptedException {
+                firstDisconnected.await();
+            }
+            @Override public void close() { firstDisconnected.countDown(); }
+        }, 1, 1);
+        runtime.start();
+        try {
+            assertTrue(firstConnected.await(2, TimeUnit.SECONDS));
+            var inFlight = runtime.sendRequired(new ProtocolEnvelope(
+                1, "inflight", "survival", null, java.util.Map.of()));
+            assertTrue(firstSendStarted.await(2, TimeUnit.SECONDS));
+            var stale = runtime.sendRequired(new ProtocolEnvelope(
+                1, "stale", "survival", null, java.util.Map.of()));
+            runtime.reconfigure(() -> new BridgeConnection() {
+                @Override public void connect() { secondConnected.countDown(); }
+                @Override public void send(ProtocolEnvelope envelope) {
+                    secondPeerPackets.incrementAndGet();
+                }
+                @Override public void awaitDisconnect() throws InterruptedException {
+                    secondDisconnected.await();
+                }
+                @Override public void close() { secondDisconnected.countDown(); }
+            });
+            assertTrue(stale.isCompletedExceptionally());
+            releaseFirstSend.countDown();
+            assertTrue(secondConnected.await(2, TimeUnit.SECONDS));
+            runtime.sendRequired(new ProtocolEnvelope(
+                1, "current", "survival", null, java.util.Map.of()
+            )).get(2, TimeUnit.SECONDS);
+            assertEquals(1, secondPeerPackets.get());
+            // An in-flight message may fail at the retired transport, but can
+            // never be forwarded to the new generation.
+            assertTrue(inFlight.isDone());
+        } finally {
+            releaseFirstSend.countDown();
+            runtime.close();
+        }
+    }
+
 }

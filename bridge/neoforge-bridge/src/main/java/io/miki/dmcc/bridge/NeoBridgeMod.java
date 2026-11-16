@@ -23,6 +23,8 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.minecraft.world.level.storage.LevelResource;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -31,6 +33,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static net.minecraft.commands.Commands.literal;
+import static net.minecraft.commands.Commands.argument;
 
 /**
  * NeoForge dedicated-server backend for the existing authenticated DMCC gateway.
@@ -44,8 +47,8 @@ public final class NeoBridgeMod {
     private static final Logger LOGGER = LoggerFactory.getLogger("minecraft_bridge/neoforge");
     private final Map<String, UUID> pendingLinks = new ConcurrentHashMap<>();
     private final OpSyncApplier operators = new OpSyncApplier();
-    private BridgeRuntime runtime;
-    private BridgeSettings settings;
+    private volatile BridgeRuntime runtime;
+    private volatile BridgeSettings settings;
     private MinecraftServer minecraft;
     private int metricTicks;
 
@@ -59,15 +62,21 @@ public final class NeoBridgeMod {
         Path config = FMLPaths.CONFIGDIR.get().resolve("minecraft-bridge.properties");
         try (var reader = Files.newBufferedReader(config)) {
             BridgeSettings loaded = BridgeSettings.fromReader(reader);
+            if (!"fabric".equals(loaded.bridgeKind())) {
+                throw new ProtocolException("NeoForge backend requires bridge_kind=fabric");
+            }
             if (loaded.requireLinking()) {
                 throw new ProtocolException(
                     "NeoForge account login freeze/kick is not yet supported; disable require_linking"
                 );
             }
+            if (loaded.opSyncEnabled()) {
+                operators.configure(config.resolveSibling("minecraft-bridge-managed-ops.properties"));
+            }
             this.minecraft = server;
             this.settings = loaded;
             this.runtime = new BridgeRuntime(
-                () -> new BridgeClient(loaded, (client, packet) -> handlePacket(server, packet)),
+                () -> new BridgeClient(loaded, (client, packet) -> handlePacket(server, client, packet)),
                 1_000, 30_000, () -> sendStarted(server)
             );
             runtime.start();
@@ -141,7 +150,134 @@ public final class NeoBridgeMod {
             literal("dmcc")
                 .then(literal("link").executes(ctx -> requestLink(ctx.getSource())))
                 .then(literal("unlink").executes(ctx -> requestUnlink(ctx.getSource())))
+                .then(literal("reload").requires(src -> src.hasPermission(4))
+                    .executes(ctx -> reloadLocalConfiguration(ctx.getSource())))
+                .then(literal("help").executes(ctx -> localHelp(ctx.getSource())))
+                .then(literal("info").executes(ctx -> localInfo(ctx.getSource())))
+                .then(literal("stats")
+                    .then(argument("type", StringArgumentType.word())
+                        .then(argument("stat", StringArgumentType.word())
+                            .executes(ctx -> localStats(ctx.getSource(),
+                                StringArgumentType.getString(ctx, "type"),
+                                StringArgumentType.getString(ctx, "stat"))))))
+                .then(literal("update").executes(ctx -> localUpdate(ctx.getSource())))
         );
+    }
+
+    /** Reload all NeoForge bridge connection settings without restarting Minecraft. */
+    private int reloadLocalConfiguration(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        Path file = FMLPaths.CONFIGDIR.get().resolve("minecraft-bridge.properties");
+        try {
+            final BridgeSettings next;
+            try (var reader = Files.newBufferedReader(file)) {
+                next = BridgeSettings.fromReader(reader);
+            }
+            if (next.requireLinking()) {
+                throw new ProtocolException("NeoForge login freeze/kick is unsupported");
+            }
+            if (!"fabric".equals(next.bridgeKind())) {
+                throw new ProtocolException("NeoForge backend requires bridge_kind=fabric");
+            }
+            // Keep the running connection intact when the OP ledger is invalid.
+            if (next.opSyncEnabled()) {
+                operators.configure(file.resolveSibling("minecraft-bridge-managed-ops.properties"));
+            }
+            BridgeRuntime current = runtime;
+            BridgeSettings old = settings;
+            if (current == null) {
+                minecraft = server;
+                settings = next;
+                runtime = new BridgeRuntime(
+                    () -> new BridgeClient(next,
+                        (client, packet) -> handlePacket(server, client, packet)),
+                    1_000, 30_000, () -> sendStarted(server)
+                );
+                runtime.start();
+                source.sendSuccess(() -> Component.literal(
+                    "DMCC configuration loaded; connecting to Gateway."), false);
+                return 1;
+            }
+            boolean reconnect = BridgeReloadPlan.requiresReconnect(old, next);
+            settings = next;
+            if (!next.opSyncEnabled()) operators.clear();
+            if (reconnect) {
+                pendingLinks.clear();
+                current.reconfigure(() -> new BridgeClient(next,
+                    (client, packet) -> handlePacket(server, client, packet)));
+            }
+            source.sendSuccess(() -> Component.literal(reconnect
+                ? "DMCC configuration reloaded; reconnecting to Gateway."
+                : "DMCC configuration reloaded; connection retained."), false);
+            LOGGER.info("NeoForge Bridge configuration reloaded (reconnect={})", reconnect);
+            return 1;
+        } catch (IOException | RuntimeException invalid) {
+            LOGGER.warn("NeoForge Bridge reload rejected; active settings retained", invalid);
+            source.sendFailure(Component.literal(
+                "DMCC reload failed; correct minecraft-bridge.properties and inspect logs."));
+            return 0;
+        }
+    }
+
+    private int localHelp(CommandSourceStack source) {
+        String options = source.hasPermission(4)
+            ? "help, info, stats <type> <stat>, update, link, unlink, reload"
+            : "help, info, stats <type> <stat>, update, link, unlink";
+        source.sendSuccess(() -> Component.literal("DMCC commands: " + options), false);
+        return 1;
+    }
+
+    private int localInfo(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        BridgeRuntime active = runtime;
+        BridgeSettings current = settings;
+        String status = active != null && active.isAuthenticated() ? "online" : "offline";
+        source.sendSuccess(() -> Component.literal("DMCC: " + status + ", server="
+            + (current == null ? "unconfigured" : current.serverId())
+            + ", Minecraft=" + server.getServerVersion()
+            + ", players=" + server.getPlayerCount() + "/" + server.getMaxPlayers()), false);
+        return 1;
+    }
+
+    private int localStats(CommandSourceStack source, String type, String stat) {
+        try { BridgeLocalStats.identifier(type); BridgeLocalStats.identifier(stat); }
+        catch (IllegalArgumentException invalid) {
+            source.sendFailure(Component.literal("DMCC: invalid statistic identifier."));
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        Path dir = server.getWorldPath(LevelResource.PLAYER_STATS_DIR);
+        Map<UUID, String> names = new java.util.HashMap<>();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            names.put(player.getUUID(), player.getName().getString());
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                String content = BridgeLocalStats.read(dir, Map.copyOf(names), type, stat);
+                server.execute(() -> source.sendSuccess(() -> Component.literal(content), false));
+            } catch (IOException error) {
+                server.execute(() -> source.sendFailure(Component.literal("DMCC: statistics unavailable.")));
+            }
+        }, "dmcc-neoforge-local-stats");
+        worker.setDaemon(true);
+        worker.start();
+        return 1;
+    }
+
+    private int localUpdate(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        Thread worker = new Thread(() -> {
+            try {
+                String content = BridgeUpdateChecker.latestRelease();
+                server.execute(() -> source.sendSuccess(() -> Component.literal(content), false));
+            } catch (IOException error) {
+                server.execute(() -> source.sendFailure(Component.literal(
+                    "DMCC: release lookup unavailable; check GitHub Releases manually.")));
+            }
+        }, "dmcc-neoforge-update-check");
+        worker.setDaemon(true);
+        worker.start();
+        return 1;
     }
 
     private int requestLink(CommandSourceStack source) throws CommandSyntaxException {
@@ -213,14 +349,17 @@ public final class NeoBridgeMod {
         ));
     }
 
-    private void handlePacket(MinecraftServer server, ProtocolEnvelope packet) {
+    private void handlePacket(MinecraftServer server, BridgeClient client, ProtocolEnvelope packet) {
         BridgeSettings configured = settings;
         BridgeRuntime current = runtime;
-        if (configured == null || current == null || !packet.serverId().equals(configured.serverId())) return;
+        if (configured == null || current == null || !current.isCurrentConnection(client)
+            || !packet.serverId().equals(configured.serverId())) return;
         if (packet.type().equals("link_response") || packet.type().equals("unlink_response")) {
             UUID playerId = pendingLinks.remove(packet.requestId());
             if (playerId == null) return;
             server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
                 ServerPlayer player = server.getPlayerList().getPlayer(playerId);
                 if (player == null) return;
                 if (packet.type().equals("link_response")) {
@@ -242,22 +381,28 @@ public final class NeoBridgeMod {
         if (packet.type().equals("minecraft_message")) {
             Object raw = packet.data().get("message");
             if (raw instanceof String message && !message.isBlank() && message.length() <= 2000) {
-                server.execute(() -> server.getPlayerList().broadcastSystemMessage(
-                    Component.literal(message), false
-                ));
+                server.execute(() -> {
+                    BridgeRuntime live = runtime;
+                    if (live == null || !live.isCurrentConnection(client)) return;
+                    server.getPlayerList().broadcastSystemMessage(Component.literal(message), false);
+                });
             }
             return;
         }
         if (packet.type().equals("minecraft_components")) {
             var content = RichTextComponents.parse(packet.data());
-            content.ifPresent(component -> server.execute(() ->
-                server.getPlayerList().broadcastSystemMessage(component, false)
-            ));
+            content.ifPresent(component -> server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
+                server.getPlayerList().broadcastSystemMessage(component, false);
+            }));
             return;
         }
         if (packet.type().equals("player_mention")) {
             var mention = PlayerMentionRequest.parse(packet.data());
             mention.ifPresent(request -> server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
                 for (UUID uuid : request.players()) {
                     ServerPlayer player = server.getPlayerList().getPlayer(uuid);
                     if (player != null) {
@@ -270,7 +415,10 @@ public final class NeoBridgeMod {
         if (packet.type().equals("op_sync_apply")) {
             if (!configured.opSyncEnabled()) return;
             var policy = OpSyncPolicy.parse(packet.data());
-            policy.ifPresent(value -> server.execute(() -> operators.apply(server, value)));
+            policy.ifPresent(value -> server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live != null && live.isCurrentConnection(client)) operators.apply(server, value);
+            }));
             return;
         }
         if (packet.type().equals("server_info_request") && packet.requestId() != null) {
@@ -307,6 +455,8 @@ public final class NeoBridgeMod {
             Object permission = packet.data().get("op_level");
             int level = permission instanceof Number n ? Math.max(0, Math.min(4, n.intValue())) : 0;
             server.execute(() -> {
+                BridgeRuntime live = runtime;
+                if (live == null || !live.isCurrentConnection(client)) return;
                 DmccRconConsoleSource output = new DmccRconConsoleSource(server);
                 int result = 0;
                 try {
