@@ -35,8 +35,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "heartbeat_timeout_seconds": 45.0,
     "request_timeout_seconds": 15.0,
     "mode": "standalone",
-    "cross_server_relay": False,
-    "cross_server_events": ["player_chat"],
+    "cross_server_relay": True,
+    "cross_server_events": ["player_chat", "player_join", "player_quit", "player_death"],
     "providers": {"control": [], "backup": []},
     "servers": [],
     "presentation": {"servers": {}},
@@ -225,10 +225,10 @@ class DmccSettings:
         mode = raw.get("mode", DEFAULT_SETTINGS["mode"])
         if mode not in {"single_server", "standalone", "multi_server_client"}:
             raise SettingsError("mode must be single_server, standalone, or multi_server_client")
-        cross_server_relay = raw.get("cross_server_relay", False)
+        cross_server_relay = raw.get("cross_server_relay", DEFAULT_SETTINGS["cross_server_relay"])
         if type(cross_server_relay) is not bool:
             raise SettingsError("cross_server_relay must be a boolean")
-        cross_events = raw.get("cross_server_events", ["player_chat"])
+        cross_events = raw.get("cross_server_events", DEFAULT_SETTINGS["cross_server_events"])
         allowed_events = {
             "player_chat", "player_join", "player_quit", "player_death",
             "player_gamemode", "player_advancement", "server_started", "server_stopping",
