@@ -177,9 +177,11 @@ Monitoring is **disabled by default** and receives authenticated Bridge telemetr
 
 新版 Fabric Bridge 使用 Fabric API 的公開 `COMMAND_MESSAGE` 事件接收指令造成的**公開廣播**（如 `/say`、`/me`），不監聽發送給私人收件者的 `/msg`；同時抑制事件系統產生的重複聊天回顯。在 Discord 呈現中可用 `server_broadcast` 自訂模板，或將該事件加入 `cross_server_events`，避免將未授權的私聊傳至其它伺服器。對 `/tellraw @a` 的完整結構化解析尚未保證。
 
-### 跨服事件
+### 跨服事件（預設啟用）
 
-根據你的需求，在 `settings/dmcc.json` 最外層加入（示例）：
+新安裝或未設定此欄位時，`cross_server_relay` 預設為 `true`，並會在已驗證且已連線的 Minecraft Bridge 之間同步**聊天、玩家加入、玩家退出及死亡**。來源伺服器不會收到自己的回送事件，且公開訊息會以系統訊息形式傳到其他伺服器，避免無限循環。
+
+若需要轉送更多公開事件，可在 Bot 的 `settings/dmcc.json` **最外層**自訂允許清單（以下為含公開廣播的示例）：
 
 ```json
 {
@@ -194,7 +196,11 @@ Monitoring is **disabled by default** and receives authenticated Bridge telemetr
 }
 ```
 
-此欄位為嚴格允許清單，只能選玩家聊天、加入、離開、死亡、進度、遊戲模式、伺服器啟停及公開廣播。帳號綁定、私有資訊、指令請求、伺服器指標不會跨服廣播。未設定時維持只跨服轉送聊天的舊行為。
+此欄位為嚴格允許清單，還可選進度、遊戲模式及伺服器啟停；**帳號綁定、私有資訊、指令請求及伺服器指標不會跨服廣播**。Discord 事件公告仍由 `presentation` 等事件路由設定個別控制。
+
+**升級注意：** Bot 的 Settings Manager 會保留部署機上既有的設定值。如果舊的 `settings/dmcc.json` 已存有 `"cross_server_relay": false` 或舊的 `"cross_server_events": ["player_chat"]`，更新程式**不會覆寫這兩個欄位**。請手動改成所需值，然後在 Discord 透過 Owner 的 `$dmcc reload` 重載模組，或重新啟動 Bot。需要關閉時仍可明確設為 `false`。
+
+Java Bridge 使用 `config/minecraft-bridge.properties` 保存**各台 Minecraft 主機自己的** Gateway 地址、Port、身分 ID 與驗證密鑰；跨服允許清單則存放在**中央 Python Bot 的** `settings/dmcc.json`。兩份設定用途不同，無須把同一個路由清單複製到三台 Minecraft 伺服器。
 
 ### 私密控制台日誌（選用）
 
