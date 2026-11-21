@@ -78,6 +78,10 @@ gateway_port=8765
 authentication_secret=請使用長且隨機的密碼
 ```
 
+跨服聊天與常用玩家事件（加入、退出、死亡）在新預設中已開啟。路由設定屬於 Bot 的 `settings/dmcc.json`，不必在每台 Minecraft 的 `minecraft-bridge.properties` 重複設定。如果是從舊版升級、已存在 `"cross_server_relay": false` 或舊的 `"cross_server_events"` 值，Bot 會尊重它們，請依需求手動修改。Discord 事件公告仍需配置頻道或模板。
+
+`minecraft-bridge.properties` 使用 Java 內建的 Properties 格式，目的只是讓每台 Minecraft 主機能以少量設定連回中央 Gateway；它**不是** Bot 的跨服路由設定格式。未來要替換成 JSON／TOML 須同步調整 Java Bridge 的解析器與重載流程。
+
 將同一段密碼加入 Bot `.env`：
 
 ```env

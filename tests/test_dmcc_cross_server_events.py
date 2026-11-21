@@ -53,9 +53,70 @@ def test_cross_server_event_settings_reject_private_command_types():
         }, environ={})
 
 
-def test_cross_server_legacy_default_remains_chat_only():
+def test_cross_server_defaults_enable_common_public_events():
     settings = DmccSettings.from_mapping(DEFAULT_SETTINGS, environ={})
+    assert settings.cross_server_relay is True
+    assert settings.cross_server_events == frozenset({
+        "player_chat", "player_join", "player_quit", "player_death",
+    })
+
+
+def test_cross_server_relay_explicit_opt_out_is_preserved():
+    settings = DmccSettings.from_mapping({
+        **DEFAULT_SETTINGS,
+        "cross_server_relay": False,
+        "cross_server_events": ["player_chat"],
+    }, environ={})
+    assert settings.cross_server_relay is False
     assert settings.cross_server_events == frozenset({"player_chat"})
+
+
+def test_cross_server_missing_options_use_safe_public_defaults():
+    raw = {
+        key: value for key, value in DEFAULT_SETTINGS.items()
+        if key not in {"cross_server_relay", "cross_server_events"}
+    }
+    settings = DmccSettings.from_mapping(raw, environ={})
+    assert settings.cross_server_relay is True
+    assert settings.cross_server_events == frozenset({
+        "player_chat", "player_join", "player_quit", "player_death",
+    })
+
+
+def test_default_join_and_quit_are_relayed_one_hop():
+    class Gateway:
+        def __init__(self):
+            self.sent = []
+
+        async def send_minecraft_message(self, server_id, message):
+            self.sent.append((server_id, message))
+
+    async def run():
+        settings = DmccSettings.from_mapping(DEFAULT_SETTINGS, environ={})
+        gateway = Gateway()
+        relay = CrossServerRelayService(
+            gateway,
+            lambda: ("survival", "creative", "mirror"),
+            event_types=settings.cross_server_events,
+        )
+        assert await relay.forward(MinecraftEvent(
+            "player_join", "survival", {"player_name": "Steve"}
+        ))
+        assert await relay.forward(MinecraftEvent(
+            "player_quit", "survival", {"player_name": "Steve"}
+        ))
+        assert gateway.sent == [
+            ("creative", "[survival] Steve joined the game"),
+            ("mirror", "[survival] Steve joined the game"),
+            ("creative", "[survival] Steve left the game"),
+            ("mirror", "[survival] Steve left the game"),
+        ]
+        assert not await relay.forward(MinecraftEvent(
+            "link_request", "survival", {"code": "SECRET"}
+        ))
+        assert len(gateway.sent) == 4
+
+    asyncio.run(run())
 
 def test_cross_server_relay_continues_after_one_peer_disconnects():
     class Gateway:
